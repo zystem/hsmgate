@@ -54,17 +54,18 @@ steps:
         ref: refs/tags/v*
 
   publish_image:
-    # kaniko builds without a privileged container (buildx needs WOODPECKER_PLUGINS_PRIVILEGED on the server)
-    image: woodpeckerci/plugin-kaniko:2.3.3
+    # the same plugin as the other repositories of this server (it needs WOODPECKER_PLUGINS_PRIVILEGED; a newer `woodpecker-cli lint` warns about that).
+    # kaniko was tried and failed on this server's agents: "error removing bin to make way for new symlink: unlinkat //bin: invalid argument".
+    image: woodpeckerci/plugin-docker-buildx:5.2.0
     settings:
       registry: ghcr.io
-      repo: ${CI_REPO}
+      repo: ghcr.io/${CI_REPO}
       username: ${CI_REPO_OWNER}
       password:
         from_secret: github_token
-      dockerfile: Dockerfile
-      context: .
-      build-args:
+      platforms:
+        - linux/amd64
+      build_args:
         - VERSION=${CI_COMMIT_TAG##v}
       tags:
         - ${CI_COMMIT_TAG##v}
