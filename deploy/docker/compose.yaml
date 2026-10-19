@@ -19,7 +19,19 @@ services:
     tmpfs:
       - /run/hsmgate:mode=0700                       # the admin socket
       - /var/log/hsmgate:mode=0750                   # or mount a host directory to keep the audit log
-    # unlock (the PIN is typed on the terminal and stays in memory):
-    #   docker compose exec hsmgate hsmgate unlock -config /etc/hsmgate/hsmgate.yaml -token card
+    # --- THE PIN: choose one way ---
+    # 1. (recommended) put no PIN anywhere. The service starts with the token locked; after each start type the PIN once, it stays in memory only:
+    #      docker compose exec hsmgate hsmgate unlock -config /etc/hsmgate/hsmgate.yaml -token card
+    # 2. from a file, so that the service unlocks itself at start (the PIN then rests on this machine). Three steps:
+    #      a. make the file owned by ROOT, mode 0400 (the container runs as root without capabilities, so a file of another owner is not readable):
+    #           install -d -m 0700 secrets && printf '%s' "$PIN" | sudo install -o root -g root -m 0400 /dev/stdin secrets/pin
+    #      b. uncomment `secrets: [hsmgate_pin]` below and the `secrets:` block at the end of this file
+    #      c. in hsmgate.yaml give the token  pin_file: /run/secrets/hsmgate_pin
+    #    The PIN is tried ONCE at every start. A wrong PIN costs a try of the card (it blocks after 3) at each restart of the container.
+    # secrets: [hsmgate_pin]
     # reload the configuration and certificates:
     #   docker compose kill -s HUP hsmgate
+
+# secrets:
+#   hsmgate_pin:
+#     file: ./secrets/pin
