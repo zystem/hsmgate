@@ -12,7 +12,7 @@ The service does the ECIES itself (the token does only ECDH, so a card without A
 |---|---|
 | mount (`transit` by default, configurable) | one face instance; a host may run several hsmgate processes, each with its own mount/port |
 | key name | a configured key: `name -> (token, key id, scheme)`; a tenant's own KEK is just another name |
-| `context` (base64) | AAD of the AEAD: `"hsmgate/transit/v1\0" || key name || "\0" || context bytes`; **required** on every key (a request without it is refused); the key's policy lists allowed context patterns (CiNim: `cinim/dek/v1\|*`) |
+| `context` (base64) | per key, `aad.mode`: **`fixed`** (the default for OpenBao's seal, which sends no context): AAD is a constant for the key, `openbao/seal/v1\|<key name>` unless `aad.fixed` says otherwise (the value `kekd` used, so existing ciphertexts open), and a request with a context is refused; **`context`** (CiNim): AAD is the context bytes exactly as sent, required, and must begin with one of `aad.allow` (e.g. `cinim/dek/v1\|`), so texts made by CiNim's `kekd` open unchanged |
 | `plaintext` / `ciphertext` | `vault:v<N>:` + base64 of the sealed text (`ecies1.<fingerprint>...`); N is the key version |
 | key versions | one version per physical key/public key; new key = new version; `min_decryption_version`, `latest_version` as Transit reports them |
 | `rewrap` | open under the version in the text, seal to the latest version, without the plaintext leaving the process |
