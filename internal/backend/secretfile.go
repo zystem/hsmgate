@@ -1,0 +1,35 @@
+package backend
+
+import (
+	"fmt"
+	"io"
+	"os"
+	"syscall"
+)
+
+// ReadSecretFile reads a file that holds a key or a PIN. It opens the path once, refuses a symbolic link, and judges the open descriptor, not the path:
+// a regular file, owned by the user the service runs as (or root), not readable by group or others, and no larger than max bytes.
+func ReadSecretFile(path string, max int64) ([]byte, error) {
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	st, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !st.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s is not a regular file", path)
+	}
+	if st.Mode().Perm()&0o077 != 0 {
+		return nil, fmt.Errorf("%s must not be readable by group or others (mode %o)", path, st.Mode().Perm())
+	}
+	if sys, ok := st.Sys().(*syscall.Stat_t); ok && int(sys.Uid) != os.Geteuid() && sys.Uid != 0 {
+		return nil, fmt.Errorf("%s is owned by another user", path)
+	}
+	if st.Size() > max {
+		return nil, fmt.Errorf("%s is larger than %d bytes", path, max)
+	}
+	return io.ReadAll(io.LimitReader(f, max+1))
+}

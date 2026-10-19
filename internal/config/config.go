@@ -2,7 +2,9 @@
 package config
 
 import (
+	"encoding/hex"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 
@@ -19,12 +21,19 @@ type Config struct {
 	} `yaml:"transit"`
 	// AdminSocket is a unix socket (mode 0600) for unlock and status; unset: no admin door.
 	AdminSocket string `yaml:"admin_socket"`
-	Audit       struct {
+	// Limits bound the work that reaches the tokens at once (a card serves one operation at a time). Changing them needs a restart.
+	Limits Limits `yaml:"limits"`
+	Audit  struct {
 		File string `yaml:"file"`
 	} `yaml:"audit"`
 	Tokens  []Token        `yaml:"tokens"`
 	Keys    map[string]Key `yaml:"keys"`
 	Clients []Client       `yaml:"clients"`
+}
+
+type Limits struct {
+	MaxConcurrent int `yaml:"max_concurrent"` // operations that may run or wait for a token at once; default 8
+	QueueSeconds  int `yaml:"queue_seconds"`  // how long one may wait for its turn before 503; default 2
 }
 
 type TLS struct {
@@ -60,6 +69,8 @@ type Version struct {
 	Token    string    `yaml:"token"`
 	Label    string    `yaml:"label"`
 	Replicas []Replica `yaml:"replicas"`
+	// Fingerprint, when set, pins the public key of this version (hex, as `hsmgate check` prints it): a holder with another key is never used.
+	Fingerprint string `yaml:"fingerprint"`
 }
 
 type Replica struct {
@@ -124,17 +135,47 @@ func Parse(raw []byte) (*Config, error) {
 	return &c, nil
 }
 
+const (
+	MaxBytesLimit = 1 << 20 // the largest max_bytes
+	maxRate       = 1_000_000
+)
+
+func isHex(s string, n int) bool {
+	if n > 0 && len(s) != n {
+		return false
+	}
+	if len(s) == 0 || len(s)%2 != 0 {
+		return false
+	}
+	_, err := hex.DecodeString(s)
+	return err == nil
+}
+
+// Validate checks the configuration as a whole. Ambiguity is an error: duplicate names, two clients with one identity, limits that read as "none" by accident.
 func (c *Config) Validate() error {
 	if c.Transit.Mount == "" {
 		c.Transit.Mount = "transit"
+	}
+	if c.Limits.MaxConcurrent < 0 || c.Limits.QueueSeconds < 0 || c.Limits.MaxConcurrent > 1024 || c.Limits.QueueSeconds > 60 {
+		return fmt.Errorf("limits: max_concurrent 0..1024 and queue_seconds 0..60")
 	}
 	tokens := map[string]Token{}
 	for _, t := range c.Tokens {
 		if t.Name == "" || (t.Type != "soft" && t.Type != "pkcs11") {
 			return fmt.Errorf("token %q: type must be soft or pkcs11", t.Name)
 		}
-		if t.Type == "pkcs11" && t.Module == "" {
-			return fmt.Errorf("token %q: module is required", t.Name)
+		if _, dup := tokens[t.Name]; dup {
+			return fmt.Errorf("token %q is defined twice", t.Name)
+		}
+		if t.Type == "pkcs11" {
+			if t.Module == "" {
+				return fmt.Errorf("token %q: module is required", t.Name)
+			}
+			for label, id := range t.Keys {
+				if !isHex(id, 0) {
+					return fmt.Errorf("token %s key %s: the CKA_ID must be hex and not empty", t.Name, label)
+				}
+			}
 		}
 		tokens[t.Name] = t
 	}
@@ -142,7 +183,13 @@ func (c *Config) Validate() error {
 		if len(k.Versions) == 0 {
 			return fmt.Errorf("key %s: no versions", name)
 		}
+		if k.MaxBytes < 0 || k.MaxBytes > MaxBytesLimit {
+			return fmt.Errorf("key %s: max_bytes must be 0..%d", name, MaxBytesLimit)
+		}
 		for i, v := range k.Versions {
+			if v.Fingerprint != "" && !isHex(v.Fingerprint, 64) {
+				return fmt.Errorf("key %s version %d: fingerprint must be 64 hex digits", name, i+1)
+			}
 			for _, h := range v.Holders() {
 				t, ok := tokens[h.Token]
 				if !ok {
@@ -159,17 +206,58 @@ func (c *Config) Validate() error {
 			if len(k.AAD.Allow) == 0 {
 				return fmt.Errorf("key %s: aad mode context needs allow patterns", name)
 			}
+			for _, a := range k.AAD.Allow {
+				if a == "" {
+					return fmt.Errorf("key %s: an empty allow pattern would allow every context", name)
+				}
+			}
 		default:
 			return fmt.Errorf("key %s: aad mode must be fixed or context", name)
 		}
 	}
+	names := map[string]bool{}
+	idents := map[string]string{}
 	for _, cl := range c.Clients {
-		if cl.Name == "" || (cl.Identity == Identity{}) {
-			return fmt.Errorf("client %q: name and identity are required", cl.Name)
+		if cl.Name == "" {
+			return fmt.Errorf("a client has no name")
 		}
+		if names[cl.Name] {
+			return fmt.Errorf("client %q is defined twice", cl.Name)
+		}
+		names[cl.Name] = true
+		id := cl.Identity
+		set, ident := 0, ""
+		if id.URI != "" {
+			set++
+			ident = "uri:" + id.URI
+			if u, err := url.Parse(id.URI); err != nil || u.Scheme == "" {
+				return fmt.Errorf("client %s: identity.uri is not a URI", cl.Name)
+			}
+		}
+		if id.SHA256 != "" {
+			set++
+			ident = "sha256:" + strings.ToLower(id.SHA256)
+			if !isHex(id.SHA256, 64) {
+				return fmt.Errorf("client %s: identity.sha256 must be 64 hex digits", cl.Name)
+			}
+		}
+		if id.CN != "" {
+			set++
+			ident = "cn:" + id.CN
+		}
+		if set != 1 {
+			return fmt.Errorf("client %s: exactly one of identity.uri, identity.sha256, identity.cn is required (several would be an OR)", cl.Name)
+		}
+		if other, dup := idents[ident]; dup {
+			return fmt.Errorf("clients %s and %s have the same identity", other, cl.Name)
+		}
+		idents[ident] = cl.Name
 		for key, g := range cl.Keys {
 			if _, ok := c.Keys[key]; !ok {
 				return fmt.Errorf("client %s: unknown key %q", cl.Name, key)
+			}
+			if g.PerMinute < 0 || g.PerDay < 0 || g.PerMinute > maxRate || g.PerDay > maxRate {
+				return fmt.Errorf("client %s key %s: per_minute and per_day must be 0..%d (0 is no limit)", cl.Name, key, maxRate)
 			}
 			for _, op := range g.Ops {
 				if op != "encrypt" && op != "decrypt" && op != "rewrap" {

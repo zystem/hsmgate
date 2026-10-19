@@ -52,7 +52,7 @@ func TestAdminUnlockAndAudit(t *testing.T) {
 	if c := post(`{"token":"nobody","pin":"1234"}`); c != 400 {
 		t.Errorf("unknown token: %d", c)
 	}
-	if strings.Contains(buf.String(), "1234") || strings.Count(buf.String(), `"op":"unlock"`) != 3 {
+	if strings.Contains(buf.String(), "1234") || strings.Count(buf.String(), `"op":"unlock"`) != 5 {
 		t.Errorf("audit: %s", buf.String())
 	}
 }
@@ -65,5 +65,21 @@ func TestAdminSocketNeverRemovesAFile(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(f); string(b) != "precious" {
 		t.Error("the file was removed")
+	}
+}
+
+type failingLog struct{}
+
+func (failingLog) Write([]byte) (int, error) { return 0, errors.New("disk full") }
+
+// With no audit log the PIN is not tried at all.
+func TestUnlockNeedsTheAuditLog(t *testing.T) {
+	tk := &lockable{pin: "1234"}
+	h := adminHandler(func() map[string]backend.Token { return map[string]backend.Token{"card": tk} }, audit.New(failingLog{}))
+	r := httptest.NewRequest("POST", "/unlock", strings.NewReader(`{"token":"card","pin":"1234"}`))
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != 503 || tk.opened {
+		t.Errorf("%d opened=%v", w.Code, tk.opened)
 	}
 }

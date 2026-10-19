@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 )
 
@@ -31,10 +30,7 @@ type Soft struct{ keys map[string]*ecdh.PrivateKey }
 func NewSoft(files map[string]string) (*Soft, error) {
 	s := &Soft{keys: map[string]*ecdh.PrivateKey{}}
 	for label, path := range files {
-		if st, err := os.Stat(path); err == nil && st.Mode().Perm()&0o077 != 0 {
-			return nil, fmt.Errorf("%s: a key file must not be readable by group or others (mode %o)", path, st.Mode().Perm())
-		}
-		raw, err := os.ReadFile(path)
+		raw, err := ReadSecretFile(path, 4096)
 		if err != nil {
 			return nil, err
 		}

@@ -9,11 +9,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 	"unicode/utf8"
 
 	"github.com/zystem/hsmgate/internal/audit"
@@ -33,19 +35,29 @@ type Face struct {
 	Audit    *audit.Log
 	Identify Identify
 
-	mu sync.RWMutex
+	mu    sync.RWMutex
+	sem   chan struct{} // operations that run or wait for a token; nil: no bound
+	queue time.Duration
 }
 
-// Reload replaces the configuration, the tokens and the policy for the requests that come after; one in flight finishes with what it began with.
-func (f *Face) Reload(cfg *config.Config, tokens map[string]backend.Token, pol *policy.Policy) {
+// Limit bounds the operations that may run or wait for a token at once, and how long one waits for its turn.
+func (f *Face) Limit(concurrent int, wait time.Duration) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.Cfg, f.Tokens, f.Policy = cfg, tokens, pol
+	f.sem, f.queue = make(chan struct{}, concurrent), wait
+}
+
+// Reload replaces the whole generation (configuration, tokens, policy and how clients are identified) at once for the requests that come after;
+// one in flight finishes with the generation it began with.
+func (f *Face) Reload(cfg *config.Config, tokens map[string]backend.Token, pol *policy.Policy, id Identify) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.Cfg, f.Tokens, f.Policy, f.Identify = cfg, tokens, pol, id
 }
 
 func (f *Face) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.mu.RLock()
-	g := &Face{Cfg: f.Cfg, Tokens: f.Tokens, Policy: f.Policy, Audit: f.Audit, Identify: f.Identify}
+	g := &Face{Cfg: f.Cfg, Tokens: f.Tokens, Policy: f.Policy, Audit: f.Audit, Identify: f.Identify, sem: f.sem, queue: f.queue}
 	f.mu.RUnlock()
 	g.serve(w, r)
 }
@@ -54,6 +66,24 @@ const (
 	face       = "transit"
 	maxContext = 1024 // the context is written to the audit: keep a line small
 )
+
+// acquire waits for a turn at the tokens; false means the caller was told to come back later.
+func (f *Face) acquire(w http.ResponseWriter, r *http.Request) (release func(), ok bool) {
+	if f.sem == nil {
+		return func() {}, true
+	}
+	t := time.NewTimer(f.queue)
+	defer t.Stop()
+	select {
+	case f.sem <- struct{}{}:
+		return func() { <-f.sem }, true
+	case <-t.C:
+	case <-r.Context().Done():
+	}
+	w.Header().Set("Retry-After", "2")
+	fail(w, 503, "busy", true)
+	return nil, false
+}
 
 func (f *Face) serve(w http.ResponseWriter, r *http.Request) {
 	prefix := "/v1/" + f.Cfg.Transit.Mount + "/"
@@ -87,10 +117,21 @@ func (f *Face) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	op, name := parts[0], parts[1]
 	ev := audit.Event{RequestID: rid, Client: client, Face: face, Key: name, Op: op}
+	// a refusal is written down as well as can be; it has nothing to withhold
 	done := func(status int, result string, msg string, retry bool) {
 		ev.Result = result
 		f.Audit.Write(ev)
 		fail(w, status, msg, retry)
+	}
+	// an answer is given only after the line that says so is written: with no log, nothing leaves
+	succeed := func(payload any) {
+		ev.Result = "ok"
+		if err := f.Audit.Write(ev); err != nil {
+			w.Header().Set("Retry-After", "5")
+			fail(w, 503, "audit log unavailable", true)
+			return
+		}
+		reply(w, 200, payload)
 	}
 	if !ok {
 		ev.Client = ""
@@ -103,15 +144,9 @@ func (f *Face) serve(w http.ResponseWriter, r *http.Request) {
 		done(403, "forbidden", "permission denied", false)
 		return
 	}
-	switch {
-	case op == "keys" && r.Method == http.MethodGet:
-		// any grant on the key lets a client read its public part
-		f.keyInfo(w, name, key)
-		ev.Result = "ok"
-		f.Audit.Write(ev)
-		return
-	case (op == "encrypt" || op == "decrypt" || op == "rewrap") && (r.Method == http.MethodPut || r.Method == http.MethodPost):
-	default:
+	isOp := (op == "encrypt" || op == "decrypt" || op == "rewrap") && (r.Method == http.MethodPut || r.Method == http.MethodPost)
+	isKeys := op == "keys" && r.Method == http.MethodGet
+	if !isOp && !isKeys {
 		done(404, "unsupported", "unsupported path", false)
 		return
 	}
@@ -121,13 +156,28 @@ func (f *Face) serve(w http.ResponseWriter, r *http.Request) {
 		fail(w, 503, "audit log unavailable", true)
 		return
 	}
-	switch f.Policy.Check(client, name, op) {
+	decision := f.Policy.Check(client, name, op)
+	if isKeys {
+		decision = f.Policy.CheckMeta(client, name) // key information has a small budget of its own
+	}
+	switch decision {
 	case policy.Forbidden:
 		done(403, "forbidden", "permission denied", false)
 		return
 	case policy.Throttled:
 		w.Header().Set("Retry-After", "5")
 		done(429, "throttled", "rate limit exceeded", true)
+		return
+	}
+	release, got := f.acquire(w, r)
+	if !got {
+		ev.Result = "busy"
+		f.Audit.Write(ev)
+		return
+	}
+	defer release()
+	if isKeys {
+		f.keyInfo(w, name, key, succeed)
 		return
 	}
 	var body struct {
@@ -139,8 +189,23 @@ func (f *Face) serve(w http.ResponseWriter, r *http.Request) {
 	if max == 0 {
 		max = config.DefaultMaxBytes
 	}
-	raw, err := io.ReadAll(io.LimitReader(r.Body, int64(4*max+4096)))
-	if err != nil || json.Unmarshal(raw, &body) != nil {
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, int64(4*max+4096)))
+	if err := dec.Decode(&body); err != nil {
+		var tooBig *http.MaxBytesError
+		if errors.As(err, &tooBig) {
+			done(413, "too_large", "request body too large", false)
+			return
+		}
+		done(400, "bad_request", "invalid request body", false)
+		return
+	}
+	// nothing but whitespace may follow the one JSON value
+	if _, err := dec.Token(); err != io.EOF {
+		var tooBig *http.MaxBytesError
+		if errors.As(err, &tooBig) {
+			done(413, "too_large", "request body too large", false)
+			return
+		}
 		done(400, "bad_request", "invalid request body", false)
 		return
 	}
@@ -172,12 +237,14 @@ func (f *Face) serve(w http.ResponseWriter, r *http.Request) {
 			f.failTokenErr(done, err)
 			return
 		}
-		ev.Result = "ok"
-		f.Audit.Write(ev)
-		reply(w, 200, map[string]any{"data": map[string]any{"ciphertext": ct, "key_version": ver}})
+		succeed(map[string]any{"data": map[string]any{"ciphertext": ct, "key_version": ver}})
 	case "decrypt", "rewrap":
 		if body.Ciphertext == nil {
 			done(400, "bad_request", "missing ciphertext", false)
+			return
+		}
+		if len(*body.Ciphertext) > 3*max+1024 { // the sealed text of max bytes is about 2.7 times as long in base64
+			done(400, "too_large", "ciphertext too large for this key", false)
 			return
 		}
 		plain, err := f.open(key, *body.Ciphertext, aad)
@@ -185,10 +252,13 @@ func (f *Face) serve(w http.ResponseWriter, r *http.Request) {
 			f.failTokenErr(done, err)
 			return
 		}
+		defer wipe(plain)
+		if len(plain) > max {
+			done(400, "too_large", "invalid ciphertext: the data is larger than max_bytes of this key", false)
+			return
+		}
 		if op == "decrypt" {
-			ev.Result = "ok"
-			f.Audit.Write(ev)
-			reply(w, 200, map[string]any{"data": map[string]any{"plaintext": base64.StdEncoding.EncodeToString(plain)}})
+			succeed(map[string]any{"data": map[string]any{"plaintext": base64.StdEncoding.EncodeToString(plain)}})
 			return
 		}
 		ct, ver, err := f.seal(key, plain, aad)
@@ -196,9 +266,13 @@ func (f *Face) serve(w http.ResponseWriter, r *http.Request) {
 			f.failTokenErr(done, err)
 			return
 		}
-		ev.Result = "ok"
-		f.Audit.Write(ev)
-		reply(w, 200, map[string]any{"data": map[string]any{"ciphertext": ct, "key_version": ver}})
+		succeed(map[string]any{"data": map[string]any{"ciphertext": ct, "key_version": ver}})
+	}
+}
+
+func wipe(b []byte) {
+	for i := range b {
+		b[i] = 0
 	}
 }
 
@@ -231,11 +305,21 @@ func (f *Face) pointOf(v config.Version) ([]byte, error) {
 	for _, h := range v.Holders() {
 		pt, err := f.Tokens[h.Token].Point(h.Label)
 		if err == nil {
-			return pt, nil
+			if err = pinned(v, pt); err == nil {
+				return pt, nil
+			}
 		}
 		last = err
 	}
 	return nil, last
+}
+
+// pinned: a version with a fingerprint is served only by holders of that key. A card that was swapped for another one is "unavailable", not trusted.
+func pinned(v config.Version, point []byte) error {
+	if v.Fingerprint != "" && !strings.EqualFold(v.Fingerprint, ecies.Fingerprint(point)) {
+		return fmt.Errorf("%w: the holder's key is not the pinned one", backend.ErrUnavailable)
+	}
+	return nil
 }
 
 func (f *Face) seal(k config.Key, plain, aad []byte) (string, int, error) {
@@ -272,6 +356,9 @@ func (f *Face) open(k config.Key, ct string, aad []byte) ([]byte, error) {
 		tok := f.Tokens[h.Token]
 		point, err := tok.Point(h.Label)
 		if err == nil {
+			err = pinned(k.Versions[n-1], point)
+		}
+		if err == nil {
 			var plain []byte
 			if plain, err = ecies.Unwrap(point, derive{tok, h.Label}, string(text), aad); err == nil {
 				return plain, nil
@@ -305,7 +392,7 @@ func (f *Face) failTokenErr(done func(int, string, string, bool), err error) {
 	}
 }
 
-func (f *Face) keyInfo(w http.ResponseWriter, name string, k config.Key) {
+func (f *Face) keyInfo(w http.ResponseWriter, name string, k config.Key, succeed func(any)) {
 	keys := map[string]any{}
 	for i, v := range k.Versions {
 		if point, err := f.pointOf(v); err == nil {
@@ -319,7 +406,7 @@ func (f *Face) keyInfo(w http.ResponseWriter, name string, k config.Key) {
 			state = st
 		}
 	}
-	reply(w, 200, map[string]any{"data": map[string]any{
+	succeed(map[string]any{"data": map[string]any{
 		"name": name, "type": "ecdh-es-p256", "latest_version": len(k.Versions), "min_decryption_version": 1,
 		"supports_encryption": true, "supports_decryption": true, "supports_derivation": k.AAD.Mode == "context",
 		"supports_signing": false, "keys": keys, "token_state": state,

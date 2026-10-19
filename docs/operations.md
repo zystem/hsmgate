@@ -45,3 +45,17 @@ The spare card needs its own PIN entry (`hsmgate unlock -token spare`) and sits 
 
 One hsmgate process serves one configuration: several keys, several clients, several tokens (cards in one or more readers), each key version pointing at its holders. Several processes on a host take separate `listen` ports and admin sockets, and one card must not be opened
 by two processes at once (the card serves one session at a time and the PIN is tried per login): give a token to one process.
+
+## Running in Docker (one machine or VM with the reader; no Kubernetes)
+
+A card is a physical device: hsmgate runs on a machine (or a VM with the reader passed through) that has it, not on a scheduler that moves pods. `deploy/docker/compose.yaml` is the example; the image is built from the `Dockerfile` in the root.
+
+- **pcscd stays on the host**; its socket `/run/pcscd` is mounted into the container. The image holds the OpenSC module and `libpcsclite1` (OpenSC loads it with `dlopen` and the package only *recommends* it: without it `C_Initialize` fails with `CKR_GENERAL_ERROR`).
+- **User**: Debian's pcscd asks polkit (`org.debian.pcsc-lite.access_pcsc`, `access_card`: allowed for a local *active session* only). A container process has no session, so a non-root user gets `SCardEstablishContext failed: 0x8010006a`
+  and the token shows `absent`. Verified on a card (2026-10-19): as root in the container (with `--cap-drop ALL`, `--read-only`, `no-new-privileges`) the service reads the key and is healthy; as uid 10001 or 1000 it does not.
+  To run as a non-root user, give that user a polkit rule on the host (a user of that uid must exist on the host, so that polkit can name it) and set `user:` in the compose file. **That rule was not tried here.**
+  Example for `/etc/polkit-1/rules.d/50-hsmgate.rules`: `polkit.addRule(function(a, s) { if ((a.id == "org.debian.pcsc-lite.access_pcsc" || a.id == "org.debian.pcsc-lite.access_card") && s.user == "hsmgate") return polkit.Result.YES; });`
+- **Unlock and reload**: `docker compose exec hsmgate hsmgate unlock -config /etc/hsmgate/hsmgate.yaml -token card` (the PIN is typed on the terminal), `docker compose kill -s HUP hsmgate`.
+- **Health check**: `hsmgate ping` is a TCP connect to the listener. It never touches the token, so a locked token is not a failing container; use `hsmgate check` or the key information (`GET /v1/transit/keys/<name>`, `token_state`) to monitor the token.
+- **Limits**: the example sets memory and process limits; `limits.max_concurrent` and `limits.queue_seconds` in the configuration bound how many operations wait for the card.
+- **USB passthrough** (`--device /dev/bus/usb` with pcscd inside the container) is possible and was not tried.

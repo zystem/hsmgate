@@ -14,6 +14,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"golang.org/x/term"
 
@@ -30,12 +31,24 @@ func die(err error) {
 }
 
 func main() {
+	if len(os.Args) >= 2 && os.Args[1] == "ping" {
+		// a TCP connect to the listener: for a container health check (it must not touch the token or need a certificate)
+		fs := flag.NewFlagSet("ping", flag.ExitOnError)
+		addr := fs.String("addr", "127.0.0.1:8443", "address to connect to")
+		fs.Parse(os.Args[2:])
+		c, err := net.DialTimeout("tcp", *addr, 3*time.Second)
+		if err != nil {
+			die(err)
+		}
+		c.Close()
+		return
+	}
 	if len(os.Args) == 2 && os.Args[1] == "version" {
 		fmt.Println("hsmgate", version)
 		return
 	}
 	if len(os.Args) < 2 || (os.Args[1] != "serve" && os.Args[1] != "check" && os.Args[1] != "unlock") {
-		fmt.Fprintln(os.Stderr, "usage: hsmgate serve|check|unlock|version -config hsmgate.yaml [-token NAME] [-pin-stdin]")
+		fmt.Fprintln(os.Stderr, "usage: hsmgate serve|check|unlock|version|ping -config hsmgate.yaml [-token NAME] [-pin-stdin]")
 		os.Exit(2)
 	}
 	fs := flag.NewFlagSet(os.Args[1], flag.ExitOnError)

@@ -17,21 +17,37 @@ const (
 	Throttled
 )
 
-type Policy struct {
-	cfg *config.Config
-	now func() time.Time
+// Counters outlive a reload: a new policy shares them, and a request of the old generation that finishes late is counted in the same place.
+type Counters struct {
 	mu  sync.Mutex
 	win map[string]*window
 }
+
+func NewCounters() *Counters { return &Counters{win: map[string]*window{}} }
+
+type Policy struct {
+	cfg *config.Config
+	now func() time.Time
+	c   *Counters
+}
+
+// MetaPerMinute bounds reads of key information (public keys), which are free of the operation budget but not of any budget.
+const MetaPerMinute = 120
 
 type window struct {
 	minute, day   int64
 	minuteN, dayN int
 }
 
-func New(cfg *config.Config) *Policy {
-	return &Policy{cfg: cfg, now: time.Now, win: map[string]*window{}}
+func New(cfg *config.Config, c *Counters) *Policy {
+	if c == nil {
+		c = NewCounters()
+	}
+	return &Policy{cfg: cfg, now: time.Now, c: c}
 }
+
+// Counters is what a reload hands to the next policy.
+func (p *Policy) Counters() *Counters { return p.c }
 
 // Check spends the budget when it allows.
 func (p *Policy) Check(client, key, op string) Decision {
@@ -53,13 +69,25 @@ func (p *Policy) Check(client, key, op string) Decision {
 	if !ok {
 		return Forbidden
 	}
+	return p.spend(client+"\x00"+key, g.PerMinute, g.PerDay)
+}
+
+// CheckMeta spends the small budget of key-information reads; the client must have some grant on the key.
+func (p *Policy) CheckMeta(client, key string) Decision {
+	if !p.Allowed(client, key) {
+		return Forbidden
+	}
+	return p.spend(client+"\x00"+key+"\x00meta", MetaPerMinute, 0)
+}
+
+func (p *Policy) spend(id string, perMinute, perDay int) Decision {
 	now := p.now().Unix()
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	w := p.win[client+"\x00"+key]
+	p.c.mu.Lock()
+	defer p.c.mu.Unlock()
+	w := p.c.win[id]
 	if w == nil {
 		w = &window{}
-		p.win[client+"\x00"+key] = w
+		p.c.win[id] = w
 	}
 	if m := now / 60; m != w.minute {
 		w.minute, w.minuteN = m, 0
@@ -67,7 +95,7 @@ func (p *Policy) Check(client, key, op string) Decision {
 	if d := now / 86400; d != w.day {
 		w.day, w.dayN = d, 0
 	}
-	if (g.PerMinute > 0 && w.minuteN >= g.PerMinute) || (g.PerDay > 0 && w.dayN >= g.PerDay) {
+	if (perMinute > 0 && w.minuteN >= perMinute) || (perDay > 0 && w.dayN >= perDay) {
 		return Throttled
 	}
 	w.minuteN++
@@ -94,16 +122,4 @@ func (p *Policy) Allowed(client, key string) bool {
 		}
 	}
 	return false
-}
-
-// Inherit takes over the counters of a policy that a reload replaces, so that a reload does not give a client a new budget.
-func (p *Policy) Inherit(old *Policy) {
-	old.mu.Lock()
-	defer old.mu.Unlock()
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	for k, w := range old.win {
-		c := *w
-		p.win[k] = &c
-	}
 }

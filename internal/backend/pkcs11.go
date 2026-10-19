@@ -40,8 +40,19 @@ var ErrAlreadyUnlocked = errors.New("the token is already unlocked")
 
 var ErrPINRefused = errors.New("the token refused the PIN")
 
+// PKCS11 is a view of a token for one generation of the configuration: the label -> CKA_ID map is its own, the session, the login and the PIN are shared
+// with the other views of the same token (a reload makes a new view and the old one keeps serving the requests that began with it).
 type PKCS11 struct {
-	cfg PKCS11Config
+	*core
+	keys map[string]string
+
+	pmu    sync.Mutex
+	points map[string][]byte
+	epoch  uint64 // the session the cached points were read in
+}
+
+type core struct {
+	cfg PKCS11Config // Keys is not used here: each view has its own
 	m   module
 
 	mu       sync.Mutex
@@ -52,7 +63,7 @@ type PKCS11 struct {
 	pin      []byte // kept in memory only, after a login that succeeded: to log in again if the session is lost
 	refused  bool   // the token refused the PIN: no automatic tries
 	absent   bool
-	points   map[string][]byte
+	epoch    uint64 // counts sessions: public keys read in an earlier one are read again (the card may have been replaced)
 }
 
 // OpenPKCS11 loads the module. The token is looked for at the first call, so the service can start with the card out.
@@ -70,10 +81,20 @@ func OpenPKCS11(cfg PKCS11Config) (*PKCS11, error) {
 }
 
 func newPKCS11(cfg PKCS11Config, m module) *PKCS11 {
-	return &PKCS11{cfg: cfg, m: m, points: map[string][]byte{}}
+	return &PKCS11{core: &core{cfg: cfg, m: m}, keys: cfg.Keys, points: map[string][]byte{}}
 }
 
-func (p *PKCS11) State() string {
+// View makes a view of the same token with another label -> CKA_ID map; nothing changes for the views that exist.
+func (p *PKCS11) View(keys map[string]string) *PKCS11 {
+	return &PKCS11{core: p.core, keys: keys, points: map[string][]byte{}}
+}
+
+// SameToken: does a configuration name the token this one was opened for? (module, label and serial cannot change in a reload)
+func (p *PKCS11) SameToken(c PKCS11Config) bool {
+	return p.cfg.Module == c.Module && p.cfg.TokenLabel == c.TokenLabel && p.cfg.TokenSerial == c.TokenSerial
+}
+
+func (p *core) State() string {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	switch {
@@ -86,7 +107,7 @@ func (p *PKCS11) State() string {
 }
 
 // Unlock logs in with the PIN: one attempt. After a refusal the service stays locked until an operator calls this again.
-func (p *PKCS11) Unlock(pin []byte) error {
+func (p *core) Unlock(pin []byte) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.refused = false
@@ -100,7 +121,7 @@ func (p *PKCS11) Unlock(pin []byte) error {
 	return p.login(pin)
 }
 
-func (p *PKCS11) login(pin []byte) error {
+func (p *core) login(pin []byte) error {
 	err := p.m.Login(p.sh, pkcs11.CKU_USER, string(pin))
 	switch {
 	case err == nil || isErr(err, pkcs11.CKR_USER_ALREADY_LOGGED_IN):
@@ -117,7 +138,7 @@ func (p *PKCS11) login(pin []byte) error {
 }
 
 // Close logs out and forgets the PIN.
-func (p *PKCS11) Close() {
+func (p *core) Close() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.open {
@@ -137,7 +158,7 @@ func isErr(err error, want pkcs11.Error) bool {
 
 func unavailable(err error) error { return fmt.Errorf("%w: %v", ErrUnavailable, err) }
 
-func (p *PKCS11) dropSession() {
+func (p *core) dropSession() {
 	if p.open {
 		p.m.CloseSession(p.sh)
 	}
@@ -145,7 +166,7 @@ func (p *PKCS11) dropSession() {
 }
 
 // ensureSession opens a session on the token (a removed token or a closed session is opened again), and logs in again with the remembered PIN if there is one.
-func (p *PKCS11) ensureSession() error {
+func (p *core) ensureSession() error {
 	if p.open {
 		return nil
 	}
@@ -175,6 +196,7 @@ func (p *PKCS11) ensureSession() error {
 		return unavailable(err)
 	}
 	p.sh, p.open, p.absent, p.loggedIn = sh, true, false, false
+	p.epoch++
 	if len(p.pin) > 0 && !p.refused {
 		return p.login(p.pin)
 	}
@@ -182,7 +204,7 @@ func (p *PKCS11) ensureSession() error {
 }
 
 func (p *PKCS11) find(label string, class uint) (pkcs11.ObjectHandle, error) {
-	id, ok := p.cfg.Keys[label]
+	id, ok := p.keys[label]
 	if !ok {
 		return 0, fmt.Errorf("no key %q", label)
 	}
@@ -206,7 +228,7 @@ func (p *PKCS11) find(label string, class uint) (pkcs11.ObjectHandle, error) {
 }
 
 // sessionErr: errors that mean the session, the login or the token is gone are "unavailable"; the session is dropped so that the next call opens it again.
-func (p *PKCS11) sessionErr(err error) error {
+func (p *core) sessionErr(err error) error {
 	for _, c := range []pkcs11.Error{pkcs11.CKR_SESSION_CLOSED, pkcs11.CKR_SESSION_HANDLE_INVALID, pkcs11.CKR_USER_NOT_LOGGED_IN, pkcs11.CKR_DEVICE_REMOVED,
 		pkcs11.CKR_TOKEN_NOT_PRESENT, pkcs11.CKR_DEVICE_ERROR, pkcs11.CKR_TOKEN_NOT_RECOGNIZED, pkcs11.CKR_DEVICE_MEMORY} {
 		if isErr(err, c) {
@@ -224,11 +246,19 @@ func (p *PKCS11) sessionErr(err error) error {
 func (p *PKCS11) Point(label string) ([]byte, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	p.pmu.Lock()
+	defer p.pmu.Unlock()
+	if p.epoch != p.core.epoch {
+		p.points, p.epoch = map[string][]byte{}, p.core.epoch // a new session: the card may be another one
+	}
 	if pt, ok := p.points[label]; ok {
 		return pt, nil
 	}
 	if err := p.ensureSession(); err != nil {
 		return nil, err
+	}
+	if p.epoch != p.core.epoch {
+		p.points, p.epoch = map[string][]byte{}, p.core.epoch
 	}
 	o, err := p.find(label, pkcs11.CKO_PUBLIC_KEY)
 	if err != nil {
@@ -283,7 +313,11 @@ func (p *PKCS11) Derive(label string, peer []byte) ([]byte, error) {
 		}
 		return nil, fmt.Errorf("the token refused the point: %w", err)
 	}
-	defer p.m.DestroyObject(p.sh, k)
+	defer func() {
+		if err := p.m.DestroyObject(p.sh, k); err != nil {
+			p.dropSession() // a derived secret that cannot be destroyed is not left in a session that stays open
+		}
+	}()
 	a, err := p.m.GetAttributeValue(p.sh, k, []*pkcs11.Attribute{pkcs11.NewAttribute(pkcs11.CKA_VALUE, nil)})
 	if err != nil {
 		return nil, p.sessionErr(err)
@@ -292,16 +326,4 @@ func (p *PKCS11) Derive(label string, peer []byte) ([]byte, error) {
 		return nil, unavailable(fmt.Errorf("the token gave a shared secret of %d bytes, not 32", len(a[0].Value)))
 	}
 	return a[0].Value, nil
-}
-
-// SetKeys replaces the label -> CKA_ID map (a reload that adds a key for a rotation). Public keys already read are kept for labels whose id did not change.
-func (p *PKCS11) SetKeys(keys map[string]string) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	for label := range p.points {
-		if keys[label] != p.cfg.Keys[label] {
-			delete(p.points, label)
-		}
-	}
-	p.cfg.Keys = keys
 }

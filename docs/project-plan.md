@@ -93,7 +93,7 @@ internal/face/          native, compat1, transit, kmsv2 (gRPC)
 api/                    the OpenAPI of v2, the protos
 docs/                   concepts, protocol, sealed format, threat model, one page per token (the matrix of what was tried), operations
 test/                   SoftHSM2 integration, the real-card script, conformance vectors
-deploy/                 systemd unit (LoadCredential, sandboxing, no network except the listener), a Kubernetes example
+deploy/                 systemd unit (LoadCredential, sandboxing, no network except the listener) (Docker example; no Kubernetes: a card ties the service to one machine)
 ```
 
 Supply chain as KeySealer: signed releases and containers, an SBOM, SLSA provenance, `govulncheck` and a linter in CI, fuzz targets for every parser (the sealed format, the context, the requests).
@@ -106,7 +106,7 @@ Supply chain as KeySealer: signed releases and containers, an SBOM, SLSA provena
 - **P3. The PKCS#11 backend**: the module loading and its checks, the slot by label or serial, the login once, the locked state, `unlock`; SoftHSM2 in CI (it has ECDH, no RSA-OAEP key wrap; the matrix says what each token can do); the scripts of `tools/hsm` ported and run on the real card by the owner.
 - **P4. Faces**: `compat v1` (the core of CiNim works unchanged against it, the tests of `tkekclient` run against the new service), `transit` (the OpenBao run of section 13 repeated, through mTLS and over a network, which was not tried), then `k8s-kms-v2`.
 - **P5. Recipients, `rewrap`, rotation**: the spare token as a recipient, the rotation of a key (a new `key_id`, `rewrap` of what exists), a written procedure for losing a card and for restoring from a DKEK backup on the second card (tried once, with the card in hand).
-- **P6. Packaging and documentation**: releases, the unit and the Kubernetes example, the page per token (SmartCard-HSM: OpenSC module and `sc-hsm-embedded`, what was tried), the operations guide (PIN, backup, the switch, monitoring).
+- **P6. Packaging and documentation**: releases, the unit and the Docker example, the page per token (SmartCard-HSM: OpenSC module and `sc-hsm-embedded`, what was tried), the operations guide (PIN, backup, the switch, monitoring).
 - **P7. CiNim moves to it**: **not a task of this project.** It is CiNim's own work (its client, chart, `src/kekd` removal, `docs/hardware-key.md`), planned and tracked in CiNim's repository. This project supplies the contract (docs/transit-face.md) and the test vectors; the notes below on what CiNim would change are for whoever picks that up.
 - **P8. Review**: a pass over the whole by someone other than the author (the card is the root of every secret), fuzzing for a stated time, the timing of the unwrap path, memory handling of the PIN and the secrets.
 

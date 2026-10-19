@@ -10,9 +10,11 @@ import (
 	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/pem"
+	"io"
 	"math/big"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"os"
 	"path/filepath"
 	"strings"
@@ -152,5 +154,96 @@ func TestInsecureOnlyOnLoopback(t *testing.T) {
 	cfg := &config.Config{Listen: "0.0.0.0:8443", InsecureLoopbackClient: "x"}
 	if _, err := New(cfg, &bytes.Buffer{}); err == nil {
 		t.Error("plain HTTP on a non-loopback address was allowed")
+	}
+}
+
+func baseConfig(t *testing.T, dir string, ca, srv ident) *config.Config {
+	os.WriteFile(filepath.Join(dir, "ca.pem"), ca.pem, 0o600)
+	os.WriteFile(filepath.Join(dir, "srv.pem"), srv.pem, 0o600)
+	writeKeyPEM(t, filepath.Join(dir, "srv.key"), srv)
+	os.WriteFile(filepath.Join(dir, "k1"), []byte(strings.Repeat("11", 32)), 0o600)
+	cfg := &config.Config{Listen: "127.0.0.1:0",
+		TLS:    config.TLS{Cert: filepath.Join(dir, "srv.pem"), Key: filepath.Join(dir, "srv.key"), ClientCA: filepath.Join(dir, "ca.pem")},
+		Tokens: []config.Token{{Name: "soft", Type: "soft", Keys: map[string]string{"m": filepath.Join(dir, "k1")}}},
+		Keys:   map[string]config.Key{"bao-seal": {Versions: []config.Version{{Token: "soft", Label: "m"}}, AAD: config.AAD{Mode: "fixed"}}},
+		Clients: []config.Client{{Name: "openbao", Identity: config.Identity{CN: "openbao"},
+			Keys: map[string]config.Grant{"bao-seal": {Ops: []string{"encrypt", "decrypt"}}}}}}
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	return cfg
+}
+
+// Replacing the CA ends access on connections that are already open: the chain is judged again at every request.
+func TestReplacedCAEndsAnOpenConnection(t *testing.T) {
+	dir := t.TempDir()
+	ca := mk(t, "ca", nil, true, false)
+	srvCert := mk(t, "hsmgate", &ca, false, true)
+	good := mk(t, "openbao", &ca, false, false)
+	cfg := baseConfig(t, dir, ca, srvCert)
+	s, err := New(cfg, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	l, _ := net.Listen("tcp", "127.0.0.1:0")
+	go s.Serve(l)
+	defer s.HTTP.Close()
+	pool := x509.NewCertPool()
+	pool.AddCert(ca.x)
+	cl := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool, Certificates: []tls.Certificate{good.cert}}}} // keep-alive: one connection
+	reused := false
+	call := func() int {
+		req, _ := http.NewRequest("GET", "https://"+l.Addr().String()+"/v1/transit/keys/bao-seal", nil)
+		req = req.WithContext(httptrace.WithClientTrace(req.Context(), &httptrace.ClientTrace{GotConn: func(i httptrace.GotConnInfo) { reused = i.Reused }}))
+		resp, err := cl.Do(req)
+		if err != nil {
+			return -1 // the handshake itself was refused: access has ended as well, but not by the check under test
+		}
+		io.Copy(io.Discard, resp.Body) // read to the end, or the connection is not kept
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	if st := call(); st != 200 {
+		t.Fatalf("before: %d", st)
+	}
+	other := mk(t, "other-ca", nil, true, false)
+	os.WriteFile(cfg.TLS.ClientCA, other.pem, 0o600)
+	if err := s.Reload(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if st := call(); st != 403 || !reused {
+		t.Errorf("the open connection: status %d, reused=%v (want 403 on the same connection)", st, reused)
+	}
+}
+
+// A reload that fails changes nothing: the tokens and the policy of the running generation stay the same objects.
+func TestRefusedReloadChangesNothing(t *testing.T) {
+	dir := t.TempDir()
+	ca := mk(t, "ca", nil, true, false)
+	srvCert := mk(t, "hsmgate", &ca, false, true)
+	cfg := baseConfig(t, dir, ca, srvCert)
+	s, err := New(cfg, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := s.Tokens()["soft"]
+	bad := *cfg
+	bad.TLS.ClientCA = filepath.Join(dir, "missing.pem")
+	if err := s.Reload(&bad); err == nil {
+		t.Fatal("accepted")
+	}
+	if s.Tokens()["soft"] != before || s.gen.cfg != cfg {
+		t.Error("a refused reload replaced the generation")
+	}
+	moved := *cfg
+	moved.Listen = "127.0.0.1:9"
+	if err := s.Reload(&moved); err == nil {
+		t.Error("a change of the listen address was applied without a restart")
+	}
+	// a pinned fingerprint that the holder does not have is refused
+	pinned := *cfg
+	pinned.Keys = map[string]config.Key{"bao-seal": {AAD: config.AAD{Mode: "fixed"}, Versions: []config.Version{{Token: "soft", Label: "m", Fingerprint: strings.Repeat("ab", 32)}}}}
+	if err := s.Reload(&pinned); err == nil || !strings.Contains(err.Error(), "pinned") {
+		t.Errorf("pin: %v", err)
 	}
 }

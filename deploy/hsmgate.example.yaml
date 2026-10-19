@@ -11,7 +11,7 @@ tokens:
   - name: card
     type: pkcs11
     module: /usr/lib/x86_64-linux-gnu/opensc-pkcs11.so
-    token_label: cinim                 # or token_serial: <serial of the token>
+    token_label: mytoken               # or token_serial: <serial of the token>
     keys: {m1: 0123456789abcdef0123456789abcdef01234567}   # label -> CKA_ID of the key pair, hex
     # pin_file: /run/credentials/hsmgate.service/pin       # tried ONCE at start; without it: `hsmgate unlock -token card`
 

@@ -1,0 +1,25 @@
+# hsmgate in Docker on a machine (or VM) that has the reader. pcscd runs on the host; its socket is mounted. One container per card.
+# Put hsmgate.yaml, server.pem, server.key and clients-ca.pem in ./config (see ../hsmgate.example.yaml) with the paths /etc/hsmgate/... in it.
+services:
+  hsmgate:
+    image: ghcr.io/zystem/hsmgate:latest        # or: build: {context: ../.., args: {VERSION: dev}}
+    restart: unless-stopped
+    # root inside the container, with every capability dropped and a read-only root file system: Debian's pcscd asks polkit, which lets only a local
+    # active session (or a user a rule names) use the card, and a container process is in none. Verified on a card. For a non-root user, see docs/operations.md.
+    user: "0:0"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 128m
+    pids_limit: 128
+    ports: ["8443:8443"]
+    volumes:
+      - ./config:/etc/hsmgate:ro
+      - /run/pcscd:/run/pcscd                     # the host's pcscd socket (the reader stays with the host)
+    tmpfs:
+      - /run/hsmgate:mode=0700                       # the admin socket
+      - /var/log/hsmgate:mode=0750                   # or mount a host directory to keep the audit log
+    # unlock (the PIN is typed on the terminal and stays in memory):
+    #   docker compose exec hsmgate hsmgate unlock -config /etc/hsmgate/hsmgate.yaml -token card
+    # reload the configuration and certificates:
+    #   docker compose kill -s HUP hsmgate

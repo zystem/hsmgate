@@ -227,3 +227,44 @@ func TestUnlockWhenLoggedInKeepsTheRightPIN(t *testing.T) {
 		t.Errorf("relogin with the remembered PIN: %v", err)
 	}
 }
+
+// A view has its own label map; the token, its session and its PIN are shared. A new view changes nothing for the old one.
+func TestViewsShareTheSessionButNotTheKeys(t *testing.T) {
+	f := newFake()
+	p := newPKCS11(cfg(), f)
+	v2 := p.View(map[string]string{"other": "02"})
+	if err := p.Unlock([]byte("123456")); err != nil {
+		t.Fatal(err)
+	}
+	if v2.State() != "ready" {
+		t.Errorf("the view does not share the login: %s", v2.State())
+	}
+	if _, err := p.Point("m"); err != nil {
+		t.Errorf("old view lost its key: %v", err)
+	}
+	if _, err := v2.Point("m"); err == nil {
+		t.Error("the new view knows the label of the old one")
+	}
+}
+
+// Public keys read in an earlier session are read again in the next one (the card may have been replaced meanwhile).
+func TestPointsAreReadAgainInANewSession(t *testing.T) {
+	f := newFake()
+	p := newPKCS11(cfg(), f)
+	first, _ := p.Point("m")
+	old := f.priv
+	f.priv, _ = ecdh.P256().GenerateKey(rand.Reader) // another card with the same label
+	if again, _ := p.Point("m"); !bytes.Equal(again, first) {
+		t.Fatal("cache not used within a session")
+	}
+	f.deriveErr = pkcs11.Error(pkcs11.CKR_SESSION_CLOSED)
+	p.Unlock([]byte("123456"))
+	peer, _ := peerOf(t, f)
+	p.Derive("m", peer) // the session is lost
+	p.Unlock([]byte("123456"))
+	second, err := p.Point("m")
+	if err != nil || bytes.Equal(second, first) || !bytes.Equal(second, f.priv.PublicKey().Bytes()) {
+		t.Errorf("stale point after a new session: %v", err)
+	}
+	_ = old
+}

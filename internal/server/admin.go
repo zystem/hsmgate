@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"syscall"
+	"time"
 
 	"github.com/zystem/hsmgate/internal/audit"
 	"github.com/zystem/hsmgate/internal/backend"
@@ -48,6 +50,12 @@ func adminHandler(current func() map[string]backend.Token, log *audit.Log) http.
 			http.Error(w, "this token takes no PIN", 400)
 			return
 		}
+		// the attempt is written down before the card is touched: with no log there is no unlock
+		ev.Result = "attempt"
+		if err := log.Write(ev); err != nil {
+			http.Error(w, "audit log unavailable", 503)
+			return
+		}
 		pin := []byte(b.Pin)
 		err := u.Unlock(pin)
 		for i := range pin {
@@ -75,7 +83,10 @@ func (s *Server) ServeAdmin(path string) error {
 		}
 		os.Remove(path)
 	}
+	// the socket is created with mode 0600 from the start, whatever the umask of the process
+	old := syscall.Umask(0o177)
 	l, err := net.Listen("unix", path)
+	syscall.Umask(old)
 	if err != nil {
 		return err
 	}
@@ -83,5 +94,6 @@ func (s *Server) ServeAdmin(path string) error {
 		l.Close()
 		return err
 	}
-	return (&http.Server{Handler: adminHandler(s.Tokens, s.audit)}).Serve(l)
+	srv := &http.Server{Handler: adminHandler(s.Tokens, s.audit), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 20 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 8 << 10}
+	return srv.Serve(l)
 }

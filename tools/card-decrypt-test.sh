@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Round trip through hsmgate on the real SmartCard-HSM: encrypt (public key only), then decrypt (login, then ECDH on the card).
-#   PIN_FILE=/path/to/pin-file tools/card-decrypt-test.sh
+#   PIN_FILE=/path/to/pin-file KEY_ID=<CKA_ID hex> TOKEN_LABEL=<label> tools/card-decrypt-test.sh
 # The PIN is read by hsmgate itself from the file, tried ONCE; this script never reads or prints it. A refused PIN costs one of the card's 3 tries.
 set -euo pipefail
 PIN_FILE="${PIN_FILE:?set PIN_FILE to the file that holds the user PIN}"
 MODULE="${MODULE:-/usr/lib/x86_64-linux-gnu/opensc-pkcs11.so}"
-KEY_ID="${KEY_ID:-0123456789abcdef0123456789abcdef01234567}"
-LABEL="${TOKEN_LABEL:-cinim}"
+KEY_ID="${KEY_ID:?set KEY_ID to the CKA_ID (hex) of the key pair on the token}"
+LABEL="${TOKEN_LABEL:?set TOKEN_LABEL to the label of the token}"
 PORT="${PORT:-18302}"
 here="$(cd "$(dirname "$0")/.." && pwd)"
 T="$(mktemp -d)"; pid=""

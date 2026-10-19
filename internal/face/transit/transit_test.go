@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zystem/hsmgate/internal/audit"
 	"github.com/zystem/hsmgate/internal/backend"
@@ -84,7 +85,7 @@ func newRig(t *testing.T, mutate func(*config.Config, map[string]backend.Token))
 		mutate(cfg, tokens)
 	}
 	buf := &bytes.Buffer{}
-	face := &Face{Cfg: cfg, Tokens: tokens, Policy: policy.New(cfg), Audit: audit.New(buf),
+	face := &Face{Cfg: cfg, Tokens: tokens, Policy: policy.New(cfg, nil), Audit: audit.New(buf),
 		Identify: func(r *http.Request) (string, bool) { c := r.Header.Get("X-Test-Client"); return c, c != "" }}
 	s := httptest.NewServer(face)
 	t.Cleanup(s.Close)
@@ -302,9 +303,7 @@ func TestRotationWithReload(t *testing.T) {
 		cfg2.Keys[k] = v
 	}
 	cfg2.Keys["rot"] = config.Key{AAD: config.AAD{Mode: "fixed", Fixed: "x"}, Versions: []config.Version{{Token: "soft", Label: "m1"}, {Token: "soft", Label: "m2"}}}
-	pol := policy.New(&cfg2)
-	pol.Inherit(f.Policy)
-	f.Reload(&cfg2, f.Tokens, pol)
+	f.Reload(&cfg2, f.Tokens, policy.New(&cfg2, f.Policy.Counters()), f.Identify)
 	_, out, _ = r.call("openbao", "PUT", "/v1/transit/encrypt/rot", map[string]string{"plaintext": b64("new")})
 	if ct := data(out)["ciphertext"].(string); !strings.HasPrefix(ct, "vault:v2:") {
 		t.Errorf("new encrypt not on v2: %s", ct[:12])
@@ -387,3 +386,75 @@ func FuzzDecryptRequest(f *testing.F) {
 		}
 	})
 }
+
+// The first write that fails must not let the answer out: the line is written before the plaintext leaves.
+func TestFirstFailedAuditWriteWithholdsThePlaintext(t *testing.T) {
+	bw := &brokenWriter{}
+	r := newRig(t, nil)
+	r.face.Audit = audit.New(bw)
+	_, out, _ := r.call("openbao", "PUT", "/v1/transit/encrypt/bao-seal", map[string]string{"plaintext": b64("topsecret")})
+	ct := data(out)["ciphertext"].(string)
+	bw.broken = true // the log was healthy a moment ago: nothing has marked it broken yet
+	st, out, _ := r.call("openbao", "PUT", "/v1/transit/decrypt/bao-seal", map[string]string{"ciphertext": ct})
+	if st != 503 || data(out)["plaintext"] != nil {
+		t.Errorf("%d %v", st, out)
+	}
+}
+
+func TestSizeLimits(t *testing.T) {
+	r := newRig(t, nil)
+	k := r.cfg.Keys["bao-seal"]
+	k.MaxBytes = 8
+	r.cfg.Keys["bao-seal"] = k
+	// 100 bytes were sealed when the limit was larger (or elsewhere): not opened now
+	big := strings.Repeat("x", 100)
+	r.cfg.Keys["bao-seal"] = config.Key{Versions: k.Versions, AAD: k.AAD, MaxBytes: 1000}
+	_, out, _ := r.call("openbao", "PUT", "/v1/transit/encrypt/bao-seal", map[string]string{"plaintext": b64(big)})
+	ct := data(out)["ciphertext"].(string)
+	r.cfg.Keys["bao-seal"] = config.Key{Versions: k.Versions, AAD: k.AAD, MaxBytes: 8}
+	if st, _, _ := r.call("openbao", "PUT", "/v1/transit/decrypt/bao-seal", map[string]string{"ciphertext": ct}); st != 400 {
+		t.Errorf("oversized plaintext on decrypt: %d", st)
+	}
+	// a valid body followed by anything but whitespace is refused, not silently cut
+	req, _ := http.NewRequest("PUT", r.srv.URL+"/v1/transit/encrypt/bao-seal", strings.NewReader(`{"plaintext":"`+b64("x")+`"}   garbage`))
+	req.Header.Set("X-Test-Client", "openbao")
+	resp, _ := http.DefaultClient.Do(req)
+	resp.Body.Close()
+	if resp.StatusCode != 400 {
+		t.Errorf("trailing garbage: %d", resp.StatusCode)
+	}
+}
+
+func TestKeyInfoHasABudgetAndConcurrencyIsBounded(t *testing.T) {
+	r := newRig(t, nil)
+	n429 := 0
+	for i := 0; i < policy.MetaPerMinute+5; i++ {
+		if st, _, _ := r.call("openbao", "GET", "/v1/transit/keys/bao-seal", nil); st == 429 {
+			n429++
+		}
+	}
+	if n429 == 0 {
+		t.Error("key information reads are not limited")
+	}
+	// one slot, held: the next operation is told to come back later, not queued for ever
+	r2 := newRig(t, nil)
+	r2.face.Limit(1, 50*time.Millisecond)
+	block := make(chan struct{})
+	r2.face.Tokens["soft"] = slowToken{r2.face.Tokens["soft"], block}
+	body := map[string]string{"ciphertext": "vault:v1:" + b64("ecies1.x.y.z")}
+	go r2.call("openbao", "PUT", "/v1/transit/decrypt/bao-seal", body)
+	time.Sleep(20 * time.Millisecond)
+	st, _, h := r2.call("openbao", "PUT", "/v1/transit/decrypt/bao-seal", body)
+	close(block)
+	if st == 503 && h.Get("Retry-After") != "" {
+		return
+	}
+	t.Errorf("second operation: %d", st)
+}
+
+type slowToken struct {
+	backend.Token
+	block chan struct{}
+}
+
+func (s slowToken) Point(l string) ([]byte, error) { <-s.block; return s.Token.Point(l) }
