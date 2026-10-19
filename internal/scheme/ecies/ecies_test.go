@@ -1,0 +1,115 @@
+package ecies
+
+import (
+	"bytes"
+	"crypto/ecdh"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"os"
+	"strings"
+	"testing"
+)
+
+type vectors struct {
+	Master struct {
+		PrivateHex  string `json:"private_hex"`
+		PublicHex   string `json:"public_hex"`
+		Fingerprint string `json:"fingerprint"`
+	} `json:"master"`
+	Valid []struct {
+		Name     string `json:"name"`
+		PlainHex string `json:"plain_hex"`
+		AAD      string `json:"aad"`
+		Wrapped  string `json:"wrapped"`
+	} `json:"valid"`
+	Invalid []struct {
+		Name    string `json:"name"`
+		Wrapped string `json:"wrapped"`
+		AAD     string `json:"aad"`
+		Error   string `json:"error"`
+	} `json:"invalid"`
+}
+
+func load(t *testing.T) (vectors, SoftKey, []byte) {
+	t.Helper()
+	raw, err := os.ReadFile("../../../testdata/vectors/ecies1.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var v vectors
+	if err := json.Unmarshal(raw, &v); err != nil {
+		t.Fatal(err)
+	}
+	privB, _ := hex.DecodeString(v.Master.PrivateHex)
+	priv, err := ecdh.P256().NewPrivateKey(privB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pub, _ := hex.DecodeString(v.Master.PublicHex)
+	if !bytes.Equal(priv.PublicKey().Bytes(), pub) {
+		t.Fatal("vector key pair does not match")
+	}
+	return v, SoftKey{priv}, pub
+}
+
+func TestFingerprintMatchesVector(t *testing.T) {
+	v, _, pub := load(t)
+	if got := Fingerprint(pub); got != v.Master.Fingerprint {
+		t.Fatalf("fingerprint %s, want %s", got, v.Master.Fingerprint)
+	}
+}
+
+func TestNimVectorsOpen(t *testing.T) {
+	v, key, pub := load(t)
+	for _, c := range v.Valid {
+		plain, err := Unwrap(pub, key, c.Wrapped, []byte(c.AAD))
+		if err != nil || hex.EncodeToString(plain) != c.PlainHex {
+			t.Errorf("%s: %x, %v", c.Name, plain, err)
+		}
+	}
+}
+
+func TestNimInvalidVectors(t *testing.T) {
+	v, key, pub := load(t)
+	want := map[string]error{"damaged": ErrDamaged, "wrong_key": ErrWrongKey}
+	for _, c := range v.Invalid {
+		if _, err := Unwrap(pub, key, c.Wrapped, []byte(c.AAD)); !errors.Is(err, want[c.Error]) {
+			t.Errorf("%s: %v, want %s", c.Name, err, c.Error)
+		}
+	}
+}
+
+func TestRoundTripAndFreshEphemeral(t *testing.T) {
+	_, key, pub := load(t)
+	a, err := Wrap(pub, []byte("data key"), []byte("ctx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := Wrap(pub, []byte("data key"), []byte("ctx"))
+	if a == b {
+		t.Error("two wraps gave the same text")
+	}
+	p, err := Unwrap(pub, key, a, []byte("ctx"))
+	if err != nil || string(p) != "data key" {
+		t.Errorf("%q %v", p, err)
+	}
+}
+
+func TestTamperAndOffCurve(t *testing.T) {
+	_, key, pub := load(t)
+	w, _ := Wrap(pub, []byte("k"), nil)
+	p := strings.Split(w, ".")
+	body := []byte(p[3])
+	body[len(body)/2] ^= 1 // flips between hex digits of the same class mostly; any change must fail
+	if body[len(body)/2] > 'f' {
+		body[len(body)/2] = '0'
+	}
+	if _, err := Unwrap(pub, key, strings.Join([]string{p[0], p[1], p[2], string(body)}, "."), nil); !errors.Is(err, ErrDamaged) {
+		t.Errorf("tamper: %v", err)
+	}
+	off := "04" + strings.Repeat("11", 64)
+	if _, err := Unwrap(pub, key, strings.Join([]string{p[0], p[1], off, p[3]}, "."), nil); !errors.Is(err, ErrDamaged) {
+		t.Errorf("off curve: %v", err)
+	}
+}

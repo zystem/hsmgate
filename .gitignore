@@ -1,0 +1,3 @@
+/hsmgate
+*.pem
+!testdata/**/*.pem
