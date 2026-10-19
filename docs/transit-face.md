@@ -34,7 +34,7 @@ final failures (wrong key, damaged, wrong context) are 400 with a distinct messa
 TLS 1.3, **client certificate required**, identity from URI SAN / pin / CN mapped to a client in the policy; `X-Vault-Token` is ignored. Per client and per key: allowed operations (`encrypt`, `decrypt`, `rewrap`), allowed context patterns, rate (minute, day), size.
 Deny by default; every decision, including refusals, is audited (never a key, plaintext, PIN or ciphertext body). Admin (unlock, disable, reload) on a separate socket.
 
-## What CiNim changes (P7)
+## What CiNim changes (CiNim's task, tracked in its repository; listed here as the contract's consumer side)
 
 `core/kekclient.nim`: the calls become `PUT /v1/transit/encrypt/<key>` and `decrypt/<key>` with `context`; the key name comes from the tenant's KEK setting (shard default, or the tenant's own); `retryable` from the header.
 Stored `ecies1` texts remain readable: the Transit text wraps them, and a migration can wrap old `kekd` outputs without opening them (the service accepts a bare `ecies1.` text on `decrypt` for this, behind a flag).

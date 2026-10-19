@@ -40,7 +40,7 @@ policy refusal -> `AccessDeniedException` (HTTP 400), rate -> `ThrottlingExcepti
 SigV4 (`AWS4-HMAC-SHA256`, service `kms`, a region string from configuration) is the credential that SDKs and CiNim's client can present: an access key id maps to a **client** in the policy, the secret is stored hashed-comparably (HMAC key kept in the config; not a password).
 It is carried **inside TLS 1.3 with a required client certificate**; the client identity is the pair (certificate identity, access key id) and both must map to the same client. Clock skew <= 5 minutes, replay window by request signature. No header from a front is trusted.
 
-## Changes in CiNim (P7)
+## Changes in CiNim (CiNim's task, not this project's)
 
 `core/kekclient.nim`: replace the v1 calls by `GetPublicKey` once (pinned), local wrap, `DeriveSharedSecret` per unwrap, SigV4 signing (the S3 signing chain exists), and the read of `ecies1` unchanged.
 `src/kekd` (Nim) and its v1 protocol and Transit face are removed when the client has moved; stored `ecies1` texts keep opening (the vectors prove it).

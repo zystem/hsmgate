@@ -16,7 +16,7 @@ This page says what to take from the neighbours, what to change in the API, how 
   one hsmgate may serve more than one physical token.
 - Consequences for hsmgate: keys are addressed by name (alias) and each maps to (token, key id); a client's policy lists keys; a tenant's own KEK is simply another key (on the same token, another token, or another hsmgate) with its own grant.
   Isolation between organisations with their own KEK is then by key, which makes the loss of server-side context checking (see awskms-face.md) matter less.
-- Consequences for CiNim (P7): the DEK of an organisation records which KEK sealed it (`kek id` per tenant, not one for the shard); `kek_check` per KEK; `vaultKek()` becomes a lookup by tenant; moving a tenant to its own KEK is a rewrap of that DEK only.
+- Consequences for CiNim (its own task, not this project's): the DEK of an organisation records which KEK sealed it (`kek id` per tenant, not one for the shard); `kek_check` per KEK; `vaultKek()` becomes a lookup by tenant; moving a tenant to its own KEK is a rewrap of that DEK only.
 - A card holds roughly 70 EC keys at best (memory-bound, not a slot limit; vendor figures, not measured on our card).
 
 ## 1. What the project is
@@ -107,7 +107,7 @@ Supply chain as KeySealer: signed releases and containers, an SBOM, SLSA provena
 - **P4. Faces**: `compat v1` (the core of CiNim works unchanged against it, the tests of `tkekclient` run against the new service), `transit` (the OpenBao run of section 13 repeated, through mTLS and over a network, which was not tried), then `k8s-kms-v2`.
 - **P5. Recipients, `rewrap`, rotation**: the spare token as a recipient, the rotation of a key (a new `key_id`, `rewrap` of what exists), a written procedure for losing a card and for restoring from a DKEK backup on the second card (tried once, with the card in hand).
 - **P6. Packaging and documentation**: releases, the unit and the Kubernetes example, the page per token (SmartCard-HSM: OpenSC module and `sc-hsm-embedded`, what was tried), the operations guide (PIN, backup, the switch, monitoring).
-- **P7. CiNim moves to it**: the chart value and the client of the core use v2 (the client sends a context and reads `retryable`), `src/kekd` and `tools/kekd-emu` go (the emulator becomes `hsmgate` with the `soft` backend and a fault switch), `docs/hardware-key.md` keeps what is about the card and points to the project for the service; `docs/compat.md` gets the line for the v1 face.
+- **P7. CiNim moves to it**: **not a task of this project.** It is CiNim's own work (its client, chart, `src/kekd` removal, `docs/hardware-key.md`), planned and tracked in CiNim's repository. This project supplies the contract (docs/transit-face.md) and the test vectors; the notes below on what CiNim would change are for whoever picks that up.
 - **P8. Review**: a pass over the whole by someone other than the author (the card is the root of every secret), fuzzing for a stated time, the timing of the unwrap path, memory handling of the PIN and the secrets.
 
 ## 9. What stays in CiNim
