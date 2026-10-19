@@ -1,0 +1,21 @@
+# Not run yet. Binaries are dynamic (cgo for PKCS#11), so one build per OS/arch on a matching runner; checksums, an SBOM and a keyless signature.
+version: 2
+project_name: hsmgate
+builds:
+  - main: ./cmd/hsmgate
+    env: [CGO_ENABLED=1]
+    goos: [linux]
+    goarch: [amd64]
+    flags: [-trimpath]
+    ldflags: ["-s -w -X main.version={{.Version}}"]
+archives:
+  - formats: [tar.gz]
+    files: [LICENSE, README.md, deploy/**, docs/**]
+checksum: {name_template: checksums.txt}
+sboms:
+  - artifacts: archive
+signs:
+  - cmd: cosign
+    artifacts: checksum
+    args: ["sign-blob", "--yes", "--output-signature=${signature}", "--output-certificate=${certificate}", "${artifact}"]
+    certificate: "${artifact}.pem"

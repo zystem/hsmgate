@@ -1,0 +1,44 @@
+# hsmgate.example.yaml: one SmartCard-HSM, three clients. Copy to /etc/hsmgate/hsmgate.yaml and edit.
+listen: 0.0.0.0:8443
+tls:
+  cert: /etc/hsmgate/server.pem       # the service's own certificate (TLS 1.3 is the only version offered)
+  key: /etc/hsmgate/server.key
+  client_ca: /etc/hsmgate/clients-ca.pem   # only certificates from this CA get past the handshake
+admin_socket: /run/hsmgate/admin.sock # unlock and status; mode 0600, a short path (unix sockets allow ~108 bytes)
+audit: {file: /var/log/hsmgate/audit.log}
+
+tokens:
+  - name: card
+    type: pkcs11
+    module: /usr/lib/x86_64-linux-gnu/opensc-pkcs11.so
+    token_label: cinim                 # or token_serial: <serial of the token>
+    keys: {m1: 0123456789abcdef0123456789abcdef01234567}   # label -> CKA_ID of the key pair, hex
+    # pin_file: /run/credentials/hsmgate.service/pin       # tried ONCE at start; without it: `hsmgate unlock -token card`
+
+keys:
+  # CiNim: the shard's master key; the context (the organisation) is part of the sealed text and must begin with one of `allow`
+  cinim-shard:
+    versions: [{token: card, label: m1}]
+    aad: {mode: context, allow: ["cinim/dek/v1|"]}
+  # OpenBao's seal `transit` sends no context: a fixed one (default "openbao/seal/v1|<key>", the value kekd used)
+  bao-seal:
+    versions: [{token: card, label: m1}]
+    aad: {mode: fixed}
+  # the etcd encryption plugin (vault-kubernetes-kms) sends no context either; give it its own constant
+  k8s-etcd:
+    versions: [{token: card, label: m1}]
+    aad: {mode: fixed, fixed: "k8s-kms/v1|k8s-etcd"}
+
+clients:
+  - name: cinim-core
+    identity: {uri: "spiffe://example.org/ns/cinim/sa/core"}   # URI SAN; or sha256: <hex of the certificate>, or cn: ... as the last resort
+    keys:
+      cinim-shard: {ops: [encrypt, decrypt, rewrap], per_minute: 120, per_day: 20000}
+  - name: openbao
+    identity: {cn: openbao}
+    keys:
+      bao-seal: {ops: [encrypt, decrypt], per_minute: 30}
+  - name: kube-kms
+    identity: {cn: kube-kms}
+    keys:
+      k8s-etcd: {ops: [encrypt, decrypt], per_minute: 600}

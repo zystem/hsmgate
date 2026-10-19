@@ -1,0 +1,50 @@
+[Unit]
+Description=hsmgate: a policy-checked door in front of a key token
+Documentation=https://github.com/zystem/hsmgate
+After=network-online.target pcscd.service
+Wants=network-online.target
+Requires=pcscd.socket
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/hsmgate serve -config /etc/hsmgate/hsmgate.yaml
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=5s
+User=hsmgate
+Group=hsmgate
+# the PIN, if it is kept in a file at all: a systemd credential, tried once at start (see docs/operations.md; the other way is `hsmgate unlock`)
+#LoadCredential=pin:/etc/hsmgate/pin
+RuntimeDirectory=hsmgate
+RuntimeDirectoryMode=0750
+LogsDirectory=hsmgate
+ConfigurationDirectory=hsmgate
+
+# sandbox: the service talks to pcscd over its unix socket, listens on one port, writes the audit log and nothing else
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=no
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+CapabilityBoundingSet=
+AmbientCapabilities=
+UMask=0077
+# no core dumps: the PIN and shared secrets are in memory
+LimitCORE=0
+
+[Install]
+WantedBy=multi-user.target
