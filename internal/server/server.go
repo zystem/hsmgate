@@ -2,6 +2,7 @@
 package server
 
 import (
+	"bytes"
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
@@ -22,17 +23,34 @@ import (
 type Server struct {
 	HTTP     *http.Server
 	Insecure bool
+	Tokens   map[string]backend.Token
+	audit    *audit.Log
 }
 
 // New builds the service from a checked configuration; auditOut nil means the file of the configuration, or standard output.
 func New(cfg *config.Config, auditOut io.Writer) (*Server, error) {
 	tokens := map[string]backend.Token{}
 	for _, t := range cfg.Tokens {
-		s, err := backend.NewSoft(t.Keys)
-		if err != nil {
-			return nil, fmt.Errorf("token %s: %w", t.Name, err)
+		switch t.Type {
+		case "soft":
+			s, err := backend.NewSoft(t.Keys)
+			if err != nil {
+				return nil, fmt.Errorf("token %s: %w", t.Name, err)
+			}
+			tokens[t.Name] = s
+		case "pkcs11":
+			p, err := backend.OpenPKCS11(backend.PKCS11Config{Module: t.Module, TokenLabel: t.TokenLabel, TokenSerial: t.TokenSerial, Keys: t.Keys})
+			if err != nil {
+				return nil, fmt.Errorf("token %s: %w", t.Name, err)
+			}
+			if t.PinFile != "" {
+				if err := unlockFromFile(p, t.PinFile); err != nil {
+					// the PIN is tried once; the service starts locked and says why
+					fmt.Fprintf(os.Stderr, "hsmgate: token %s stays locked: %v\n", t.Name, err)
+				}
+			}
+			tokens[t.Name] = p
 		}
-		tokens[t.Name] = s
 	}
 	if auditOut == nil {
 		auditOut = os.Stdout
@@ -45,8 +63,9 @@ func New(cfg *config.Config, auditOut io.Writer) (*Server, error) {
 		}
 	}
 	srv := &http.Server{Addr: cfg.Listen, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, MaxHeaderBytes: 16 << 10}
-	face := &transit.Face{Cfg: cfg, Tokens: tokens, Policy: policy.New(cfg), Audit: audit.New(auditOut)}
-	s := &Server{HTTP: srv}
+	alog := audit.New(auditOut)
+	face := &transit.Face{Cfg: cfg, Tokens: tokens, Policy: policy.New(cfg), Audit: alog}
+	s := &Server{HTTP: srv, Tokens: tokens, audit: alog}
 	if cfg.InsecureLoopbackClient != "" {
 		if !loopback(cfg.Listen) {
 			return nil, fmt.Errorf("insecure_loopback_client is allowed on a loopback address only")
@@ -87,4 +106,18 @@ func (s *Server) Serve(l net.Listener) error {
 		return s.HTTP.Serve(l)
 	}
 	return s.HTTP.ServeTLS(l, "", "")
+}
+
+func unlockFromFile(u Unlocker, path string) error {
+	pin, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	pin = bytes.TrimRight(pin, "\r\n")
+	defer func() {
+		for i := range pin {
+			pin[i] = 0
+		}
+	}()
+	return u.Unlock(pin)
 }

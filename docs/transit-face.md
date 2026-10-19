@@ -44,3 +44,13 @@ Old `kekd` (Nim) and its v1 API are removed after the move. The face's behaviour
 
 OpenBao v2.6.1 with `seal "transit"` (address of hsmgate over plain loopback HTTP, `insecure_loopback_client`, soft key): `bao operator init -recovery-shares=1`, a KV secret written, OpenBao stopped and started again:
 it unsealed by itself through hsmgate and returned the secret; the audit shows `encrypt`/`decrypt` as client `openbao`. Not yet run: the same over mTLS and a network, a card behind it (P3), `vault-kubernetes-kms`, SOPS.
+
+## The PKCS#11 backend (P3)
+
+`type: pkcs11` token (`module`, `token_label` or `token_serial`, `keys: label -> CKA_ID`). The public key is read without a PIN; `encrypt` works while the token is locked (it needs the public key only). `decrypt`/`rewrap` need the login:
+the PIN comes from `pin_file` (one try at start) or from `hsmgate unlock -token NAME` over the admin socket (`admin_socket`, mode 0600; the PIN from the terminal or `-pin-stdin`, kept in memory). A refused PIN is never retried by the service
+(the card blocks at 3): it answers 503 `locked`, retryable, until an operator unlocks again. A lost session or a removed token is reopened at the next call (state `absent` meanwhile); the PIN is remembered in memory only to log in again after that.
+Unix socket paths are limited to ~108 bytes (use a short path).
+
+Checked (2026-10-19): unit tests with a software token module (PIN tried once, relogin, token out, wrong label); the real SmartCard-HSM through OpenSC read-only (`HSMGATE_P11_MODULE=... HSMGATE_P11_KEY_ID=... go test -run RealModule ./internal/backend`)
+and a running hsmgate on the card **with no PIN**: `keys/k` gives the card's key and `token_state: locked`, `encrypt` works, `decrypt` answers 503 retryable. **Not run by the assistant**: any login or ECDH on the card (needs the owner's PIN; `tools/card-decrypt-test.sh`), SoftHSM2 (not installed here).

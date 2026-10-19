@@ -17,7 +17,9 @@ type Config struct {
 	Transit                struct {
 		Mount string `yaml:"mount"`
 	} `yaml:"transit"`
-	Audit struct {
+	// AdminSocket is a unix socket (mode 0600) for unlock and status; unset: no admin door.
+	AdminSocket string `yaml:"admin_socket"`
+	Audit       struct {
 		File string `yaml:"file"`
 	} `yaml:"audit"`
 	Tokens  []Token        `yaml:"tokens"`
@@ -33,9 +35,16 @@ type TLS struct {
 
 // Token is one physical (or software) token. Type "soft" holds private keys in files: tests and development.
 type Token struct {
-	Name string            `yaml:"name"`
-	Type string            `yaml:"type"`
-	Keys map[string]string `yaml:"keys"` // soft: label -> file with 64 hex digits
+	Name string `yaml:"name"`
+	Type string `yaml:"type"` // soft or pkcs11
+	// soft: label -> file with 64 hex digits. pkcs11: label -> CKA_ID of the key pair, in hex.
+	Keys map[string]string `yaml:"keys"`
+	// pkcs11 only
+	Module      string `yaml:"module"`
+	TokenLabel  string `yaml:"token_label"`
+	TokenSerial string `yaml:"token_serial"`
+	// PinFile: tried once at start. Without it the token starts locked until `hsmgate unlock`.
+	PinFile string `yaml:"pin_file"`
 }
 
 // Key is a named key of the Transit face. Versions[i] is version i+1; the last one is the latest.
@@ -100,8 +109,11 @@ func (c *Config) Validate() error {
 	}
 	tokens := map[string]Token{}
 	for _, t := range c.Tokens {
-		if t.Name == "" || t.Type != "soft" { // pkcs11 comes in P3
-			return fmt.Errorf("token %q: type must be soft", t.Name)
+		if t.Name == "" || (t.Type != "soft" && t.Type != "pkcs11") {
+			return fmt.Errorf("token %q: type must be soft or pkcs11", t.Name)
+		}
+		if t.Type == "pkcs11" && t.Module == "" {
+			return fmt.Errorf("token %q: module is required", t.Name)
 		}
 		tokens[t.Name] = t
 	}
