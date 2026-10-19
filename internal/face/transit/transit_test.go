@@ -230,12 +230,16 @@ func TestRewrapMovesToLatestVersion(t *testing.T) {
 func TestClientCallsAroundTheSeal(t *testing.T) {
 	r := newRig(t, nil)
 	for _, p := range []struct{ m, path string }{{"GET", "/v1/sys/health"}, {"GET", "/v1/auth/token/lookup-self"}, {"POST", "/v1/auth/token/renew-self"}} {
-		if st, _, _ := r.call("", p.m, p.path, nil); st != 200 {
+		if st, _, _ := r.call("openbao", p.m, p.path, nil); st != 200 {
 			t.Errorf("%s: %d", p.path, st)
 		}
 	}
+	// a certificate the policy does not know fails at the token calls, not later
+	if st, _, _ := r.call("", "GET", "/v1/auth/token/lookup-self", nil); st != 403 {
+		t.Errorf("unknown client at lookup-self: %d", st)
+	}
 	// vault-kubernetes-kms (v1.4.0) reads data.ttl and data.creation_ttl as numbers from lookup-self, and data.latest_version from keys/<name>
-	_, out, _ := r.call("", "GET", "/v1/auth/token/lookup-self", nil)
+	_, out, _ := r.call("openbao", "GET", "/v1/auth/token/lookup-self", nil)
 	if d := data(out); d["ttl"] != float64(0) || d["creation_ttl"] != float64(0) {
 		t.Errorf("lookup-self: %v", out)
 	}

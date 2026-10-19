@@ -62,3 +62,9 @@ soft token). A small gRPC client for Kubernetes KMS v2 (`k8s.io/kms/apis/v2`) ca
 So **etcd encryption by the card needs no gRPC code in hsmgate**: kube-apiserver -> the plugin -> hsmgate Transit. Notes from the plugin's source: it sends no context, so its key must be `aad.mode: fixed` (give it its own `fixed` value, e.g. `k8s-kms/v1|kms`);
 it reads `data.ttl` and `data.creation_ttl` from `auth/token/lookup-self` as numbers (the face answers 0 and 0, so it never tries to renew) and `data.latest_version` from `keys/<name>`; the token it presents is ignored.
 Not run: a real kube-apiserver, mTLS between the plugin and hsmgate (the plugin has `-cert-*` options and the Vault API client reads `VAULT_CLIENT_CERT`/`VAULT_CLIENT_KEY`; to be tried), the card behind it.
+
+## Verified over mTLS (2026-10-19)
+
+hsmgate with `tls:` (TLS 1.3, client certificate required, identity by CN), test CA made with openssl, soft token. **vault-kubernetes-kms v1.4.0** (`VAULT_CACERT`, `VAULT_CLIENT_CERT`, `VAULT_CLIENT_KEY`): `Status`/`Encrypt`/`Decrypt` through its gRPC socket worked.
+**OpenBao v2.6.1** (`seal "transit"` with `tls_ca_cert`, `tls_client_cert`, `tls_client_key`): init, a secret, restart, auto-unseal, secret read back. The audit names the clients `kms` and `openbao` by certificate.
+A certificate from the CA that the policy does not know is refused at `auth/token/lookup-self` (403), so the plugin exits at its start with "failed to connect"; with no certificate the TLS handshake fails. Not run: a real kube-apiserver, the card behind mTLS, certificate reload on SIGHUP (not implemented yet).

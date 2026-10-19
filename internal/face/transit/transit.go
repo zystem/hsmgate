@@ -43,7 +43,13 @@ func (f *Face) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		reply(w, 200, map[string]any{"initialized": true, "sealed": false, "standby": false, "version": "hsmgate"})
 		return
 	case path == "/v1/auth/token/lookup-self" || path == "/v1/auth/token/renew-self":
-		// a token is never an authentication here; clients that look at theirs get a long-lived, renewable one
+		// a token is never an authentication here; a client the policy knows gets a token that never expires, so that nothing tries to renew it.
+		// A certificate the policy does not know is refused here, so that such a client fails at its start and not at its first key.
+		if _, ok := f.Identify(r); !ok {
+			f.Audit.Write(audit.Event{RequestID: requestID(r), Face: face, Op: "token-lookup", Result: "unauthenticated"})
+			fail(w, 403, "permission denied", false)
+			return
+		}
 		reply(w, 200, map[string]any{"data": map[string]any{"id": "hsmgate", "ttl": 0, "creation_ttl": 0, "renewable": false, "policies": []string{}},
 			"auth": map[string]any{"client_token": "hsmgate", "lease_duration": 2764800, "renewable": false}})
 		return
