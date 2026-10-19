@@ -2,6 +2,8 @@
 # Put hsmgate.yaml, server.pem, server.key and clients-ca.pem in ./config (see ../hsmgate.example.yaml) with the paths /etc/hsmgate/... in it.
 services:
   hsmgate:
+    # a package that CI pushes to ghcr.io is PRIVATE until its owner makes it public (GitHub: Packages -> hsmgate -> Package settings -> Change visibility).
+    # Until then: `docker login ghcr.io` with a token that has read:packages, or build locally with the `build:` line below instead of `image:`.
     image: ghcr.io/zystem/hsmgate:latest        # or: build: {context: ../.., args: {VERSION: dev}}
     restart: unless-stopped
     # root inside the container, with every capability dropped and a read-only root file system: Debian's pcscd asks polkit, which lets only a local

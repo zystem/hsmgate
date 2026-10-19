@@ -13,6 +13,9 @@ FROM debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595
 RUN apt-get update && apt-get install -y --no-install-recommends opensc-pkcs11 libpcsclite1 ca-certificates && rm -rf /var/lib/apt/lists/* \
  && useradd --system --uid 10001 --user-group --home-dir /nonexistent --shell /usr/sbin/nologin hsmgate
 COPY --from=build /out/hsmgate /usr/local/bin/hsmgate
+LABEL org.opencontainers.image.source="https://github.com/zystem/hsmgate" \
+      org.opencontainers.image.description="hsmgate: a policy-checked network door in front of a key token (Transit API)" \
+      org.opencontainers.image.licenses="MIT"
 USER 10001:10001
 EXPOSE 8443
 # a TCP connect to the listener: it never touches the token (a locked token is a state of the service, not a failure of the container)
