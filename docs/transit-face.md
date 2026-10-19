@@ -39,3 +39,8 @@ Deny by default; every decision, including refusals, is audited (never a key, pl
 `core/kekclient.nim`: the calls become `PUT /v1/transit/encrypt/<key>` and `decrypt/<key>` with `context`; the key name comes from the tenant's KEK setting (shard default, or the tenant's own); `retryable` from the header.
 Stored `ecies1` texts remain readable: the Transit text wraps them, and a migration can wrap old `kekd` outputs without opening them (the service accepts a bare `ecies1.` text on `decrypt` for this, behind a flag).
 Old `kekd` (Nim) and its v1 API are removed after the move. The face's behaviour is specified by test vectors and by runs of the real clients (OpenBao seal, `vault-kubernetes-kms`), already done against the Nim `kekd` for OpenBao.
+
+## Verified against OpenBao (2026-10-19)
+
+OpenBao v2.6.1 with `seal "transit"` (address of hsmgate over plain loopback HTTP, `insecure_loopback_client`, soft key): `bao operator init -recovery-shares=1`, a KV secret written, OpenBao stopped and started again:
+it unsealed by itself through hsmgate and returned the secret; the audit shows `encrypt`/`decrypt` as client `openbao`. Not yet run: the same over mTLS and a network, a card behind it (P3), `vault-kubernetes-kms`, SOPS.
