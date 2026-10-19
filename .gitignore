@@ -1,3 +1,5 @@
 /hsmgate
 *.pem
 !testdata/**/*.pem
+/build/
+/dist/

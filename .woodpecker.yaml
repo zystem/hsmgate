@@ -31,7 +31,7 @@ steps:
     image: golang:1.26-bookworm
     commands:
       - mkdir -p build
-      - CGO_ENABLED=1 go build -trimpath -ldflags "-s -w -X main.version=${CI_COMMIT_TAG:-dev}" -o build/hsmgate ./cmd/hsmgate
+      - CGO_ENABLED=1 go build -trimpath -buildvcs=false -ldflags "-s -w -X main.version=${CI_COMMIT_TAG:-dev}" -o build/hsmgate ./cmd/hsmgate
       - build/hsmgate version
     depends_on:
       - test
@@ -54,16 +54,17 @@ steps:
         ref: refs/tags/v*
 
   publish_image:
-    image: woodpeckerci/plugin-docker-buildx:5.2.0
+    # kaniko builds without a privileged container (buildx needs WOODPECKER_PLUGINS_PRIVILEGED on the server)
+    image: woodpeckerci/plugin-kaniko:2.3.3
     settings:
       registry: ghcr.io
-      repo: ghcr.io/${CI_REPO}
+      repo: ${CI_REPO}
       username: ${CI_REPO_OWNER}
       password:
         from_secret: github_token
-      platforms:
-        - linux/amd64
-      build_args:
+      dockerfile: Dockerfile
+      context: .
+      build-args:
         - VERSION=${CI_COMMIT_TAG##v}
       tags:
         - ${CI_COMMIT_TAG##v}
