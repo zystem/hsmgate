@@ -1,0 +1,13 @@
+.git
+.woodpecker.yaml
+renovate.json
+docs
+deploy
+tools
+testdata
+graphify-out
+build
+dist
+**/*_test.go
+**/testdata
+*.md
