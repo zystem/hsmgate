@@ -4,7 +4,7 @@ services:
   hsmgate:
     # a package that CI pushes to ghcr.io is PRIVATE until its owner makes it public (GitHub: Packages -> hsmgate -> Package settings -> Change visibility).
     # Until then: `docker login ghcr.io` with a token that has read:packages, or build locally with the `build:` line below instead of `image:`.
-    image: ghcr.io/zystem/hsmgate:latest        # or: build: {context: ../.., args: {VERSION: dev}}
+    image: ghcr.io/zystem/hsmgate:v0.1.1@sha256:c17e7cfcaae0f9f67b9ef5b5362651b3679743e88d6d9b3136ffc4a8620c965a   # pinned by digest; Renovate bumps it. Or: build: {context: ../.., args: {VERSION: dev}}
     restart: unless-stopped
     # root inside the container, with every capability dropped and a read-only root file system: Debian's pcscd asks polkit, which lets only a local
     # active session (or a user a rule names) use the card, and a container process is in none. Verified on a card. For a non-root user, see docs/operations.md.

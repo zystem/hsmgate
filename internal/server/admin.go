@@ -39,7 +39,7 @@ func adminHandler(current func() map[string]backend.Token, log *audit.Log) http.
 	mux.HandleFunc("POST /unlock", func(w http.ResponseWriter, r *http.Request) {
 		var b struct{ Token, Pin string }
 		if json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024)).Decode(&b) != nil {
-			http.Error(w, "bad request", 400)
+			http.Error(w, "bad request", http.StatusBadRequest)
 			return
 		}
 		u, ok := current()[b.Token].(Unlocker)
@@ -47,13 +47,13 @@ func adminHandler(current func() map[string]backend.Token, log *audit.Log) http.
 		if !ok {
 			ev.Result = "not_lockable"
 			log.Write(ev)
-			http.Error(w, "this token takes no PIN", 400)
+			http.Error(w, "this token takes no PIN", http.StatusBadRequest)
 			return
 		}
 		// the attempt is written down before the card is touched: with no log there is no unlock
 		ev.Result = "attempt"
 		if err := log.Write(ev); err != nil {
-			http.Error(w, "audit log unavailable", 503)
+			http.Error(w, "audit log unavailable", http.StatusServiceUnavailable)
 			return
 		}
 		pin := []byte(b.Pin)
@@ -64,11 +64,15 @@ func adminHandler(current func() map[string]backend.Token, log *audit.Log) http.
 		if err != nil {
 			ev.Result = "refused"
 			log.Write(ev)
-			http.Error(w, err.Error(), 403)
+			http.Error(w, err.Error(), http.StatusForbidden)
 			return
 		}
 		ev.Result = "ok"
-		log.Write(ev)
+		if err := log.Write(ev); err != nil {
+			// the token is unlocked and the attempt was written; say that the result line was not
+			http.Error(w, "unlocked, but the audit log could not record the result: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
 		json.NewEncoder(w).Encode(map[string]string{"state": u.State()})
 	})
 	return mux

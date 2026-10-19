@@ -4,7 +4,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 )
 
 func TestSoftRefusesAKeyFileOthersCanRead(t *testing.T) {
@@ -38,5 +40,22 @@ func TestSecretFileIsReadFromTheDescriptor(t *testing.T) {
 	os.WriteFile(big, []byte(strings.Repeat("a", 100)), 0o600)
 	if _, err := ReadSecretFile(big, 16); err == nil {
 		t.Error("a file over the limit was read")
+	}
+}
+
+func TestSecretFileFIFODoesNotBlock(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "fifo")
+	if err := syscall.Mkfifo(f, 0o600); err != nil {
+		t.Skip(err)
+	}
+	done := make(chan error, 1)
+	go func() { _, err := ReadSecretFile(f, 16); done <- err }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Error("a FIFO was read")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("opening a FIFO blocked")
 	}
 }

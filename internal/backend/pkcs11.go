@@ -63,6 +63,7 @@ type core struct {
 	pin      []byte // kept in memory only, after a login that succeeded: to log in again if the session is lost
 	refused  bool   // the token refused the PIN: no automatic tries
 	absent   bool
+	closed   bool   // Close was called: the token is retired and opens no session again
 	epoch    uint64 // counts sessions: public keys read in an earlier one are read again (the card may have been replaced)
 }
 
@@ -141,6 +142,7 @@ func (p *core) login(pin []byte) error {
 func (p *core) Close() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	p.closed = true
 	if p.open {
 		p.m.Logout(p.sh)
 		p.dropSession()
@@ -163,12 +165,16 @@ func (p *core) dropSession() {
 		p.m.CloseSession(p.sh)
 	}
 	p.open, p.loggedIn = false, false
+	p.epoch++ // what was read in that session is no longer known to come from the card that is there now
 }
 
 // ensureSession opens a session on the token (a removed token or a closed session is opened again), and logs in again with the remembered PIN if there is one.
 func (p *core) ensureSession() error {
 	if p.open {
 		return nil
+	}
+	if p.closed {
+		return fmt.Errorf("%w: the token was retired by a reload or a shutdown", ErrUnavailable)
 	}
 	slots, err := p.m.GetSlotList(true)
 	if err != nil {
@@ -327,3 +333,6 @@ func (p *PKCS11) Derive(label string, peer []byte) ([]byte, error) {
 	}
 	return a[0].Value, nil
 }
+
+// Identity names the physical token behind a view: views of one token share it. A reload compares these, not names, to know which tokens are gone.
+func (p *PKCS11) Identity() any { return p.core }

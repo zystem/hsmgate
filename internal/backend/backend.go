@@ -68,3 +68,5 @@ func (s *Soft) Derive(label string, peer []byte) ([]byte, error) {
 }
 
 func (s *Soft) State() string { return "ready" }
+
+func (s *Soft) Identity() any { return s }

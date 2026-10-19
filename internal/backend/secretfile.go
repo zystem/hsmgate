@@ -10,7 +10,7 @@ import (
 // ReadSecretFile reads a file that holds a key or a PIN. It opens the path once, refuses a symbolic link, and judges the open descriptor, not the path:
 // a regular file, owned by the user the service runs as (or root), not readable by group or others, and no larger than max bytes.
 func ReadSecretFile(path string, max int64) ([]byte, error) {
-	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_CLOEXEC|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -31,5 +31,9 @@ func ReadSecretFile(path string, max int64) ([]byte, error) {
 	if st.Size() > max {
 		return nil, fmt.Errorf("%s is larger than %d bytes", path, max)
 	}
-	return io.ReadAll(io.LimitReader(f, max+1))
+	b, err := io.ReadAll(io.LimitReader(f, max+1))
+	if err == nil && int64(len(b)) > max {
+		return nil, fmt.Errorf("%s grew beyond %d bytes while it was read", path, max)
+	}
+	return b, err
 }

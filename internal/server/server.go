@@ -23,8 +23,8 @@ import (
 	"github.com/zystem/hsmgate/internal/policy"
 )
 
-// drain is how long tokens that a reload removed stay open for the requests that began before it (the write timeout of the server is 30 s).
-const drain = 35 * time.Second
+// maxDrain bounds the wait for requests of an old generation before the tokens a reload dropped are closed anyway (a stuck driver call cannot be cancelled).
+const maxDrain = 10 * time.Minute
 
 type generation struct {
 	cfg    *config.Config
@@ -157,10 +157,17 @@ func (s *Server) prepare(cfg *config.Config, old *generation) (gen *generation, 
 		counters = old.pol.Counters()
 	}
 	gen = &generation{cfg: cfg, tokens: tokens, auth: authn.New(cfg.Clients, roots), tlsCfg: tcfg, pol: policy.New(cfg, counters)}
+	// a token is gone when no token of the new generation is the same physical token (by identity, not by name: a name can be given to another token)
 	removed = map[string]backend.Token{}
 	if old != nil {
 		for n, t := range old.tokens {
-			if _, kept := tokens[n]; !kept {
+			still := false
+			for _, nt := range tokens {
+				if sameToken(t, nt) {
+					still = true
+				}
+			}
+			if !still {
 				removed[n] = t
 			}
 		}
@@ -233,9 +240,17 @@ func (s *Server) Reload(cfg *config.Config) error {
 	s.mu.Lock()
 	s.gen = gen
 	s.mu.Unlock()
-	s.face.Reload(cfg, gen.tokens, gen.pol, identifier(gen.auth))
-	// tokens the new configuration no longer names are logged out when the requests that began with the old one are done
-	time.AfterFunc(drain, func() { closeTokens(removed) })
+	waitOld := s.face.Reload(cfg, gen.tokens, gen.pol, identifier(gen.auth))
+	// tokens the new configuration no longer uses are logged out when the requests that began with the old generation are done
+	go func() {
+		done := make(chan struct{})
+		go func() { waitOld(); close(done) }()
+		select {
+		case <-done:
+		case <-time.After(maxDrain):
+		}
+		closeTokens(removed)
+	}()
 	return nil
 }
 
@@ -316,4 +331,10 @@ func closeTokens(m map[string]backend.Token) {
 func (s *Server) Close() {
 	s.HTTP.Close()
 	closeTokens(s.Tokens())
+}
+
+func sameToken(a, b backend.Token) bool {
+	ia, oka := a.(interface{ Identity() any })
+	ib, okb := b.(interface{ Identity() any })
+	return oka && okb && ia.Identity() == ib.Identity()
 }

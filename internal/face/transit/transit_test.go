@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -442,14 +443,26 @@ func TestKeyInfoHasABudgetAndConcurrencyIsBounded(t *testing.T) {
 	block := make(chan struct{})
 	r2.face.Tokens["soft"] = slowToken{r2.face.Tokens["soft"], block}
 	body := map[string]string{"ciphertext": "vault:v1:" + b64("ecies1.x.y.z")}
-	go r2.call("openbao", "PUT", "/v1/transit/decrypt/bao-seal", body)
-	time.Sleep(20 * time.Millisecond)
+	// the first operation holds the slot: it is sent from another goroutine with plain net/http (a test helper that calls t.Fatal must not run there)
+	first := make(chan struct{})
+	go func() {
+		defer close(first)
+		b, _ := json.Marshal(body)
+		req, _ := http.NewRequest("PUT", r2.srv.URL+"/v1/transit/decrypt/bao-seal", bytes.NewReader(b))
+		req.Header.Set("X-Test-Client", "openbao")
+		if resp, err := http.DefaultClient.Do(req); err == nil {
+			resp.Body.Close()
+		}
+	}()
+	for i := 0; i < 200 && len(r2.face.sem) == 0; i++ { // wait until it really has the slot
+		time.Sleep(5 * time.Millisecond)
+	}
 	st, _, h := r2.call("openbao", "PUT", "/v1/transit/decrypt/bao-seal", body)
 	close(block)
-	if st == 503 && h.Get("Retry-After") != "" {
-		return
+	<-first
+	if st != 503 || h.Get("Retry-After") == "" {
+		t.Errorf("second operation: %d", st)
 	}
-	t.Errorf("second operation: %d", st)
 }
 
 type slowToken struct {
@@ -458,3 +471,68 @@ type slowToken struct {
 }
 
 func (s slowToken) Point(l string) ([]byte, error) { <-s.block; return s.Token.Point(l) }
+
+// The line is finite: with the slot taken and the waiting places full, the next request is refused at once, not after the queue time.
+func TestAdmissionIsAFiniteLine(t *testing.T) {
+	r := newRig(t, nil)
+	r.face.Limit(1, 5*time.Second)
+	block := make(chan struct{})
+	r.face.Tokens["soft"] = slowToken{r.face.Tokens["soft"], block}
+	body, _ := json.Marshal(map[string]string{"ciphertext": "vault:v1:" + b64("ecies1.x.y.z")})
+	send := func(wg *sync.WaitGroup) {
+		defer wg.Done()
+		req, _ := http.NewRequest("PUT", r.srv.URL+"/v1/transit/decrypt/bao-seal", bytes.NewReader(body))
+		req.Header.Set("X-Test-Client", "openbao")
+		if resp, err := http.DefaultClient.Do(req); err == nil {
+			resp.Body.Close()
+		}
+	}
+	var wg sync.WaitGroup
+	wg.Add(2) // one runs, one waits: the line (2 places) is full
+	go send(&wg)
+	go send(&wg)
+	for i := 0; i < 400 && len(r.face.adm) < 2; i++ {
+		time.Sleep(5 * time.Millisecond)
+	}
+	start := time.Now()
+	st, _, _ := r.call("openbao", "PUT", "/v1/transit/decrypt/bao-seal", map[string]string{"ciphertext": "vault:v1:" + b64("ecies1.x.y.z")})
+	took := time.Since(start)
+	close(block)
+	wg.Wait()
+	if st != 503 || took > time.Second {
+		t.Errorf("third request: %d after %v (want 503 at once)", st, took)
+	}
+}
+
+// A reload hands back a way to wait for the requests of the old generation.
+func TestReloadWaitsForRequestsInFlight(t *testing.T) {
+	r := newRig(t, nil)
+	block := make(chan struct{})
+	r.face.Tokens["soft"] = slowToken{r.face.Tokens["soft"], block}
+	body, _ := json.Marshal(map[string]string{"ciphertext": "vault:v1:" + b64("ecies1.x.y.z")})
+	req, _ := http.NewRequest("PUT", r.srv.URL+"/v1/transit/decrypt/bao-seal", bytes.NewReader(body))
+	req.Header.Set("X-Test-Client", "openbao")
+	finished := make(chan struct{})
+	go func() {
+		if resp, err := http.DefaultClient.Do(req); err == nil {
+			resp.Body.Close()
+		}
+		close(finished)
+	}()
+	time.Sleep(100 * time.Millisecond) // the request is inside the old generation, blocked at the token
+	wait := r.face.Reload(r.face.Cfg, r.face.Tokens, r.face.Policy, r.face.Identify)
+	done := make(chan struct{})
+	go func() { wait(); close(done) }()
+	select {
+	case <-done:
+		t.Fatal("the wait returned while a request of the old generation was running")
+	case <-time.After(150 * time.Millisecond):
+	}
+	close(block)
+	<-finished
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Error("the wait did not return after the request was done")
+	}
+}

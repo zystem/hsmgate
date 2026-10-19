@@ -21,7 +21,6 @@ type fakeModule struct {
 	deriveErr    error // returned once by DeriveKey
 	wrapPoint    bool  // CKA_EC_POINT as a DER OCTET STRING
 	loggedIn     bool
-	last         []*pkcs11.Attribute
 	foundClass   uint
 	peer, secret []byte // the test sets peer to what it passes to Derive
 }
@@ -267,4 +266,40 @@ func TestPointsAreReadAgainInANewSession(t *testing.T) {
 		t.Errorf("stale point after a new session: %v", err)
 	}
 	_ = old
+}
+
+// R-01: after a session is dropped the cached public key is not served any more; if the card is gone, so is the answer.
+func TestPointIsNotServedFromTheCacheAfterTheSessionWasDropped(t *testing.T) {
+	f := newFake()
+	p := newPKCS11(cfg(), f)
+	first, err := p.Point("m")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.mu.Lock()
+	p.dropSession() // what a lost session or a failed destroy does
+	p.mu.Unlock()
+	f.present = false
+	if pt, err := p.Point("m"); err == nil {
+		t.Errorf("a stale point was served: %x", pt)
+	}
+	f.present = true
+	f.priv, _ = ecdh.P256().GenerateKey(rand.Reader) // another card
+	second, err := p.Point("m")
+	if err != nil || bytes.Equal(second, first) {
+		t.Errorf("the new card's key was not read: %v", err)
+	}
+}
+
+// A retired token (Close) opens no session again, even if a request of the old generation still calls it.
+func TestRetiredTokenOpensNoSession(t *testing.T) {
+	f := newFake()
+	p := newPKCS11(cfg(), f)
+	p.Unlock([]byte("123456"))
+	p.Close()
+	opens := f.opens
+	peer, _ := peerOf(t, f)
+	if _, err := p.Derive("m", peer); !errors.Is(err, ErrUnavailable) || f.opens != opens {
+		t.Errorf("%v opens %d->%d", err, opens, f.opens)
+	}
 }

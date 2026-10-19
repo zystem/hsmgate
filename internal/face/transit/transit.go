@@ -36,29 +36,58 @@ type Face struct {
 	Identify Identify
 
 	mu    sync.RWMutex
-	sem   chan struct{} // operations that run or wait for a token; nil: no bound
+	sem   chan struct{} // operations that run on a token at once; nil: no bound
+	adm   chan struct{} // operations that run or wait (twice the above): a request beyond it is refused at once
 	queue time.Duration
+	track *tracker // requests of this generation that are in flight
 }
+
+// tracker counts the requests of one generation, so that a reload can tell when the tokens it dropped are no longer in use.
+type tracker struct{ wg sync.WaitGroup }
 
 // Limit bounds the operations that may run or wait for a token at once, and how long one waits for its turn.
 func (f *Face) Limit(concurrent int, wait time.Duration) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.sem, f.queue = make(chan struct{}, concurrent), wait
+	f.sem, f.adm, f.queue = make(chan struct{}, concurrent), make(chan struct{}, 2*concurrent), wait
 }
 
 // Reload replaces the whole generation (configuration, tokens, policy and how clients are identified) at once for the requests that come after;
 // one in flight finishes with the generation it began with.
-func (f *Face) Reload(cfg *config.Config, tokens map[string]backend.Token, pol *policy.Policy, id Identify) {
+// It returns a function that waits until every request that began with the previous generation is done.
+func (f *Face) Reload(cfg *config.Config, tokens map[string]backend.Token, pol *policy.Policy, id Identify) (waitOld func()) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	old := f.track
 	f.Cfg, f.Tokens, f.Policy, f.Identify = cfg, tokens, pol, id
+	f.track = &tracker{}
+	if old == nil {
+		return func() {}
+	}
+	return old.wg.Wait
 }
 
 func (f *Face) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.mu.RLock()
-	g := &Face{Cfg: f.Cfg, Tokens: f.Tokens, Policy: f.Policy, Audit: f.Audit, Identify: f.Identify, sem: f.sem, queue: f.queue}
+	missing := f.track == nil
 	f.mu.RUnlock()
+	if missing {
+		f.mu.Lock()
+		if f.track == nil {
+			f.track = &tracker{}
+		}
+		f.mu.Unlock()
+	}
+	f.mu.RLock()
+	g := &Face{Cfg: f.Cfg, Tokens: f.Tokens, Policy: f.Policy, Audit: f.Audit, Identify: f.Identify, sem: f.sem, adm: f.adm, queue: f.queue}
+	t := f.track
+	if t != nil {
+		t.wg.Add(1) // under the read lock: Reload swaps the tracker under the write lock, so no request joins a generation that is being waited for
+	}
+	f.mu.RUnlock()
+	if t != nil {
+		defer t.wg.Done()
+	}
 	g.serve(w, r)
 }
 
@@ -72,14 +101,23 @@ func (f *Face) acquire(w http.ResponseWriter, r *http.Request) (release func(), 
 	if f.sem == nil {
 		return func() {}, true
 	}
+	// a finite line: at most concurrent operations run and concurrent more wait; the next one is refused without waiting at all
+	select {
+	case f.adm <- struct{}{}:
+	default:
+		w.Header().Set("Retry-After", "2")
+		fail(w, 503, "busy", true)
+		return nil, false
+	}
 	t := time.NewTimer(f.queue)
 	defer t.Stop()
 	select {
 	case f.sem <- struct{}{}:
-		return func() { <-f.sem }, true
+		return func() { <-f.sem; <-f.adm }, true
 	case <-t.C:
 	case <-r.Context().Done():
 	}
+	<-f.adm
 	w.Header().Set("Retry-After", "2")
 	fail(w, 503, "busy", true)
 	return nil, false
