@@ -54,3 +54,11 @@ Unix socket paths are limited to ~108 bytes (use a short path).
 
 Checked (2026-10-19): unit tests with a software token module (PIN tried once, relogin, token out, wrong label); the real SmartCard-HSM through OpenSC read-only (`HSMGATE_P11_MODULE=... HSMGATE_P11_KEY_ID=... go test -run RealModule ./internal/backend`)
 and a running hsmgate on the card **with no PIN**: `keys/k` gives the card's key and `token_state: locked`, `encrypt` works, `decrypt` answers 503 retryable. **Run by the owner (2026-10-19)**: `tools/card-decrypt-test.sh` on the SmartCard-HSM: PIN file read by hsmgate once, `encrypt` then `decrypt` through the login and ECDH on the card gave the plaintext back (about 0.05 s for the decrypt call), a wrong context answered 400, the audit shows the three calls and no secrets. **Not run**: SoftHSM2 (not installed here), an unplugged card, a refused PIN on the card.
+
+## Verified against vault-kubernetes-kms (2026-10-19)
+
+`vault-kubernetes-kms` v1.4.0 (FalcoSuessgott; release tarball `vault-kubernetes-kms_Linux_x86_64.tar.gz`, SHA-256 checked against the release's `checksums.txt`) with `-auth-method token -token unused -transit-key kms`, pointed at hsmgate (plain loopback HTTP,
+soft token). A small gRPC client for Kubernetes KMS v2 (`k8s.io/kms/apis/v2`) called `Status`, `Encrypt`, `Decrypt` on the plugin's unix socket: the plaintext came back, the plugin logged no errors, the audit shows `keys`, `encrypt`, `decrypt` as the client `kms`.
+So **etcd encryption by the card needs no gRPC code in hsmgate**: kube-apiserver -> the plugin -> hsmgate Transit. Notes from the plugin's source: it sends no context, so its key must be `aad.mode: fixed` (give it its own `fixed` value, e.g. `k8s-kms/v1|kms`);
+it reads `data.ttl` and `data.creation_ttl` from `auth/token/lookup-self` as numbers (the face answers 0 and 0, so it never tries to renew) and `data.latest_version` from `keys/<name>`; the token it presents is ignored.
+Not run: a real kube-apiserver, mTLS between the plugin and hsmgate (the plugin has `-cert-*` options and the Vault API client reads `VAULT_CLIENT_CERT`/`VAULT_CLIENT_KEY`; to be tried), the card behind it.

@@ -234,6 +234,11 @@ func TestClientCallsAroundTheSeal(t *testing.T) {
 			t.Errorf("%s: %d", p.path, st)
 		}
 	}
+	// vault-kubernetes-kms (v1.4.0) reads data.ttl and data.creation_ttl as numbers from lookup-self, and data.latest_version from keys/<name>
+	_, out, _ := r.call("", "GET", "/v1/auth/token/lookup-self", nil)
+	if d := data(out); d["ttl"] != float64(0) || d["creation_ttl"] != float64(0) {
+		t.Errorf("lookup-self: %v", out)
+	}
 	st, out, _ := r.call("openbao", "GET", "/v1/transit/keys/bao-seal", nil)
 	if st != 200 || data(out)["latest_version"] != float64(1) {
 		t.Errorf("%d %v", st, out)

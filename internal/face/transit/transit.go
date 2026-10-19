@@ -44,7 +44,7 @@ func (f *Face) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	case path == "/v1/auth/token/lookup-self" || path == "/v1/auth/token/renew-self":
 		// a token is never an authentication here; clients that look at theirs get a long-lived, renewable one
-		reply(w, 200, map[string]any{"data": map[string]any{"id": "hsmgate", "ttl": 0, "renewable": false, "policies": []string{}},
+		reply(w, 200, map[string]any{"data": map[string]any{"id": "hsmgate", "ttl": 0, "creation_ttl": 0, "renewable": false, "policies": []string{}},
 			"auth": map[string]any{"client_token": "hsmgate", "lease_duration": 2764800, "renewable": false}})
 		return
 	case !strings.HasPrefix(path, prefix):

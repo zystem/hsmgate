@@ -8,7 +8,7 @@ This page says what to take from the neighbours, what to change in the API, how 
 - Decided: Go, MIT, name `hsmgate`. CiNim's own protocol (v1) is **not carried over and no v2 native protocol is built for it**.
 - CiNim uses the **Vault/OpenBao Transit face**, see [transit-face.md](transit-face.md) (decided 2026-10-19; it replaces the AWS KMS choice made earlier the same day, which stays as the optional later face [awskms-face.md](awskms-face.md)). The service does the ECIES itself; named keys, a required context checked against policy, versions and `rewrap` map onto Transit.
   The `hsm1` multi-recipient format and the native v2 API are dropped for the first release.
-- Section 8: P1 now contains the AWS KMS face spec and the `ecies1` vectors (done: `testdata/vectors/ecies1.json`, `internal/scheme/ecies`); P2 builds mTLS, policy, audit, the soft backend and the Transit operations (encrypt, decrypt, rewrap, keys); P4 "compat v1" is deleted; P7 is the client change described in transit-face.md.
+- Section 8: P1 now contains the AWS KMS face spec and the `ecies1` vectors (done: `testdata/vectors/ecies1.json`, `internal/scheme/ecies`); P2 builds mTLS, policy, audit, the soft backend and the Transit operations (encrypt, decrypt, rewrap, keys); P4 "compat v1" is deleted and the native Kubernetes KMS v2 gRPC face is postponed (the `vault-kubernetes-kms` plugin already works through Transit, see transit-face.md); P7 is the client change described in transit-face.md.
 
 ### Sizing and key model (2026-10-19)
 
