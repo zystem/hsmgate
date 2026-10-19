@@ -21,14 +21,21 @@ import (
 	"github.com/zystem/hsmgate/internal/server"
 )
 
+// version is set at build time (-X main.version=...)
+var version = "dev"
+
 func die(err error) {
 	fmt.Fprintln(os.Stderr, "hsmgate:", err)
 	os.Exit(1)
 }
 
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == "version" {
+		fmt.Println("hsmgate", version)
+		return
+	}
 	if len(os.Args) < 2 || (os.Args[1] != "serve" && os.Args[1] != "check" && os.Args[1] != "unlock") {
-		fmt.Fprintln(os.Stderr, "usage: hsmgate serve|check|unlock -config hsmgate.yaml [-token NAME] [-pin-stdin]")
+		fmt.Fprintln(os.Stderr, "usage: hsmgate serve|check|unlock|version -config hsmgate.yaml [-token NAME] [-pin-stdin]")
 		os.Exit(2)
 	}
 	fs := flag.NewFlagSet(os.Args[1], flag.ExitOnError)
