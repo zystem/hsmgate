@@ -317,3 +317,73 @@ func TestRotationWithReload(t *testing.T) {
 		t.Errorf("rewrap: %v", out)
 	}
 }
+
+func TestContextTooLongAndUnsafeRequestID(t *testing.T) {
+	r := newRig(t, nil)
+	long := strings.Repeat("a", 2000)
+	st, _, _ := r.call("core", "PUT", "/v1/transit/encrypt/cinim", map[string]string{"plaintext": b64("x"), "context": b64("cinim/dek/v1|" + long)})
+	if st != 400 {
+		t.Errorf("long context: %d", st)
+	}
+	req, _ := http.NewRequest("PUT", r.srv.URL+"/v1/transit/encrypt/cinim", strings.NewReader(`{}`))
+	req.Header.Set("X-Test-Client", "core")
+	req.Header.Set("X-Request-Id", "bad id\"},{\"x\":1")
+	resp, _ := http.DefaultClient.Do(req)
+	resp.Body.Close()
+	if id := resp.Header.Get("X-Request-Id"); id == "" || strings.ContainsAny(id, " \"{") {
+		t.Errorf("request id %q", id)
+	}
+}
+
+type brokenWriter struct{ broken bool }
+
+func (b *brokenWriter) Write(p []byte) (int, error) {
+	if b.broken {
+		return 0, os.ErrClosed
+	}
+	return len(p), nil
+}
+
+// With no way to write the decision down, nothing is done; when the log works again the service does too.
+func TestAuditFailureFailsClosed(t *testing.T) {
+	bw := &brokenWriter{}
+	r := newRig(t, nil)
+	r.face.Audit = audit.New(bw)
+	body := map[string]string{"plaintext": b64("x")}
+	if st, _, _ := r.call("openbao", "PUT", "/v1/transit/encrypt/bao-seal", body); st != 200 {
+		t.Fatalf("%d", st)
+	}
+	bw.broken = true
+	r.face.Audit.Write(audit.Event{}) // a write that fails marks the log unhealthy
+	if st, _, h := r.call("openbao", "PUT", "/v1/transit/encrypt/bao-seal", body); st != 503 || h.Get("X-Hsmgate-Retryable") != "true" {
+		t.Errorf("broken log: %d", st)
+	}
+	bw.broken = false
+	if st, _, _ := r.call("openbao", "PUT", "/v1/transit/encrypt/bao-seal", body); st != 200 {
+		t.Errorf("recovered log: %d", st)
+	}
+}
+
+// Fuzzing the request: any body to decrypt and rewrap. No panic, no 5xx other than the retryable 503, no plaintext from nonsense.
+// The face is built once and called directly (a server per input would exhaust the machine and look like a crash).
+func FuzzDecryptRequest(f *testing.F) {
+	f.Add([]byte(`{"ciphertext":"vault:v1:aGVsbG8=","context":"Y2luaW0vZGVrL3YxfHQx"}`))
+	f.Add([]byte(`{"ciphertext":"vault:v9:x"}`))
+	f.Add([]byte(`{"ciphertext":1}`))
+	f.Add([]byte(`[`))
+	var face *Face
+	f.Fuzz(func(t *testing.T, body []byte) {
+		if face == nil {
+			face = newRig(t, nil).face
+		}
+		for _, p := range []struct{ client, path string }{{"core", "/v1/transit/decrypt/cinim"}, {"openbao", "/v1/transit/decrypt/bao-seal"}, {"openbao", "/v1/transit/rewrap/rot"}} {
+			req := httptest.NewRequest("PUT", p.path, bytes.NewReader(body))
+			req.Header.Set("X-Test-Client", p.client)
+			rec := httptest.NewRecorder()
+			face.ServeHTTP(rec, req)
+			if rec.Code == 200 || rec.Code >= 500 && rec.Code != 503 {
+				t.Fatalf("%s: %d for %q", p.path, rec.Code, body)
+			}
+		}
+	})
+}

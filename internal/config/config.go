@@ -107,13 +107,21 @@ func Load(path string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	return Parse(raw)
+}
+
+// Parse reads and checks a configuration; unknown fields are errors (a misspelt policy line must not be silently ignored).
+func Parse(raw []byte) (*Config, error) {
 	var c Config
 	dec := yaml.NewDecoder(strings.NewReader(string(raw)))
 	dec.KnownFields(true)
 	if err := dec.Decode(&c); err != nil {
 		return nil, err
 	}
-	return &c, c.Validate()
+	if err := c.Validate(); err != nil {
+		return nil, err
+	}
+	return &c, nil
 }
 
 func (c *Config) Validate() error {

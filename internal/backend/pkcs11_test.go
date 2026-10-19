@@ -208,3 +208,22 @@ func TestWrongKeyLabel(t *testing.T) {
 		t.Error("an unknown label was accepted")
 	}
 }
+
+// A PIN given to a token that is logged in is not taken: C_Login would answer "already logged in" and the wrong PIN would be kept for the next login.
+func TestUnlockWhenLoggedInKeepsTheRightPIN(t *testing.T) {
+	f := newFake()
+	p := newPKCS11(cfg(), f)
+	peer, want := peerOf(t, f)
+	if err := p.Unlock([]byte("123456")); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Unlock([]byte("wrong!")); !errors.Is(err, ErrAlreadyUnlocked) {
+		t.Fatalf("%v", err)
+	}
+	f.deriveErr = pkcs11.Error(pkcs11.CKR_SESSION_CLOSED)
+	p.Derive("m", peer) // the session is lost
+	got, err := p.Derive("m", peer)
+	if err != nil || !bytes.Equal(got, want) {
+		t.Errorf("relogin with the remembered PIN: %v", err)
+	}
+}

@@ -50,7 +50,10 @@ func (f *Face) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	g.serve(w, r)
 }
 
-const face = "transit"
+const (
+	face       = "transit"
+	maxContext = 1024 // the context is written to the audit: keep a line small
+)
 
 func (f *Face) serve(w http.ResponseWriter, r *http.Request) {
 	prefix := "/v1/" + f.Cfg.Transit.Mount + "/"
@@ -110,6 +113,12 @@ func (f *Face) serve(w http.ResponseWriter, r *http.Request) {
 	case (op == "encrypt" || op == "decrypt" || op == "rewrap") && (r.Method == http.MethodPut || r.Method == http.MethodPost):
 	default:
 		done(404, "unsupported", "unsupported path", false)
+		return
+	}
+	// fail closed: with no way to write the decision down nothing is done (a probe line says when the log works again)
+	if !f.Audit.Healthy() && f.Audit.Write(audit.Event{RequestID: rid, Face: face, Op: "audit-probe", Result: "probe"}) != nil {
+		w.Header().Set("Retry-After", "5")
+		fail(w, 503, "audit log unavailable", true)
 		return
 	}
 	switch f.Policy.Check(client, name, op) {
@@ -204,6 +213,9 @@ func (f *Face) aadOf(name string, k config.Key, ctx *string) ([]byte, string) {
 		return nil, "missing context"
 	}
 	b, err := base64.StdEncoding.DecodeString(*ctx)
+	if err == nil && len(b) > maxContext {
+		return nil, "context is too long"
+	}
 	if err != nil || len(b) == 0 {
 		return nil, "failed to base64-decode context"
 	}
@@ -315,7 +327,7 @@ func (f *Face) keyInfo(w http.ResponseWriter, name string, k config.Key) {
 }
 
 func requestID(r *http.Request) string {
-	if id := r.Header.Get("X-Request-Id"); id != "" && len(id) <= 64 && utf8.ValidString(id) {
+	if id := r.Header.Get("X-Request-Id"); id != "" && len(id) <= 64 && safeID(id) {
 		return id
 	}
 	b := make([]byte, 8)
@@ -332,4 +344,13 @@ func reply(w http.ResponseWriter, status int, v any) {
 func fail(w http.ResponseWriter, status int, msg string, retry bool) {
 	w.Header().Set("X-Hsmgate-Retryable", strconv.FormatBool(retry))
 	reply(w, status, map[string]any{"errors": []string{msg}})
+}
+
+func safeID(s string) bool {
+	for _, c := range s {
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '_' || c == '.') {
+			return false
+		}
+	}
+	return true
 }

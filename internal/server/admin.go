@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -67,7 +68,13 @@ func adminHandler(current func() map[string]backend.Token, log *audit.Log) http.
 
 // ServeAdmin listens on the unix socket of the configuration (mode 0600) and serves until the listener closes.
 func (s *Server) ServeAdmin(path string) error {
-	os.Remove(path)
+	// a stale socket of an earlier run is replaced; anything else at that path is left alone
+	if st, err := os.Lstat(path); err == nil {
+		if st.Mode()&os.ModeSocket == 0 {
+			return fmt.Errorf("admin_socket %s exists and is not a socket", path)
+		}
+		os.Remove(path)
+	}
 	l, err := net.Listen("unix", path)
 	if err != nil {
 		return err

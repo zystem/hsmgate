@@ -235,6 +235,9 @@ func (s *Server) Serve(l net.Listener) error {
 }
 
 func unlockFromFile(u Unlocker, path string) error {
+	if st, err := os.Stat(path); err == nil && st.Mode().Perm()&0o077 != 0 {
+		return fmt.Errorf("%s is readable by group or others (mode %o): not used", path, st.Mode().Perm())
+	}
 	pin, err := os.ReadFile(path)
 	if err != nil {
 		return err
@@ -246,4 +249,14 @@ func unlockFromFile(u Unlocker, path string) error {
 		}
 	}()
 	return u.Unlock(pin)
+}
+
+// Close stops the listener, logs the tokens out and makes them forget their PIN. The signal handler of `serve` calls it.
+func (s *Server) Close() {
+	s.HTTP.Close()
+	for _, t := range s.Tokens() {
+		if c, ok := t.(interface{ Close() }); ok {
+			c.Close()
+		}
+	}
 }

@@ -72,6 +72,14 @@ func main() {
 			}
 		}
 	}()
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-stop
+		s.Close()
+		fmt.Fprintln(os.Stderr, "hsmgate: stopped, tokens logged out")
+		os.Exit(0)
+	}()
 	l, err := net.Listen("tcp", cfg.Listen)
 	if err != nil {
 		die(err)

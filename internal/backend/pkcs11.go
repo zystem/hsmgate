@@ -35,6 +35,9 @@ type PKCS11Config struct {
 }
 
 // ErrPINRefused: the token refused the PIN. It is not tried again by the service; an operator unlocks again, knowing the card blocks after a few wrong tries.
+// ErrAlreadyUnlocked: the token is logged in; its PIN is not asked again.
+var ErrAlreadyUnlocked = errors.New("the token is already unlocked")
+
 var ErrPINRefused = errors.New("the token refused the PIN")
 
 type PKCS11 struct {
@@ -89,6 +92,10 @@ func (p *PKCS11) Unlock(pin []byte) error {
 	p.refused = false
 	if err := p.ensureSession(); err != nil {
 		return err
+	}
+	if p.loggedIn {
+		// a PIN given to a token that is logged in would be taken for good by C_Login and remembered for the next login: do not touch it
+		return ErrAlreadyUnlocked
 	}
 	return p.login(pin)
 }

@@ -20,17 +20,28 @@ type Event struct {
 }
 
 type Log struct {
-	mu  sync.Mutex
-	w   io.Writer
-	now func() time.Time
+	mu     sync.Mutex
+	w      io.Writer
+	now    func() time.Time
+	failed bool
 }
 
 func New(w io.Writer) *Log { return &Log{w: w, now: time.Now} }
 
-func (l *Log) Write(e Event) {
+// Write returns an error when the line could not be written; the log is then unhealthy until a write succeeds.
+func (l *Log) Write(e Event) error {
 	e.Time = l.now().UTC()
 	b, _ := json.Marshal(e)
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.w.Write(append(b, '\n'))
+	_, err := l.w.Write(append(b, '\n'))
+	l.failed = err != nil
+	return err
+}
+
+// Healthy: the last write succeeded. A service that cannot write down what it does stops doing it.
+func (l *Log) Healthy() bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return !l.failed
 }

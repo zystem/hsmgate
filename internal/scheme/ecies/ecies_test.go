@@ -113,3 +113,51 @@ func TestTamperAndOffCurve(t *testing.T) {
 		t.Errorf("off curve: %v", err)
 	}
 }
+
+// Fuzzing: whatever text arrives, Unwrap neither panics nor opens it, except the genuine ones.
+func FuzzUnwrap(f *testing.F) {
+	raw, _ := os.ReadFile("../../../testdata/vectors/ecies1.json")
+	var v vectors
+	json.Unmarshal(raw, &v)
+	for _, c := range v.Valid {
+		f.Add(c.Wrapped, []byte(c.AAD))
+	}
+	f.Add("ecies1.x.y.z", []byte("a"))
+	privB, _ := hex.DecodeString(v.Master.PrivateHex)
+	priv, _ := ecdh.P256().NewPrivateKey(privB)
+	pub := priv.PublicKey().Bytes()
+	f.Fuzz(func(t *testing.T, wrapped string, aad []byte) {
+		plain, err := Unwrap(pub, SoftKey{priv}, wrapped, aad)
+		if err == nil {
+			// the only texts that open are ones sealed to this key with this aad: seal the result again and check it is consistent
+			again, err := Wrap(pub, plain, aad)
+			if err != nil {
+				t.Fatal(err)
+			}
+			back, err := Unwrap(pub, SoftKey{priv}, again, aad)
+			if err != nil || !bytes.Equal(back, plain) {
+				t.Fatalf("inconsistent: %v", err)
+			}
+		}
+	})
+}
+
+func FuzzRoundTrip(f *testing.F) {
+	f.Add([]byte("k"), []byte("aad"))
+	f.Fuzz(func(t *testing.T, plain, aad []byte) {
+		_, key, pub := load(t)
+		w, err := Wrap(pub, plain, aad)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := Unwrap(pub, key, w, aad)
+		if err != nil || !bytes.Equal(got, plain) {
+			t.Fatalf("%v", err)
+		}
+		if len(aad) > 0 {
+			if _, err := Unwrap(pub, key, w, append([]byte{}, aad[1:]...)); err == nil {
+				t.Fatal("a different aad opened the text")
+			}
+		}
+	})
+}

@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"errors"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -52,5 +54,16 @@ func TestAdminUnlockAndAudit(t *testing.T) {
 	}
 	if strings.Contains(buf.String(), "1234") || strings.Count(buf.String(), `"op":"unlock"`) != 3 {
 		t.Errorf("audit: %s", buf.String())
+	}
+}
+
+func TestAdminSocketNeverRemovesAFile(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "s")
+	os.WriteFile(f, []byte("precious"), 0o600)
+	if err := (&Server{}).ServeAdmin(f); err == nil {
+		t.Error("a regular file at admin_socket was accepted")
+	}
+	if b, _ := os.ReadFile(f); string(b) != "precious" {
+		t.Error("the file was removed")
 	}
 }
