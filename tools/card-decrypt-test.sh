@@ -34,6 +34,6 @@ s=$(date +%s.%N)
 OUT=$(curl -s -X PUT "localhost:$PORT/v1/transit/decrypt/k" -d "{\"ciphertext\":\"$CT\",\"context\":\"$CTX\"}")
 e=$(date +%s.%N)
 GOT=$(printf '%s' "$OUT" | python3 -c "import sys,json;d=json.load(sys.stdin);print(d['data']['plaintext'] if 'data' in d else d)")
-if [ "$GOT" = "$PLAIN" ]; then echo "decrypt on the card: OK ($(printf '%.2f' "$(echo "$e - $s" | bc)") s)"; else echo "decrypt FAILED: $GOT"; exit 1; fi
+if [ "$GOT" = "$PLAIN" ]; then echo "decrypt on the card: OK ($(awk -v a="$s" -v b="$e" 'BEGIN{printf "%.3f", b-a}') s)"; else echo "decrypt FAILED: $GOT"; exit 1; fi
 echo "wrong context must fail:"; curl -s -o /dev/null -w "  HTTP %{http_code}\n" -X PUT "localhost:$PORT/v1/transit/decrypt/k" -d "{\"ciphertext\":\"$CT\",\"context\":\"$(printf 'cinim/dek/v1|t2' | base64)\"}"
 echo "audit:"; cut -c1-150 "$T/audit.log"
