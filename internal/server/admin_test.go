@@ -34,7 +34,7 @@ func (l *lockable) State() string {
 func TestAdminUnlockAndAudit(t *testing.T) {
 	tk := &lockable{pin: "1234"}
 	buf := &bytes.Buffer{}
-	h := adminHandler(map[string]backend.Token{"card": tk}, audit.New(buf))
+	h := adminHandler(func() map[string]backend.Token { return map[string]backend.Token{"card": tk} }, audit.New(buf))
 	post := func(body string) int {
 		r := httptest.NewRequest("POST", "/unlock", strings.NewReader(body))
 		w := httptest.NewRecorder()

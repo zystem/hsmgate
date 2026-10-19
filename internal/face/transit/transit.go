@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"unicode/utf8"
 
 	"github.com/zystem/hsmgate/internal/audit"
@@ -31,11 +32,27 @@ type Face struct {
 	Policy   *policy.Policy
 	Audit    *audit.Log
 	Identify Identify
+
+	mu sync.RWMutex
+}
+
+// Reload replaces the configuration, the tokens and the policy for the requests that come after; one in flight finishes with what it began with.
+func (f *Face) Reload(cfg *config.Config, tokens map[string]backend.Token, pol *policy.Policy) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.Cfg, f.Tokens, f.Policy = cfg, tokens, pol
+}
+
+func (f *Face) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	f.mu.RLock()
+	g := &Face{Cfg: f.Cfg, Tokens: f.Tokens, Policy: f.Policy, Audit: f.Audit, Identify: f.Identify}
+	f.mu.RUnlock()
+	g.serve(w, r)
 }
 
 const face = "transit"
 
-func (f *Face) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (f *Face) serve(w http.ResponseWriter, r *http.Request) {
 	prefix := "/v1/" + f.Cfg.Transit.Mount + "/"
 	path := r.URL.Path
 	switch {
@@ -196,12 +213,22 @@ func (f *Face) aadOf(name string, k config.Key, ctx *string) ([]byte, string) {
 	return b, ""
 }
 
-func (f *Face) tokenOf(v config.Version) backend.Token { return f.Tokens[v.Token] }
+// pointOf is the public key of a version, from the first holder that answers.
+func (f *Face) pointOf(v config.Version) ([]byte, error) {
+	var last error
+	for _, h := range v.Holders() {
+		pt, err := f.Tokens[h.Token].Point(h.Label)
+		if err == nil {
+			return pt, nil
+		}
+		last = err
+	}
+	return nil, last
+}
 
 func (f *Face) seal(k config.Key, plain, aad []byte) (string, int, error) {
 	ver := len(k.Versions)
-	v := k.Versions[ver-1]
-	point, err := f.tokenOf(v).Point(v.Label)
+	point, err := f.pointOf(k.Versions[ver-1])
 	if err != nil {
 		return "", 0, err
 	}
@@ -227,13 +254,23 @@ func (f *Face) open(k config.Key, ct string, aad []byte) ([]byte, error) {
 	if err != nil {
 		return nil, errBadCiphertext
 	}
-	v := k.Versions[n-1]
-	tok := f.tokenOf(v)
-	point, err := tok.Point(v.Label)
-	if err != nil {
-		return nil, err
+	// the holders in order: the next one is tried only when this one could not answer (locked, removed), never when it said the text is bad
+	var last error
+	for _, h := range k.Versions[n-1].Holders() {
+		tok := f.Tokens[h.Token]
+		point, err := tok.Point(h.Label)
+		if err == nil {
+			var plain []byte
+			if plain, err = ecies.Unwrap(point, derive{tok, h.Label}, string(text), aad); err == nil {
+				return plain, nil
+			}
+		}
+		if !errors.Is(err, backend.ErrUnavailable) {
+			return nil, err
+		}
+		last = err
 	}
-	return ecies.Unwrap(point, derive{tok, v.Label}, string(text), aad)
+	return nil, last
 }
 
 type derive struct {
@@ -259,11 +296,17 @@ func (f *Face) failTokenErr(done func(int, string, string, bool), err error) {
 func (f *Face) keyInfo(w http.ResponseWriter, name string, k config.Key) {
 	keys := map[string]any{}
 	for i, v := range k.Versions {
-		if point, err := f.tokenOf(v).Point(v.Label); err == nil {
+		if point, err := f.pointOf(v); err == nil {
 			keys[strconv.Itoa(i+1)] = map[string]any{"public_key": base64.StdEncoding.EncodeToString(point), "fingerprint": ecies.Fingerprint(point)}
 		}
 	}
-	state := f.tokenOf(k.Versions[len(k.Versions)-1]).State()
+	// the state of the best holder of the latest version
+	state := "absent"
+	for _, h := range k.Versions[len(k.Versions)-1].Holders() {
+		if st := f.Tokens[h.Token].State(); st == "ready" || state == "absent" {
+			state = st
+		}
+	}
 	reply(w, 200, map[string]any{"data": map[string]any{
 		"name": name, "type": "ecdh-es-p256", "latest_version": len(k.Versions), "min_decryption_version": 1,
 		"supports_encryption": true, "supports_decryption": true, "supports_derivation": k.AAD.Mode == "context",

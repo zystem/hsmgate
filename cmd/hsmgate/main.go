@@ -11,7 +11,9 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 
 	"golang.org/x/term"
 
@@ -46,12 +48,30 @@ func main() {
 		die(err)
 	}
 	if os.Args[1] == "check" {
+		for _, line := range s.Describe() {
+			fmt.Println(line)
+		}
 		fmt.Println("configuration ok")
 		return
 	}
 	if cfg.AdminSocket != "" {
 		go func() { die(s.ServeAdmin(cfg.AdminSocket)) }()
 	}
+	hup := make(chan os.Signal, 1)
+	signal.Notify(hup, syscall.SIGHUP)
+	go func() {
+		for range hup {
+			next, err := config.Load(*path)
+			if err == nil {
+				err = s.Reload(next)
+			}
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "hsmgate: reload refused, nothing changed:", err)
+			} else {
+				fmt.Fprintln(os.Stderr, "hsmgate: configuration reloaded")
+			}
+		}
+	}()
 	l, err := net.Listen("tcp", cfg.Listen)
 	if err != nil {
 		die(err)

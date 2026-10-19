@@ -95,3 +95,15 @@ func (p *Policy) Allowed(client, key string) bool {
 	}
 	return false
 }
+
+// Inherit takes over the counters of a policy that a reload replaces, so that a reload does not give a client a new budget.
+func (p *Policy) Inherit(old *Policy) {
+	old.mu.Lock()
+	defer old.mu.Unlock()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for k, w := range old.win {
+		c := *w
+		p.win[k] = &c
+	}
+}

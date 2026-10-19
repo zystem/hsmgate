@@ -286,3 +286,15 @@ func (p *PKCS11) Derive(label string, peer []byte) ([]byte, error) {
 	}
 	return a[0].Value, nil
 }
+
+// SetKeys replaces the label -> CKA_ID map (a reload that adds a key for a rotation). Public keys already read are kept for labels whose id did not change.
+func (p *PKCS11) SetKeys(keys map[string]string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for label := range p.points {
+		if keys[label] != p.cfg.Keys[label] {
+			delete(p.points, label)
+		}
+	}
+	p.cfg.Keys = keys
+}

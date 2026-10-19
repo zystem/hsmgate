@@ -18,9 +18,10 @@ type Unlocker interface {
 }
 
 // adminHandler: POST /unlock {"token": name, "pin": "..."} and GET /status. The door is the file mode of the socket; there is no other authentication.
-func adminHandler(tokens map[string]backend.Token, log *audit.Log) http.Handler {
+func adminHandler(current func() map[string]backend.Token, log *audit.Log) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /status", func(w http.ResponseWriter, r *http.Request) {
+		tokens := current()
 		st := map[string]string{}
 		names := []string{}
 		for n := range tokens {
@@ -38,7 +39,7 @@ func adminHandler(tokens map[string]backend.Token, log *audit.Log) http.Handler 
 			http.Error(w, "bad request", 400)
 			return
 		}
-		u, ok := tokens[b.Token].(Unlocker)
+		u, ok := current()[b.Token].(Unlocker)
 		ev := audit.Event{Client: "admin", Face: "admin", Key: b.Token, Op: "unlock"}
 		if !ok {
 			ev.Result = "not_lockable"

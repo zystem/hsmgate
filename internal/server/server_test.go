@@ -117,6 +117,35 @@ func TestMutualTLSAndIdentity(t *testing.T) {
 	if _, err := call(&good.cert, tls.VersionTLS12); err == nil {
 		t.Error("TLS 1.2 was accepted")
 	}
+
+	// a reload without a restart: the stranger is added to the policy
+	cfg2 := *cfg
+	cfg2.Clients = append(append([]config.Client{}, cfg.Clients...), config.Client{Name: "nobody", Identity: config.Identity{CN: "nobody"},
+		Keys: map[string]config.Grant{"bao-seal": {Ops: []string{"encrypt"}}}})
+	if err := s.Reload(&cfg2); err != nil {
+		t.Fatal(err)
+	}
+	if st, err := call(&stranger.cert, 0); err != nil || st != 200 {
+		t.Errorf("after the reload: %d %v", st, err)
+	}
+	// a configuration that names a token that does not exist is refused and changes nothing
+	bad := cfg2
+	bad.Tokens = nil
+	if err := s.Reload(&bad); err == nil {
+		t.Error("a broken reload was accepted")
+	}
+	if st, err := call(&good.cert, 0); err != nil || st != 200 {
+		t.Errorf("after the refused reload: %d %v", st, err)
+	}
+	// a replica that holds another key is refused
+	other := filepath.Join(dir, "k2")
+	os.WriteFile(other, []byte(strings.Repeat("22", 32)), 0o600)
+	cfg3 := cfg2
+	cfg3.Tokens = append(append([]config.Token{}, cfg.Tokens...), config.Token{Name: "spare", Type: "soft", Keys: map[string]string{"m": other}})
+	cfg3.Keys = map[string]config.Key{"bao-seal": {AAD: config.AAD{Mode: "fixed"}, Versions: []config.Version{{Token: "soft", Label: "m", Replicas: []config.Replica{{Token: "spare", Label: "m"}}}}}}
+	if err := s.Reload(&cfg3); err == nil || !strings.Contains(err.Error(), "different key") {
+		t.Errorf("replica with another key: %v", err)
+	}
 }
 
 func TestInsecureOnlyOnLoopback(t *testing.T) {

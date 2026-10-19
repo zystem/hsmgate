@@ -54,9 +54,22 @@ type Key struct {
 	MaxBytes int       `yaml:"max_bytes"`
 }
 
+// Version is one version of a key. Replicas are other tokens that hold the same key (a spare card made from a DKEK backup): they are tried, in order,
+// when the first token cannot answer; their public key must be the same, or the configuration is refused.
 type Version struct {
+	Token    string    `yaml:"token"`
+	Label    string    `yaml:"label"`
+	Replicas []Replica `yaml:"replicas"`
+}
+
+type Replica struct {
 	Token string `yaml:"token"`
 	Label string `yaml:"label"`
+}
+
+// Holders lists the primary and then the replicas.
+func (v Version) Holders() []Replica {
+	return append([]Replica{{v.Token, v.Label}}, v.Replicas...)
 }
 
 // AAD says how the additional data of the AEAD is made. Mode "fixed": a constant for the key, no context accepted (OpenBao's seal sends none;
@@ -122,12 +135,14 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("key %s: no versions", name)
 		}
 		for i, v := range k.Versions {
-			t, ok := tokens[v.Token]
-			if !ok {
-				return fmt.Errorf("key %s version %d: unknown token %q", name, i+1, v.Token)
-			}
-			if _, ok := t.Keys[v.Label]; !ok {
-				return fmt.Errorf("key %s version %d: token %s has no key %q", name, i+1, v.Token, v.Label)
+			for _, h := range v.Holders() {
+				t, ok := tokens[h.Token]
+				if !ok {
+					return fmt.Errorf("key %s version %d: unknown token %q", name, i+1, h.Token)
+				}
+				if _, ok := t.Keys[h.Label]; !ok {
+					return fmt.Errorf("key %s version %d: token %s has no key %q", name, i+1, h.Token, h.Label)
+				}
 			}
 		}
 		switch k.AAD.Mode {

@@ -40,6 +40,7 @@ type rig struct {
 	audit *bytes.Buffer
 	vec   vec
 	cfg   *config.Config
+	face  *Face
 }
 
 func newRig(t *testing.T, mutate func(*config.Config, map[string]backend.Token)) *rig {
@@ -87,7 +88,7 @@ func newRig(t *testing.T, mutate func(*config.Config, map[string]backend.Token))
 		Identify: func(r *http.Request) (string, bool) { c := r.Header.Get("X-Test-Client"); return c, c != "" }}
 	s := httptest.NewServer(face)
 	t.Cleanup(s.Close)
-	return &rig{t, s, buf, v, cfg}
+	return &rig{t, s, buf, v, cfg, face}
 }
 
 func (r *rig) call(client, method, path string, body any) (int, map[string]any, http.Header) {
@@ -256,5 +257,63 @@ func TestAuditNeverHoldsSecrets(t *testing.T) {
 	log := r.audit.String()
 	if log == "" || strings.Contains(log, "topsecretvalue") || strings.Contains(log, b64("topsecretvalue")) || strings.Contains(log, ct[10:30]) {
 		t.Errorf("audit: %s", log)
+	}
+}
+
+// A spare card: the same key on another token. When the first holder cannot answer, the next one does; a text that is bad is bad on every holder.
+func TestReplicaAnswersWhenThePrimaryIsLocked(t *testing.T) {
+	r := newRig(t, func(c *config.Config, tk map[string]backend.Token) {
+		tk["spare"] = tk["soft"]             // the same key, as a second card restored from the backup
+		tk["soft"] = lockedToken{tk["soft"]} // the first card is locked
+		c.Keys["bao-seal"] = config.Key{AAD: config.AAD{Mode: "fixed"},
+			Versions: []config.Version{{Token: "soft", Label: "m1", Replicas: []config.Replica{{Token: "spare", Label: "m1"}}}}}
+	})
+	_, out, _ := r.call("openbao", "PUT", "/v1/transit/encrypt/bao-seal", map[string]string{"plaintext": b64("k")})
+	ct, _ := data(out)["ciphertext"].(string)
+	st, out, _ := r.call("openbao", "PUT", "/v1/transit/decrypt/bao-seal", map[string]string{"ciphertext": ct})
+	if st != 200 || data(out)["plaintext"] != b64("k") {
+		t.Fatalf("%d %v", st, out)
+	}
+	// damaged text: not retried elsewhere, final
+	if st, _, h := r.call("openbao", "PUT", "/v1/transit/decrypt/bao-seal", map[string]string{"ciphertext": "vault:v1:" + b64("ecies1.x")}); st != 400 || h.Get("X-Hsmgate-Retryable") != "false" {
+		t.Errorf("damaged: %d", st)
+	}
+	// both holders locked: retryable
+	r2 := newRig(t, func(c *config.Config, tk map[string]backend.Token) {
+		tk["spare"] = lockedToken{tk["soft"]}
+		tk["soft"] = lockedToken{tk["soft"]}
+		c.Keys["bao-seal"] = config.Key{AAD: config.AAD{Mode: "fixed"},
+			Versions: []config.Version{{Token: "soft", Label: "m1", Replicas: []config.Replica{{Token: "spare", Label: "m1"}}}}}
+	})
+	if st, _, h := r2.call("openbao", "PUT", "/v1/transit/decrypt/bao-seal", map[string]string{"ciphertext": ct}); st != 503 || h.Get("X-Hsmgate-Retryable") != "true" {
+		t.Errorf("both locked: %d", st)
+	}
+}
+
+// Rotation through Reload: a new version is added, new encrypts use it, the old texts still open, rewrap moves them.
+func TestRotationWithReload(t *testing.T) {
+	r := newRig(t, nil)
+	f := r.face
+	_, out, _ := r.call("openbao", "PUT", "/v1/transit/encrypt/rot", map[string]string{"plaintext": b64("secret")})
+	old := data(out)["ciphertext"].(string)
+	cfg2 := *f.Cfg
+	cfg2.Keys = map[string]config.Key{}
+	for k, v := range f.Cfg.Keys {
+		cfg2.Keys[k] = v
+	}
+	cfg2.Keys["rot"] = config.Key{AAD: config.AAD{Mode: "fixed", Fixed: "x"}, Versions: []config.Version{{Token: "soft", Label: "m1"}, {Token: "soft", Label: "m2"}}}
+	pol := policy.New(&cfg2)
+	pol.Inherit(f.Policy)
+	f.Reload(&cfg2, f.Tokens, pol)
+	_, out, _ = r.call("openbao", "PUT", "/v1/transit/encrypt/rot", map[string]string{"plaintext": b64("new")})
+	if ct := data(out)["ciphertext"].(string); !strings.HasPrefix(ct, "vault:v2:") {
+		t.Errorf("new encrypt not on v2: %s", ct[:12])
+	}
+	if st, out, _ := r.call("openbao", "PUT", "/v1/transit/decrypt/rot", map[string]string{"ciphertext": old}); st != 200 || data(out)["plaintext"] != b64("secret") {
+		t.Errorf("old text: %d %v", st, out)
+	}
+	_, out, _ = r.call("openbao", "PUT", "/v1/transit/rewrap/rot", map[string]string{"ciphertext": old})
+	if ct := data(out)["ciphertext"].(string); !strings.HasPrefix(ct, "vault:v2:") {
+		t.Errorf("rewrap: %v", out)
 	}
 }
