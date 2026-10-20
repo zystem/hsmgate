@@ -36,7 +36,7 @@ export AWS_ACCESS_KEY_ID=AKIDAPPAPPAPPAPP0001 AWS_SECRET_ACCESS_KEY="$(cat app.s
 aws kms encrypt --endpoint-url https://hsmgate.example:8443 --key-id alias/app --plaintext fileb://secret.txt --query CiphertextBlob --output text
 ```
 
-The CLI cannot present a client certificate, so this is the `no_cert` case.
+The CLI cannot present a client certificate, so this is the `no_cert` case. Tried (aws CLI 1.45): `encrypt`, `decrypt`, `generate-data-key` and `describe-key` against a local service with the client above.
 
 ## boto3 (can present a client certificate)
 
