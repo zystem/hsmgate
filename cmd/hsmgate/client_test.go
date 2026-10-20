@@ -308,8 +308,8 @@ func TestDecryptIndividualFiles(t *testing.T) {
 	vol := secretVolume(t, fieldsOf(t, out))
 	dst := t.TempDir()
 	code, _, e := dec(t, addr, "", "-context-prefix", "k8s/shop/files/",
-		"-file", filepath.Join(vol, "a")+"="+filepath.Join(dst, "conf", "nested", "a.txt"),
-		"-file", filepath.Join(vol, "c"), "-out-dir", filepath.Join(dst, "out"))
+		"-in-file", filepath.Join(vol, "a")+"="+filepath.Join(dst, "conf", "nested", "a.txt"),
+		"-in-file", filepath.Join(vol, "c"), "-out-dir", filepath.Join(dst, "out"))
 	if code != 0 {
 		t.Fatalf("%d %s", code, e)
 	}
@@ -326,7 +326,7 @@ func TestDecryptIndividualFiles(t *testing.T) {
 	_, out, _ = enc(t, addr, "x", "-k8s", "shop/elsewhere/d")
 	bad := writeFiles(t, map[string][]byte{"d": []byte(ciphertextFromManifest(t, out))})
 	dst2 := t.TempDir()
-	code, _, e = dec(t, addr, "", "-context-prefix", "k8s/shop/files/", "-file", filepath.Join(vol, "a")+"="+filepath.Join(dst2, "a"), "-file", filepath.Join(bad, "d")+"="+filepath.Join(dst2, "d"))
+	code, _, e = dec(t, addr, "", "-context-prefix", "k8s/shop/files/", "-in-file", filepath.Join(vol, "a")+"="+filepath.Join(dst2, "a"), "-in-file", filepath.Join(bad, "d")+"="+filepath.Join(dst2, "d"))
 	if code != 1 || !strings.Contains(e, "d:") {
 		t.Fatalf("%d %s", code, e)
 	}
@@ -350,34 +350,34 @@ func TestDirectoryAndFileModesAreChecked(t *testing.T) {
 		"-in-dir without -k8s":         {"-in-dir", src},
 		"-in-dir with -context":        {"-in-dir", src, "-k8s", "shop/s", "-context", "x"},
 		"-in with -in-dir":             {"-in", "-", "-in-dir", src, "-k8s", "shop/s"},
-		"-in with -file":               {"-in", "-", "-file", filepath.Join(src, "ok"), "-k8s", "shop/s"},
-		"-file without -k8s":           {"-file", filepath.Join(src, "ok")},
+		"-in with -in-file":            {"-in", "-", "-in-file", filepath.Join(src, "ok"), "-k8s", "shop/s"},
+		"-in-file without -k8s":        {"-in-file", filepath.Join(src, "ok")},
 	} {
 		if code, _, _ := enc(t, addr, "", args...); code != 2 {
 			t.Errorf("encrypt %s: exit %d", name, code)
 		}
 	}
 	for name, args := range map[string][]string{
-		"-in with -in-dir":     {"-in", "-", "-in-dir", "/y", "-out-dir", "/z", "-context-prefix", "k8s/a/"},
-		"-in with -file":       {"-file", "/x", "-in", "-", "-context-prefix", "k8s/a/"},
-		"-file with no place":  {"-file", "/x", "-context-prefix", "k8s/a/"},
-		"-file with no prefix": {"-file", "/x=/y"},
+		"-in with -in-dir":        {"-in", "-", "-in-dir", "/y", "-out-dir", "/z", "-context-prefix", "k8s/a/"},
+		"-in with -in-file":       {"-in-file", "/x", "-in", "-", "-context-prefix", "k8s/a/"},
+		"-in-file with no place":  {"-in-file", "/x", "-context-prefix", "k8s/a/"},
+		"-in-file with no prefix": {"-in-file", "/x=/y"},
 	} {
 		if code, _, _ := dec(t, addr, "", args...); code != 2 {
 			t.Errorf("decrypt %s: exit %d", name, code)
 		}
 	}
-	if code, _, e := dec(t, addr, "", "-file", "/no/such/file=/tmp/x", "-context-prefix", "k8s/a/"); code != 1 || !strings.Contains(e, "no such file") {
+	if code, _, e := dec(t, addr, "", "-in-file", "/no/such/file=/tmp/x", "-context-prefix", "k8s/a/"); code != 1 || !strings.Contains(e, "no such file") {
 		t.Errorf("a missing source: %d %s", code, e)
 	}
 }
 
-// -in-dir and -file mean the same in both commands and can be given together; "=TARGET" is the other side: the field name when sealing, the path when opening.
+// -in-dir and -in-file mean the same in both commands and can be given together; "=TARGET" is the other side: the field name when sealing, the path when opening.
 func TestInDirAndFileAreUniform(t *testing.T) {
 	addr := service(t)
 	dir := writeFiles(t, map[string][]byte{"from-dir": []byte("one")})
 	extra := writeFiles(t, map[string][]byte{"app.yaml": []byte("two"), "other": []byte("three")})
-	code, out, e := enc(t, addr, "", "-in-dir", dir, "-file", filepath.Join(extra, "app.yaml")+"=application.yaml", "-file", filepath.Join(extra, "other"), "-k8s", "shop/mixed")
+	code, out, e := enc(t, addr, "", "-in-dir", dir, "-in-file", filepath.Join(extra, "app.yaml")+"=application.yaml", "-in-file", filepath.Join(extra, "other"), "-k8s", "shop/mixed")
 	if code != 0 {
 		t.Fatalf("%d %s", code, e)
 	}
@@ -390,7 +390,7 @@ func TestInDirAndFileAreUniform(t *testing.T) {
 	vol2 := secretVolume(t, map[string]string{"application.yaml": fields["application.yaml"], "other": fields["other"]})
 	dst := t.TempDir()
 	code, _, e = dec(t, addr, "", "-context-prefix", "k8s/shop/mixed/", "-out-dir", filepath.Join(dst, "all"),
-		"-in-dir", vol, "-file", filepath.Join(vol2, "application.yaml")+"="+filepath.Join(dst, "etc", "app.yaml"), "-file", filepath.Join(vol2, "other"))
+		"-in-dir", vol, "-in-file", filepath.Join(vol2, "application.yaml")+"="+filepath.Join(dst, "etc", "app.yaml"), "-in-file", filepath.Join(vol2, "other"))
 	if code != 0 {
 		t.Fatalf("%d %s", code, e)
 	}
@@ -400,11 +400,11 @@ func TestInDirAndFileAreUniform(t *testing.T) {
 		}
 	}
 	// two sources for one field, or for one destination, are an error and nothing is done
-	if code, out, e := enc(t, addr, "", "-in-dir", dir, "-file", filepath.Join(extra, "other")+"=from-dir", "-k8s", "shop/mixed"); code != 1 || out != "" || !strings.Contains(e, "twice") {
+	if code, out, e := enc(t, addr, "", "-in-dir", dir, "-in-file", filepath.Join(extra, "other")+"=from-dir", "-k8s", "shop/mixed"); code != 1 || out != "" || !strings.Contains(e, "twice") {
 		t.Errorf("a field twice: %d %q %s", code, out, e)
 	}
 	dst2 := t.TempDir()
-	if code, _, e := dec(t, addr, "", "-context-prefix", "k8s/shop/mixed/", "-in-dir", vol, "-file", filepath.Join(vol2, "other")+"="+filepath.Join(dst2, "from-dir"), "-out-dir", dst2); code != 1 || !strings.Contains(e, "same place") {
+	if code, _, e := dec(t, addr, "", "-context-prefix", "k8s/shop/mixed/", "-in-dir", vol, "-in-file", filepath.Join(vol2, "other")+"="+filepath.Join(dst2, "from-dir"), "-out-dir", dst2); code != 1 || !strings.Contains(e, "same place") {
 		t.Errorf("a destination twice: %d %s", code, e)
 	}
 	if ents, _ := os.ReadDir(dst2); len(ents) != 0 {

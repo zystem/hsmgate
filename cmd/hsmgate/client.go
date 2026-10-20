@@ -58,7 +58,7 @@ func runEncrypt(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	in := fs.String("in", "-", "file with the value, or - for standard input (a terminal is asked without echo)")
 	inDir := fs.String("in-dir", "", "a directory of files, one value each; the file name is the field name")
 	var files fileList
-	fs.Var(&files, "file", "one file, SRC or SRC=FIELD (repeat for more): SRC holds the value, FIELD is the field name (default: the base name of SRC). With -in-dir and -file, -k8s NAMESPACE/SECRET prints one Secret manifest with a field per file")
+	fs.Var(&files, "in-file", "one file, SRC or SRC=FIELD (repeat for more): SRC holds the value, FIELD is the field name (default: the base name of SRC). With -in-dir and -in-file, -k8s NAMESPACE/SECRET prints one Secret manifest with a field per file")
 	raw := fs.Bool("raw", false, "keep a trailing newline of the input (by default one is removed)")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -71,7 +71,7 @@ func runEncrypt(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	})
 	if *inDir != "" || len(files) > 0 {
 		if explicitIn {
-			fmt.Fprintln(stderr, "hsmgate encrypt: -in (one value) cannot be combined with -in-dir or -file")
+			fmt.Fprintln(stderr, "hsmgate encrypt: -in (one value) cannot be combined with -in-dir or -in-file")
 			return 2
 		}
 		return encryptFiles(&c, *inDir, files, *k8s, *aadContext, *raw, stdout, stderr)
@@ -143,7 +143,7 @@ func validField(n string) bool {
 // source is one value to seal: the file that holds it and the name of its field.
 type source struct{ field, path string }
 
-// sealSources lists the files of -in-dir (every regular file that does not start with a dot) and -file; the same field name twice is an error.
+// sealSources lists the files of -in-dir (every regular file that does not start with a dot) and -in-file; the same field name twice is an error.
 func sourcesOf(dir string, files fileList, stderr io.Writer) ([]source, bool) {
 	var out []source
 	seen := map[string]string{}
@@ -184,7 +184,7 @@ func sourcesOf(dir string, files fileList, stderr io.Writer) ([]source, bool) {
 			path, field = f[:i], f[i+1:]
 		}
 		if path == "" {
-			fmt.Fprintf(stderr, "hsmgate encrypt: -file %q has no source\n", f)
+			fmt.Fprintf(stderr, "hsmgate encrypt: -in-file %q has no source\n", f)
 			return nil, false
 		}
 		if field == "" {
@@ -199,7 +199,7 @@ func sourcesOf(dir string, files fileList, stderr io.Writer) ([]source, bool) {
 func encryptFiles(c *common, dir string, files fileList, k8s, aadContext string, raw bool, stdout, stderr io.Writer) int {
 	p := strings.Split(k8s, "/")
 	if len(p) != 2 || p[0] == "" || p[1] == "" || aadContext != "" {
-		fmt.Fprintln(stderr, "hsmgate encrypt: -in-dir and -file need -k8s NAMESPACE/SECRET (and no -context): the context of a file is k8s/NAMESPACE/SECRET/<field>")
+		fmt.Fprintln(stderr, "hsmgate encrypt: -in-dir and -in-file need -k8s NAMESPACE/SECRET (and no -context): the context of a file is k8s/NAMESPACE/SECRET/<field>")
 		return 2
 	}
 	cl, err := c.client()
@@ -311,7 +311,7 @@ func runDecrypt(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	out := fs.String("out", "-", "where the value goes in single mode: a file, or - for standard output")
 	inDir := fs.String("in-dir", "", "directory of ciphertexts, one file each (a mounted Secret): the file name is the field name")
 	var files fileList
-	fs.Var(&files, "file", "one ciphertext file, SRC or SRC=DST (repeat for more): its context is the prefix followed by the base name of SRC; DST defaults to -out-dir/<base name of SRC>")
+	fs.Var(&files, "in-file", "one ciphertext file, SRC or SRC=DST (repeat for more): its context is the prefix followed by the base name of SRC; DST defaults to -out-dir/<base name of SRC>")
 	outDir := fs.String("out-dir", "", "directory for the values, one file each (directory and file modes)")
 	prefix := fs.String("context-prefix", "", "directory mode: the context of a file is this prefix followed by the file name, e.g. k8s/$(POD_NAMESPACE)/app-secrets/")
 	mode := fs.String("mode", "0440", "directory mode: permission bits of the files (octal); use 0440 with the group of the pod's fsGroup")
@@ -319,7 +319,7 @@ func runDecrypt(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return 2
 	}
 	if (*in != "") == (*inDir != "" || len(files) > 0) {
-		fmt.Fprintln(stderr, "hsmgate decrypt: give either -in (one ciphertext to standard output) or -in-dir and/or -file (several, to files)")
+		fmt.Fprintln(stderr, "hsmgate decrypt: give either -in (one ciphertext to standard output) or -in-dir and/or -in-file (several, to files)")
 		return 2
 	}
 	cl, err := c.client()
@@ -385,7 +385,7 @@ func (f *fileList) Set(v string) error { *f = append(*f, v); return nil }
 // job is one ciphertext file and where its value goes. name is the field name: it ends the context.
 type job struct{ name, src, dst string }
 
-// jobsOf lists what to open: the files of -in-dir (every regular file that does not start with a dot) and -file, as in `encrypt`. The same destination twice is an error.
+// jobsOf lists what to open: the files of -in-dir (every regular file that does not start with a dot) and -in-file, as in `encrypt`. The same destination twice is an error.
 func jobsOf(inDir, outDir string, files fileList, stderr io.Writer) ([]job, int) {
 	var jobs []job
 	seen := map[string]string{}
@@ -425,7 +425,7 @@ func jobsOf(inDir, outDir string, files fileList, stderr io.Writer) ([]job, int)
 			src, dst = f[:i], f[i+1:]
 		}
 		if src == "" || (dst == "" && outDir == "") {
-			fmt.Fprintf(stderr, "hsmgate decrypt: -file %q needs a source, and a destination or -out-dir\n", f)
+			fmt.Fprintf(stderr, "hsmgate decrypt: -in-file %q needs a source, and a destination or -out-dir\n", f)
 			return nil, 2
 		}
 		if dst == "" {
