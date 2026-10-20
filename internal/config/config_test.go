@@ -239,3 +239,25 @@ func TestMacRules(t *testing.T) {
 		t.Error("verify_mac on an ECDH key was accepted")
 	}
 }
+
+func TestKMSJSONKeyNames(t *testing.T) {
+	v := "versions: [{token: t, label: m}], aad: {mode: fixed}"
+	mk := func(name string) string {
+		return "kmsjson: {enabled: true}\ntokens: [{name: t, type: soft, keys: {m: /x}}]\nkeys:\n  \"" + name + "\": {kmsjson: true, " + v + "}\nclients:\n"
+	}
+	for _, ok := range []string{"etcd", "app-key_1.v2", strings.Repeat("a", 128)} {
+		if _, err := Parse([]byte(mk(ok))); err != nil {
+			t.Errorf("%q: %v", ok, err)
+		}
+	}
+	for _, bad := range []string{"a@1", "alias/x", "a:b", "a b", strings.Repeat("a", 129), "ключ"} {
+		if _, err := Parse([]byte(mk(bad))); err == nil {
+			t.Errorf("%q was accepted", bad)
+		}
+	}
+	// the Transit face keeps its freedom of names
+	plain := "tokens: [{name: t, type: soft, keys: {m: /x}}]\nkeys:\n  \"cinim shard/1\": {" + v + "}\nclients:\n"
+	if _, err := Parse([]byte(plain)); err != nil {
+		t.Errorf("a Transit-only key name: %v", err)
+	}
+}

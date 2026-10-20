@@ -360,6 +360,15 @@ func (c *Config) validateKMSJSON() error {
 		}
 	}
 	for name, k := range c.Keys {
+		if k.KMSJSON {
+			// the name is read back from a key id ("name", "alias/name", an identifier ending in ":key/name", "name@N") and written into ciphertext blobs with a length byte
+			if len(name) == 0 || len(name) > 128 || strings.Trim(name, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.-") != "" {
+				return fmt.Errorf("key %s: a key with kmsjson: true is named with 1 to 128 letters, digits, dots, dashes and underscores", name)
+			}
+			if len(k.Versions) > 1000 {
+				return fmt.Errorf("key %s: a key with kmsjson: true has at most 1000 versions", name)
+			}
+		}
 		if k.KMSJSONUsage != "" && !k.KMSJSON {
 			return fmt.Errorf("key %s: kmsjson_usage needs kmsjson: true", name)
 		}
