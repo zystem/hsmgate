@@ -33,7 +33,7 @@ wait_api() {
     $KC get nodes >/dev/null 2>&1 && return 0
     sleep 2
   done
-  echo "the API did not come back in 3 minutes" >&2
+  echo "the API did not come back in 3 minutes. Look at: journalctl -u k3s -n 40 --no-pager ; ss -ltnp | grep 6443" >&2
   return 1
 }
 
@@ -52,6 +52,8 @@ preflight() {
   say "datastore"; ls -la "$DB" 2>&1 | head || true
   say "tools"; for t in openssl curl systemctl; do if command -v $t >/dev/null; then echo "$t ok"; else echo "$t MISSING"; fi; done
   say "ports and sockets"
+  # tailscaled can take 6443 on the tailnet address while k3s is stopped, and then k3s cannot start ("address already in use")
+  if command -v tailscale >/dev/null && tailscale serve status 2>/dev/null | grep -q 6443; then echo "WARNING: tailscale serve has a rule for 6443: during a k3s restart tailscaled may take the port. Turn it off first (tailscale serve --tcp=6443 off)."; fi
   if ss -ltn 2>/dev/null | grep -q ":$PORT "; then echo "port $PORT is taken"; else echo "port $PORT free"; fi
   ls "$SOCK_DIR" 2>&1 | head -2 || true
 }
