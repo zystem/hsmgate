@@ -9,11 +9,14 @@
 #   tools/k3s-kms-test.sh verify             a Secret is stored as a KMS envelope; health of the KMS provider
 #   tools/k3s-kms-test.sh rotate             a second key version in hsmgate (reload), a new Secret is written after the apiserver saw the new key_id
 #   tools/k3s-kms-test.sh outage             stops hsmgate for 30 s: the provider must fail its health check; a Secret write may still work (the apiserver reuses a cached DEK); then it must recover
+#   tools/k3s-kms-test.sh locked             (CARD=1) hsmgate restarts WITHOUT the PIN file: the token is locked, the card is not asked for a PIN; looks at health, then restores the PIN file
 #   tools/k3s-kms-test.sh restart-outage     stops hsmgate and the plug-in, restarts k3s (the apiserver starts with its KMS provider unreachable), looks at health, reads and writes, then brings them back
 #   tools/k3s-kms-test.sh disable            identity first, restart, REWRITE every Secret, then remove the provider and the units
 #
 # Why `disable` rewrites the Secrets: anything written while the provider was first is stored under it and is unreadable without the plug-in.
 # The software key is for a test: the cluster's Secrets are sealed under a key in a file on the same node.
+# CARD=1 (with CARD_KEY_ID=<CKA_ID hex>, CARD_PIN_FILE=<file>, CARD_LABEL=<token label>) uses a PKCS#11 token instead: the same EC key as another service may use, under the key name k8s-etcd.
+# The PIN file is read by hsmgate itself (once at each start); this script never reads or prints it. `rotate` needs a second key and is not available with CARD=1.
 set -euo pipefail
 [ "$(id -u)" = 0 ] || { echo "run as root on the k3s node" >&2; exit 1; }
 
@@ -72,6 +75,22 @@ backup() {
 }
 
 write_config() { # $1 = number of key versions (1 or 2)
+  if [ "${CARD:-0}" = 1 ]; then
+    [ "$1" = 1 ] || { echo "rotate needs a second key: not available with CARD=1" >&2; return 1; }
+    : "${CARD_KEY_ID:?CARD_KEY_ID}" "${CARD_PIN_FILE:?CARD_PIN_FILE}"
+    {
+      echo "listen: 127.0.0.1:$PORT"
+      echo "tls: {cert: $D/certs/srv.pem, key: $D/certs/srv.key, client_ca: $D/certs/ca.pem}"
+      echo "audit: {file: $D/audit.log}"
+      echo "tokens: [{name: card, type: pkcs11, module: /usr/lib/x86_64-linux-gnu/opensc-pkcs11.so, token_label: ${CARD_LABEL:-cinim}, pin_file: $CARD_PIN_FILE, keys: {m: $CARD_KEY_ID}}]"
+      echo "keys:"
+      echo "  k8s-etcd: {versions: [{token: card, label: m}], aad: {mode: fixed, fixed: \"k8s-kms/v1|k8s-etcd\"}}"
+      echo "clients:"
+      echo "  - {name: kube-kms, identity: {cn: kube-kms}, keys: {k8s-etcd: {ops: [encrypt, decrypt], per_minute: 600}}}"
+    } > $D/hsmgate.yaml
+    chmod 600 $D/hsmgate.yaml
+    return 0
+  fi
   if [ "$1" = 2 ] && [ ! -f $D/k2.hex ]; then openssl rand -hex 32 | tr -d '\n' > $D/k2.hex; chmod 600 $D/k2.hex; fi
   local keys="m: $D/k1.hex" versions="{token: soft, label: m}"
   if [ "$1" = 2 ]; then keys="m: $D/k1.hex, m2: $D/k2.hex"; versions="{token: soft, label: m}, {token: soft, label: m2}"; fi
@@ -125,7 +144,7 @@ do_install() {
     mkcert kms kube-kms "extendedKeyUsage=clientAuth"
     chmod 600 ./*.key
   )
-  if [ ! -f $D/k1.hex ]; then openssl rand -hex 32 | tr -d '\n' > $D/k1.hex; chmod 600 $D/k1.hex; fi
+  if [ "${CARD:-0}" != 1 ] && [ ! -f $D/k1.hex ]; then openssl rand -hex 32 | tr -d '\n' > $D/k1.hex; chmod 600 $D/k1.hex; fi
   write_config 1
   install_units
   systemctl daemon-reload; systemctl enable --now hsmgate-test.service; sleep 2; systemctl enable --now vkk-test.service; sleep 3
@@ -187,7 +206,31 @@ outage() {
   $KC -n kms-test create secret generic kms-after-outage --from-literal=a=b && echo "writes work again"
 }
 
+locked() {
+  set +e +o pipefail   # the commands below are expected to fail while the provider is down: look at their output, do not stop on it
+  [ "${CARD:-0}" = 1 ] || { echo "locked needs CARD=1" >&2; exit 1; }
+  cp $D/hsmgate.yaml $D/hsmgate.yaml.with-pin
+  sed -i 's# pin_file: [^,]*,##' $D/hsmgate.yaml
+  echo "pin_file lines in the config now: $(grep -c pin_file $D/hsmgate.yaml || true)"
+  say "restarting hsmgate without the PIN file"
+  systemctl restart hsmgate-test; sleep 3
+  hg /v1/transit/keys/k8s-etcd | grep -o '"token_state":"[a-z]*"'
+  say "waiting 80 s for the apiserver to poll Status (the probe needs a decrypt)"; sleep 80
+  $KC --request-timeout=15s get --raw='/readyz?verbose' 2>&1 | grep -iE "kms-providers" | head -2 | cut -c1-80
+  say "a write and a read of an existing Secret while the token is locked"
+  if $KC --request-timeout=15s -n kms-test create secret generic kms-locked-write --from-literal=a=b 2>&1; then echo "the write worked (cached DEK)"; else echo "the write failed"; fi
+  $KC --request-timeout=15s -n kms-test get secrets --no-headers 2>&1 | awk '{print $1}' | head -3
+  say "the PIN file is back: hsmgate restarts and logs in"
+  mv $D/hsmgate.yaml.with-pin $D/hsmgate.yaml
+  systemctl restart hsmgate-test; sleep 3
+  hg /v1/transit/keys/k8s-etcd | grep -o '"token_state":"[a-z]*"'
+  for i in $(seq 1 40); do $KC --request-timeout=5s get --raw=/readyz >/dev/null 2>&1 && break; sleep 3; done
+  $KC get --raw='/readyz?verbose' 2>&1 | grep -i kms-providers | cut -c1-60
+  $KC -n kms-test delete secret kms-locked-write --ignore-not-found >/dev/null 2>&1 || true
+}
+
 restart_outage() {
+  set +e +o pipefail   # the commands below are expected to fail while the provider is down: look at their output, do not stop on it
   say "before: the Secrets written under the provider (from verify) must read"
   $KC --request-timeout=15s -n kms-test get secrets --no-headers 2>&1 | awk '{print $1}' | head -3
   say "stopping the plug-in and hsmgate, then restarting k3s"
@@ -237,6 +280,7 @@ case "${1:-}" in
   rotate) rotate ;;
   outage) outage ;;
   restart-outage) restart_outage ;;
+  locked) locked ;;
   disable) do_disable ;;
   *) sed -n '2,16p' "$0"; exit 2 ;;
 esac
