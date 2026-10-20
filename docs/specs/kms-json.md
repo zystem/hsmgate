@@ -61,4 +61,4 @@ Rules checked at load: a `kmsjson` key must be `aad.mode: fixed`; `derive` needs
 
 ## 6. Tests
 
-Unit tests per package; a server test with both faces on one mTLS listener; `test/kmsjson-sdk` builds the real binary and calls it with the official Go SDK (shared secret equals local ECDH, versions, listings, error codes, wrong secret, unknown access key, unsupported operation). It runs in CI.
+Unit tests per package; a server test with both faces on one mTLS listener; `test/kmsjson-sdk` builds the real binary and calls it with the official Go SDK (shared secret equals local ECDH, versions, listings, error codes, wrong secret, unknown access key, unsupported operation). `test/kmsjson-boto3` does the same with the vendor's Python SDK (a second, independent client). Both run in CI.
