@@ -1,6 +1,6 @@
 # Kubernetes KMS v2 (etcd encryption by the card)
 
-**Status: served through a plug-in, verified with a gRPC client; a native gRPC face is not built.**
+**Status: served through a plug-in; verified with a gRPC client and with a real kube-apiserver (k3s v1.36.5) using a software key; not yet with a card; a native gRPC face is not built.**
 
 Kubernetes can encrypt Secrets in etcd with a key it does not hold: `kube-apiserver` calls a *KMS plug-in* over a local gRPC socket, and the plug-in sends the apiserver's data keys to a key service. hsmgate is that key service; the key is on the card. There are two ways to connect them. Only the first exists.
 
@@ -50,7 +50,7 @@ What the plaintext is: a data-encryption key (DEK) of the apiserver, 32 bytes. T
 | `Decrypt` | `PUT transit/decrypt/{key}` `{"ciphertext"}` | `plaintext` |
 | (the plug-in's own token upkeep) | `GET auth/token/lookup-self` at start and every `-token-refresh-interval` (default 60 s) | a failure there is logged; at start it is fatal |
 
-Every `Status` the apiserver polls therefore costs hsmgate **one `encrypt`, one `decrypt` (an ECDH on the card) and one `keys` read**. That is how a locked or absent card shows up as a failing healthz in the apiserver, which is the point, but it also means the probe needs the card unlocked and counts against the rate of the client.
+Every `Status` the apiserver polls therefore costs hsmgate **one `encrypt`, one `decrypt` (an ECDH on the card) and two `keys` reads** (seen in the audit as `keys, encrypt, keys, decrypt` within about 6 ms). That is how a locked or absent card shows up as a failing healthz in the apiserver, which is the point, but it also means the probe needs the card unlocked and counts against the rate of the client.
 
 `annotations` are not used. The plug-in sends no `context`, so the hsmgate key must be in `fixed` mode, with a constant of its own (for example `k8s-kms/v1|k8s-etcd`).
 
@@ -74,9 +74,9 @@ clients:
 - **Start.** The plug-in calls `lookup-self` first. A client certificate the policy does not know gets `403` and the plug-in exits: fail at the start, not at the first Secret.
 - **Locked card.** `Encrypt` works (public key only); `Decrypt` fails with 503 until an operator unlocks, and so does the health probe, so `Status` answers `healthz "err"` and the apiserver's health check fails. A restarted apiserver cannot read its Secrets during that time. Keep the card unlocked (`pin_file`, or `hsmgate unlock` after each start) and see [../operations.md](../operations.md).
 - **Rotation.** Add a version to the key, reload (`SIGHUP`). `latest_version` becomes `2`; the plug-in's next `Encrypt` returns `key_id "2"`, which tells the apiserver the data under `"1"` is stale; old ciphertexts (`vault:v1:`) still decrypt. Do not retire the old key while any stored data is on `v1`.
-- **Rate.** The apiserver caches DEKs, so `Encrypt` and `Decrypt` calls are few, but `Status` is polled (the apiserver polls about once a minute when healthy and faster when not; that interval is the apiserver's, not checked here) and each poll is the three calls above. Set `per_minute` with room for that and for a restart (the example says 600).
+- **Rate.** The apiserver caches DEKs, so `Encrypt` and `Decrypt` calls are few, but `Status` is polled (about **once a minute** while healthy: measured in the audit of a real apiserver, one probe at the same second of every minute; the interval when unhealthy was not measured) and each poll is the three calls above. Set `per_minute` with room for that and for a restart (the example says 600).
 
-**Checked.** The plug-in was started against hsmgate (plain HTTP and then mTLS) and a gRPC client for `k8s.io/kms/apis/v2` called `Status` (`version v2`, `healthz ok`, `key_id "1"`), `Encrypt` and `Decrypt`; the plaintext came back and the audit shows `keys`, `encrypt`, `decrypt` for the client. A client certificate unknown to the policy made the plug-in exit at the start. The mapping above was then read from the plug-in's source (`pkg/plugin/plugin_v2.go`, `pkg/vault/transit.go`), which corrected an earlier guess that `Status` only reads the token. **Not checked**: a real `kube-apiserver` with an `EncryptionConfiguration`, a rotation under a running cluster, the card behind the plug-in.
+**Checked.** The plug-in was started against hsmgate (plain HTTP and then mTLS) and a gRPC client for `k8s.io/kms/apis/v2` called `Status` (`version v2`, `healthz ok`, `key_id "1"`), `Encrypt` and `Decrypt`; the plaintext came back and the audit shows `keys`, `encrypt`, `decrypt` for the client. A client certificate unknown to the policy made the plug-in exit at the start. The mapping above was then read from the plug-in's source (`pkg/plugin/plugin_v2.go`, `pkg/vault/transit.go`), which corrected an earlier guess that `Status` only reads the token. **Checked on a real cluster** (2026-10-20, single-node k3s v1.36.5 with `tools/k3s-kms-test.sh`; hsmgate with a software key and the plug-in as systemd units, mutual TLS between them, `EncryptionConfiguration` with `kms` v2 first and `identity` second): the apiserver reported `[+]kms-providers ok`; a Secret was read back through the API; its plaintext was not in the datastore and a `k8s:enc:kms:v2:hsmgate` envelope was; the audit showed the apiserver's calls as the client `kube-kms`. **Rotation**: after a second key version and a reload, the next Secret was sealed under `vault:v2:` while the earlier one stayed under `vault:v1:` and both were read through the API. **Not yet checked**: the card behind the plug-in, a locked card, a restart of the apiserver under load, an outage of hsmgate (the script's `outage` step; result below when run).
 
 ## 3. The way that does not exist: a native KMS v2 face
 
