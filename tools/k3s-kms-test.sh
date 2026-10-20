@@ -9,6 +9,7 @@
 #   tools/k3s-kms-test.sh verify             a Secret is stored as a KMS envelope; health of the KMS provider
 #   tools/k3s-kms-test.sh rotate             a second key version in hsmgate (reload), a new Secret is written after the apiserver saw the new key_id
 #   tools/k3s-kms-test.sh outage             stops hsmgate for 30 s: the provider must fail its health check; a Secret write may still work (the apiserver reuses a cached DEK); then it must recover
+#   tools/k3s-kms-test.sh restart-outage     stops hsmgate and the plug-in, restarts k3s (the apiserver starts with its KMS provider unreachable), looks at health, reads and writes, then brings them back
 #   tools/k3s-kms-test.sh disable            identity first, restart, REWRITE every Secret, then remove the provider and the units
 #
 # Why `disable` rewrites the Secrets: anything written while the provider was first is stored under it and is unreadable without the plug-in.
@@ -186,6 +187,34 @@ outage() {
   $KC -n kms-test create secret generic kms-after-outage --from-literal=a=b && echo "writes work again"
 }
 
+restart_outage() {
+  say "before: the Secrets written under the provider (from verify) must read"
+  $KC --request-timeout=15s -n kms-test get secrets --no-headers 2>&1 | awk '{print $1}' | head -3
+  say "stopping the plug-in and hsmgate, then restarting k3s"
+  systemctl stop vkk-test hsmgate-test
+  # `systemctl restart k3s` does not return while the provider is unreachable (k3s is Type=notify and its Secret cache cannot list the Secrets stored under the provider):
+  # observed on k3s v1.36.5. So the restart is started in the background, and the script looks at the API, which does answer, then starts the services.
+  systemctl restart --no-block k3s
+  for i in $(seq 1 60); do $KC --request-timeout=5s get --raw=/livez >/dev/null 2>&1 && break; sleep 3; done
+  echo "(the API answered /livez after about $((i*3)) s)"
+  say "health while the provider is unreachable"
+  $KC --request-timeout=15s get --raw='/readyz?verbose' 2>&1 | grep -iE "kms|ready|healthz check failed" | head -3
+  say "reading a Secret that was written under the provider (needs a decrypt; the apiserver has no cached DEK after a restart)"
+  $KC --request-timeout=15s -n kms-test get secrets 2>&1 | head -3
+  say "reading a Secret that is not under the provider (kube-system, written before the provider was enabled)"
+  $KC --request-timeout=15s -n kube-system get secrets --no-headers 2>&1 | head -2 | cut -c1-120
+  say "writing a new Secret"
+  if $KC --request-timeout=15s -n kms-test create secret generic kms-down-write --from-literal=a=b 2>&1; then echo "the write worked"; else echo "the write failed"; fi
+  say "bringing hsmgate and the plug-in back"
+  systemctl start hsmgate-test; sleep 3; systemctl start vkk-test
+  for i in $(seq 1 40); do $KC --request-timeout=5s get --raw=/readyz >/dev/null 2>&1 && break; sleep 3; done
+  echo "(readyz ok after about $((i*3)) s)"
+  $KC get --raw='/readyz?verbose' 2>&1 | grep -i kms
+  say "after: the Secrets read again"
+  $KC --request-timeout=15s -n kms-test get secrets --no-headers 2>&1 | awk '{print $1}' | head -5
+  $KC -n kms-test delete secret kms-down-write --ignore-not-found >/dev/null 2>&1 || true
+}
+
 do_disable() {
   [ -f "$DROPIN" ] || echo "(drop-in not there)"
   enc_config identity-first; systemctl restart k3s; wait_api
@@ -207,6 +236,7 @@ case "${1:-}" in
   verify) verify ;;
   rotate) rotate ;;
   outage) outage ;;
+  restart-outage) restart_outage ;;
   disable) do_disable ;;
   *) sed -n '2,16p' "$0"; exit 2 ;;
 esac
