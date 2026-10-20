@@ -110,6 +110,20 @@ func (c *call) crypto(op string, body []byte) {
 	}
 }
 
+// knownAlgorithms are the names the cloud service has for its other key types: asked for one of them, the answer is the one that service gives for a key of another type
+// (InvalidKeyUsageException); any other string is a malformed request.
+var knownAlgorithms = map[string]bool{"RSAES_OAEP_SHA_1": true, "RSAES_OAEP_SHA_256": true, "SM2PKE": true, "SYMMETRIC_DEFAULT": true,
+	"RSASSA_PKCS1_V1_5_SHA_256": true, "RSASSA_PKCS1_V1_5_SHA_384": true, "RSASSA_PKCS1_V1_5_SHA_512": true, "RSASSA_PSS_SHA_256": true, "RSASSA_PSS_SHA_384": true,
+	"RSASSA_PSS_SHA_512": true, "ECDSA_SHA_256": true, "ECDSA_SHA_384": true, "ECDSA_SHA_512": true, "SM2DSA": true}
+
+func (c *call) badAlgorithm(field, given string) {
+	if knownAlgorithms[given] {
+		c.refuse(400, "InvalidKeyUsageException", "Algorithm "+given+" is incompatible with the key", "bad_algorithm", false)
+		return
+	}
+	c.refuse(400, "ValidationException", field+" is not a known algorithm", "bad_request", false)
+}
+
 func okAlgorithm(a string) bool { return a == "" || a == algorithm }
 
 // target finds the key of an id for an operation and judges the request: the key is enabled for the face with the usage encrypt_decrypt, the client has the right and the budget,
@@ -293,7 +307,7 @@ func b64(b []byte) string { return base64.StdEncoding.EncodeToString(b) }
 
 func (c *call) encrypt(req cryptoReq) {
 	if !okAlgorithm(req.EncryptionAlgorithm) {
-		c.refuse(400, "ValidationException", "EncryptionAlgorithm must be "+algorithm, "bad_request", false)
+		c.badAlgorithm("EncryptionAlgorithm", req.EncryptionAlgorithm)
 		return
 	}
 	name, ver, key, aad, ok := c.target(req.KeyID, 0, "encrypt", req.EncryptionContext)
@@ -344,7 +358,7 @@ func (c *call) source(blob []byte, id string, ctx map[string]string) (name strin
 
 func (c *call) decrypt(req cryptoReq) {
 	if !okAlgorithm(req.EncryptionAlgorithm) {
-		c.refuse(400, "ValidationException", "EncryptionAlgorithm must be "+algorithm, "bad_request", false)
+		c.badAlgorithm("EncryptionAlgorithm", req.EncryptionAlgorithm)
 		return
 	}
 	name, ver, key, text, aad, ok := c.source(req.CiphertextBlob, req.KeyID, req.EncryptionContext)
@@ -365,7 +379,7 @@ func (c *call) decrypt(req cryptoReq) {
 
 func (c *call) reencrypt(req cryptoReq) {
 	if !okAlgorithm(req.SourceEncryptionAlgorithm) || !okAlgorithm(req.DestinationEncryptionAlgorithm) {
-		c.refuse(400, "ValidationException", "the encryption algorithm must be "+algorithm, "bad_request", false)
+		c.badAlgorithm("EncryptionAlgorithm", req.SourceEncryptionAlgorithm+req.DestinationEncryptionAlgorithm)
 		return
 	}
 	if req.DestinationKeyID == "" {
@@ -402,7 +416,7 @@ func (c *call) reencrypt(req cryptoReq) {
 
 func (c *call) dataKey(op string, req cryptoReq) {
 	if !okAlgorithm(req.EncryptionAlgorithm) {
-		c.refuse(400, "ValidationException", "EncryptionAlgorithm must be "+algorithm, "bad_request", false)
+		c.badAlgorithm("EncryptionAlgorithm", req.EncryptionAlgorithm)
 		return
 	}
 	var n int
@@ -469,7 +483,7 @@ const maxMessage = 4096 // the limit of the cloud service for a message to sign;
 // digestOf makes the 32 bytes that ECDSA signs from a request: the SHA-256 of a RAW message, or a DIGEST as given. Only ECDSA_SHA_256 is served.
 func (c *call) digestOf(req cryptoReq) ([]byte, bool) {
 	if req.SigningAlgorithm != "ECDSA_SHA_256" {
-		c.refuse(400, "ValidationException", "SigningAlgorithm must be ECDSA_SHA_256", "bad_request", false)
+		c.badAlgorithm("SigningAlgorithm", req.SigningAlgorithm)
 		return nil, false
 	}
 	switch req.MessageType {

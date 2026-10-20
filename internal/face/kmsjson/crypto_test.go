@@ -400,7 +400,7 @@ func TestSignAndVerify(t *testing.T) {
 		t.Errorf("Sign a digest: %d %v", st, out)
 	}
 	for name, body := range map[string]map[string]any{
-		"algorithm":    {"KeyId": "sig", "Message": msg, "SigningAlgorithm": "RSASSA_PKCS1_V1_5_SHA_256"},
+		"algorithm":    {"KeyId": "sig", "Message": msg, "SigningAlgorithm": "NONSENSE"},
 		"short digest": {"KeyId": "sig", "Message": []byte("x"), "MessageType": "DIGEST", "SigningAlgorithm": "ECDSA_SHA_256"},
 		"empty":        {"KeyId": "sig", "SigningAlgorithm": "ECDSA_SHA_256"},
 		"too long":     {"KeyId": "sig", "Message": make([]byte, 4097), "SigningAlgorithm": "ECDSA_SHA_256"},
@@ -430,5 +430,22 @@ func TestSignNeedsTheRight(t *testing.T) {
 	// "reader" has no grant on the signing key: it looks like a key that does not exist
 	if st, out, _ := r.call("reader", "AKIDVIEWERVIEWER00", "Sign", map[string]any{"KeyId": "sig", "Message": []byte("m"), "SigningAlgorithm": "ECDSA_SHA_256"}, nil); st != 400 || typ(out) != "AccessDeniedException" {
 		t.Errorf("%d %v", st, out)
+	}
+}
+
+// An algorithm of another key type gets the answer the cloud service gives for it (checked against that service with RSA keys): InvalidKeyUsageException.
+func TestAlgorithmOfAnotherKeyType(t *testing.T) {
+	r := cryptoRig(t)
+	for op, body := range map[string]map[string]any{
+		"Sign":    {"KeyId": "sig", "Message": []byte("m"), "SigningAlgorithm": "RSASSA_PSS_SHA_256"},
+		"Encrypt": {"KeyId": "seal", "Plaintext": []byte("m"), "EncryptionAlgorithm": "RSAES_OAEP_SHA_256"},
+		"Decrypt": {"CiphertextBlob": []byte("m"), "EncryptionAlgorithm": "RSAES_OAEP_SHA_1"},
+	} {
+		if st, out := r.app(op, body); st != 400 || typ(out) != "InvalidKeyUsageException" {
+			t.Errorf("%s: %d %v", op, st, out)
+		}
+	}
+	if st, out := r.app("Encrypt", map[string]any{"KeyId": "seal", "Plaintext": []byte("m"), "EncryptionAlgorithm": "garbage"}); st != 400 || typ(out) != "ValidationException" {
+		t.Errorf("garbage: %d %v", st, out)
 	}
 }
