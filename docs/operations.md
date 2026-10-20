@@ -47,6 +47,10 @@ Enable it with `kmsjson: {enabled: true}` (a restart; a reload refuses to toggle
 
 Rotating a key of this face is adding a version (as in Transit): `Encrypt`, `GenerateDataKey`, `Sign` and `GenerateMac` use the latest version; `Decrypt` opens any (the blob names the version); `Verify` and `VerifyMac` try the latest and then the earlier versions, so what was made before the rotation still verifies (a client can ask for one version as `name@N`). A key signs, makes MACs or does ECDH, never two of them, and a token key may be used by one such key only. `kmsjson.mac_cache_seconds` keeps derived MAC keys in memory for that time; a reload clears them.
 
+## Metrics
+
+`GET /metrics` on the **admin socket** (mode 0600, no network port) gives the counters in the text format of Prometheus: `hsmgate_requests_total{face,op,result}` (every decision of the service, refused ones included; the same words as the `op` and `result` of the audit log), `hsmgate_audit_write_failures_total`, `hsmgate_token_state{token,state}` (1 for the state a token is in: ready, locked or absent), `hsmgate_gate_running` and `hsmgate_gate_waiting` (operations at the tokens and in line for them). No client, key or address is a label, so a peer cannot make new series. To scrape it, read the socket on the host: `curl --unix-socket /run/hsmgate/admin.sock http://x/metrics`, or run an exporter on the host that forwards it to the monitoring system. Alert on a token that is not ready, on a growing `hsmgate_gate_waiting`, on any `hsmgate_audit_write_failures_total` and on a rise of `result="bad_signature"` or `"unauthenticated"`.
+
 ## Several processes, several tokens
 
 One hsmgate process serves one configuration: several keys, several clients, several tokens (cards in one or more readers), each key version pointing at its holders. Several processes on a host take separate `listen` ports and admin sockets, and one card must not be opened

@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -23,6 +24,7 @@ import (
 	"github.com/zystem/hsmgate/internal/face/kmsjson"
 	"github.com/zystem/hsmgate/internal/face/transit"
 	"github.com/zystem/hsmgate/internal/gate"
+	"github.com/zystem/hsmgate/internal/metrics"
 	"github.com/zystem/hsmgate/internal/policy"
 )
 
@@ -46,6 +48,7 @@ type Server struct {
 	face  *transit.Face
 	kms   *kmsjson.Face // nil when the second face is off
 	gate  *gate.Gate
+	stats *metrics.Registry
 
 	mu  sync.RWMutex
 	gen *generation
@@ -81,6 +84,8 @@ func New(cfg *config.Config, auditOut io.Writer) (*Server, error) {
 	if wait == 0 {
 		wait = 2 * time.Second
 	}
+	s.stats = metrics.New()
+	s.audit.Observer = s.stats.Observe
 	s.gate = gate.New(conc, wait)
 	s.face.Limit(s.gate)
 	var handler http.Handler = s.face
@@ -401,4 +406,32 @@ func loadCreds(cfg *config.Config) (map[string]kmsjson.Cred, error) {
 		creds[c.SigV4.AccessKeyID] = kmsjson.Cred{Client: c.Name, Secret: sec, NoCert: c.SigV4.NoCert, From: from}
 	}
 	return creds, nil
+}
+
+// metricsHandler renders the counters and the state of the tokens and of the line to them, for the admin socket.
+func (s *Server) metricsHandler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var g []metrics.Gauge
+		tokens := s.Tokens()
+		names := make([]string, 0, len(tokens))
+		for n := range tokens {
+			names = append(names, n)
+		}
+		sort.Strings(names)
+		for _, n := range names {
+			state := tokens[n].State()
+			for _, st := range []string{"ready", "locked", "absent"} {
+				v := 0.0
+				if st == state {
+					v = 1
+				}
+				g = append(g, metrics.Gauge{Name: "hsmgate_token_state", Help: "1 for the state a token is in.", Labels: fmt.Sprintf("token=%q,state=%q", n, st), Value: v})
+			}
+		}
+		g = append(g,
+			metrics.Gauge{Name: "hsmgate_gate_running", Help: "Operations at the tokens now.", Value: float64(s.gate.Running())},
+			metrics.Gauge{Name: "hsmgate_gate_waiting", Help: "Operations waiting for their turn at the tokens.", Value: float64(s.gate.InLine())})
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+		s.stats.Write(w, g)
+	})
 }

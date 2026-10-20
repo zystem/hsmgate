@@ -20,9 +20,12 @@ type Unlocker interface {
 	State() string
 }
 
-// adminHandler: POST /unlock {"token": name, "pin": "..."} and GET /status. The door is the file mode of the socket; there is no other authentication.
-func adminHandler(current func() map[string]backend.Token, log *audit.Log) http.Handler {
+// adminHandler: POST /unlock {"token": name, "pin": "..."}, GET /status and GET /metrics (the counters in the text format of Prometheus). The door is the file mode of the socket; there is no other authentication.
+func adminHandler(current func() map[string]backend.Token, log *audit.Log, metrics http.Handler) http.Handler {
 	mux := http.NewServeMux()
+	if metrics != nil {
+		mux.Handle("GET /metrics", metrics)
+	}
 	mux.HandleFunc("GET /status", func(w http.ResponseWriter, r *http.Request) {
 		tokens := current()
 		st := map[string]string{}
@@ -98,6 +101,6 @@ func (s *Server) ServeAdmin(path string) error {
 		l.Close()
 		return err
 	}
-	srv := &http.Server{Handler: adminHandler(s.Tokens, s.audit), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 20 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 8 << 10}
+	srv := &http.Server{Handler: adminHandler(s.Tokens, s.audit, s.metricsHandler()), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 20 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 8 << 10}
 	return srv.Serve(l)
 }

@@ -24,6 +24,8 @@ type Log struct {
 	w      io.Writer
 	now    func() time.Time
 	failed bool
+	// Observer, when set, sees every event after it was written, with the error of the write (the metrics count them).
+	Observer func(Event, error)
 }
 
 func New(w io.Writer) *Log { return &Log{w: w, now: time.Now} }
@@ -36,6 +38,9 @@ func (l *Log) Write(e Event) error {
 	defer l.mu.Unlock()
 	_, err := l.w.Write(append(b, '\n'))
 	l.failed = err != nil
+	if l.Observer != nil {
+		l.Observer(e, err)
+	}
 	return err
 }
 
