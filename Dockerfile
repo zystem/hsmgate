@@ -14,7 +14,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends opensc-pkcs11 l
  && useradd --system --uid 10001 --user-group --home-dir /nonexistent --shell /usr/sbin/nologin hsmgate
 COPY --from=build /out/hsmgate /usr/local/bin/hsmgate
 LABEL org.opencontainers.image.source="https://github.com/zystem/hsmgate" \
-      org.opencontainers.image.description="hsmgate: a policy-checked network door in front of a key token (Transit API)" \
+      org.opencontainers.image.description="hsmgate: a policy-checked network door in front of a key token (Transit API, optional KMS-JSON API)" \
       org.opencontainers.image.licenses="MIT"
 USER 10001:10001
 EXPOSE 8443
