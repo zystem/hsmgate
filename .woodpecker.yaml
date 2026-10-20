@@ -46,7 +46,7 @@ steps:
       - mkdir -p dist
       - cp build/hsmgate dist/hsmgate-linux-amd64
       - sha256sum dist/hsmgate-linux-amd64 > dist/hsmgate-linux-amd64.sha256
-      - tar -czf dist/hsmgate-deploy.tar.gz LICENSE README.md deploy docs
+      - tar -czf dist/hsmgate-deploy.tar.gz LICENSE README.md api deploy docs
     depends_on:
       - build
     when:

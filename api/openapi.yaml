@@ -1,0 +1,370 @@
+openapi: 3.1.0
+info:
+  title: hsmgate (Transit API)
+  version: 0.1.2
+  summary: The Vault/OpenBao Transit subset that hsmgate serves in front of a PKCS#11 token.
+  description: |
+    hsmgate speaks the part of the HashiCorp Vault / OpenBao **Transit** API that OpenBao's `seal "transit"`, `vault-kubernetes-kms` and CiNim use.
+    See docs/transit-face.md for the design. Keys are named in the configuration of the service and live on the token; they are never created through this API.
+
+    **Authentication** is mutual TLS (TLS 1.3, a client certificate from the service's client CA). The client is the entry of the policy that the certificate matches
+    (URI SAN, SHA-256 pin or CN). A `X-Vault-Token` header is ignored. **Authorisation** is per client and key: operations, the allowed contexts, a rate limit. Deny by default:
+    a key the client has no grant for answers 403, like one that does not exist.
+
+    **Errors** are `{"errors": ["..."]}`. The header `X-Hsmgate-Retryable` says whether trying again later can help (`true` for a locked token, a busy queue, a rate limit; `false` for a bad request or ciphertext).
+    **Context**: a key is either `fixed` (the additional data is a constant of the key and a request with a `context` is refused: what OpenBao's seal needs) or `context` (the `context` is required, must begin with one of the key's allowed prefixes, and is the additional data).
+  license:
+    name: MIT
+    identifier: MIT
+servers:
+  - url: https://hsmgate.example.org:8443
+    description: Replace with the address of your service. `transit` is the default mount; `transit.mount` in the configuration changes it.
+security:
+  - mtls: []
+tags:
+  - {name: transit, description: Encrypt, decrypt and rewrap data keys under a key that is on the token}
+  - {name: compat, description: Calls that existing Vault clients make around Transit}
+paths:
+  /v1/sys/health:
+    get:
+      tags: [compat]
+      operationId: health
+      summary: Is the service up
+      description: Does not touch the token and needs no client in the policy (the TLS handshake already needs a certificate of the client CA). Use `keys/{name}` for the state of the token.
+      responses:
+        '200':
+          description: Up
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  initialized: {type: boolean}
+                  sealed: {type: boolean}
+                  standby: {type: boolean}
+                  version: {type: string}
+  /v1/auth/token/lookup-self:
+    get:
+      tags: [compat]
+      operationId: tokenLookupSelf
+      summary: A token that never expires, for clients that look at theirs
+      description: A token is never an authentication here. A client the policy knows gets a fixed answer (`ttl` and `creation_ttl` 0), so that clients do not try to renew. A certificate the policy does not know gets 403, so that such a client fails at its start.
+      responses:
+        '200':
+          description: The client is known
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      id: {type: string}
+                      ttl: {type: integer}
+                      creation_ttl: {type: integer}
+                      renewable: {type: boolean}
+                      policies: {type: array, items: {type: string}}
+        '403': {$ref: '#/components/responses/Forbidden'}
+  /v1/auth/token/renew-self:
+    post:
+      tags: [compat]
+      operationId: tokenRenewSelf
+      summary: Renewal of that token (a fixed answer)
+      responses:
+        '200':
+          description: The client is known
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  auth:
+                    type: object
+                    properties:
+                      client_token: {type: string}
+                      lease_duration: {type: integer}
+                      renewable: {type: boolean}
+        '403': {$ref: '#/components/responses/Forbidden'}
+  /v1/transit/keys/{name}:
+    get:
+      tags: [transit]
+      operationId: readKey
+      summary: Public keys and state of a key
+      description: Never touches the token (the public keys are cached) apart from reading them after a session was lost. Any grant on the key allows it; it has a small budget of its own (120 a minute per client and key).
+      parameters:
+        - {$ref: '#/components/parameters/name'}
+      responses:
+        '200':
+          description: The key
+          headers:
+            X-Request-Id: {$ref: '#/components/headers/RequestId'}
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      name: {type: string}
+                      type: {type: string, const: ecdh-es-p256}
+                      latest_version: {type: integer, minimum: 1}
+                      min_decryption_version: {type: integer}
+                      supports_encryption: {type: boolean}
+                      supports_decryption: {type: boolean}
+                      supports_derivation: {type: boolean, description: True for a key in `context` mode}
+                      supports_signing: {type: boolean, const: false}
+                      token_state: {type: string, enum: [ready, locked, absent], description: State of the best holder of the latest version}
+                      keys:
+                        type: object
+                        description: Version number to public key
+                        additionalProperties:
+                          type: object
+                          properties:
+                            public_key: {type: string, contentEncoding: base64, description: 'The 65-byte uncompressed P-256 point'}
+                            fingerprint: {type: string, description: 'SHA-256 of the DER SubjectPublicKeyInfo, hex'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '429': {$ref: '#/components/responses/Throttled'}
+        '503': {$ref: '#/components/responses/Unavailable'}
+  /v1/transit/encrypt/{name}:
+    put:
+      tags: [transit]
+      operationId: encryptPut
+      summary: Seal a data key under the latest version of the key
+      description: Needs the public key only, so it works while the token is locked (it needs the token again after a lost session, to be sure of the key).
+      parameters:
+        - {$ref: '#/components/parameters/name'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/EncryptRequest'}
+      responses:
+        '200':
+          description: Sealed
+          headers:
+            X-Request-Id: {$ref: '#/components/headers/RequestId'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CiphertextResponse'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '413': {$ref: '#/components/responses/TooLarge'}
+        '429': {$ref: '#/components/responses/Throttled'}
+        '503': {$ref: '#/components/responses/Unavailable'}
+    post:
+      tags: [transit]
+      operationId: encryptPost
+      summary: Same as PUT
+      parameters:
+        - {$ref: '#/components/parameters/name'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/EncryptRequest'}
+      responses:
+        '200':
+          description: Sealed
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CiphertextResponse'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '413': {$ref: '#/components/responses/TooLarge'}
+        '429': {$ref: '#/components/responses/Throttled'}
+        '503': {$ref: '#/components/responses/Unavailable'}
+  /v1/transit/decrypt/{name}:
+    put:
+      tags: [transit]
+      operationId: decryptPut
+      summary: Open a sealed data key (ECDH on the token)
+      description: Needs the token logged in. A locked token answers 503 with `X-Hsmgate-Retryable true`; a text that is damaged, for another key or another context answers 400 with `false`.
+      parameters:
+        - {$ref: '#/components/parameters/name'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/DecryptRequest'}
+      responses:
+        '200':
+          description: Opened
+          headers:
+            X-Request-Id: {$ref: '#/components/headers/RequestId'}
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      plaintext: {type: string, contentEncoding: base64}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '413': {$ref: '#/components/responses/TooLarge'}
+        '429': {$ref: '#/components/responses/Throttled'}
+        '503': {$ref: '#/components/responses/Unavailable'}
+    post:
+      tags: [transit]
+      operationId: decryptPost
+      summary: Same as PUT
+      parameters:
+        - {$ref: '#/components/parameters/name'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/DecryptRequest'}
+      responses:
+        '200':
+          description: Opened
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      plaintext: {type: string, contentEncoding: base64}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '413': {$ref: '#/components/responses/TooLarge'}
+        '429': {$ref: '#/components/responses/Throttled'}
+        '503': {$ref: '#/components/responses/Unavailable'}
+  /v1/transit/rewrap/{name}:
+    put:
+      tags: [transit]
+      operationId: rewrapPut
+      summary: Open a sealed data key and seal it again under the latest version, without the plaintext leaving the service
+      description: The operation of a key rotation. Needs the `rewrap` operation in the grant.
+      parameters:
+        - {$ref: '#/components/parameters/name'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/DecryptRequest'}
+      responses:
+        '200':
+          description: Sealed again
+          headers:
+            X-Request-Id: {$ref: '#/components/headers/RequestId'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CiphertextResponse'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '413': {$ref: '#/components/responses/TooLarge'}
+        '429': {$ref: '#/components/responses/Throttled'}
+        '503': {$ref: '#/components/responses/Unavailable'}
+    post:
+      tags: [transit]
+      operationId: rewrapPost
+      summary: Same as PUT
+      parameters:
+        - {$ref: '#/components/parameters/name'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/DecryptRequest'}
+      responses:
+        '200':
+          description: Sealed again
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CiphertextResponse'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '413': {$ref: '#/components/responses/TooLarge'}
+        '429': {$ref: '#/components/responses/Throttled'}
+        '503': {$ref: '#/components/responses/Unavailable'}
+components:
+  securitySchemes:
+    mtls:
+      type: mutualTLS
+      description: TLS 1.3 with a client certificate from the service's client CA; the policy maps the certificate to a client.
+  parameters:
+    name:
+      name: name
+      in: path
+      required: true
+      description: The name of a key of the configuration
+      schema: {type: string}
+  headers:
+    RequestId:
+      description: The request id (the `X-Request-Id` of the request if it is made of letters, digits, `-`, `_`, `.`; else a generated one). It is in the audit log.
+      schema: {type: string}
+    Retryable:
+      description: '`true` if trying again later can help'
+      schema: {type: string, enum: ['true', 'false']}
+    RetryAfter:
+      description: Seconds
+      schema: {type: string}
+  schemas:
+    EncryptRequest:
+      type: object
+      required: [plaintext]
+      properties:
+        plaintext: {type: string, contentEncoding: base64, description: 'The data key, 1 byte up to the key''s `max_bytes` (8192 by default)'}
+        context: {type: string, contentEncoding: base64, description: 'Required for a key in `context` mode (at most 1024 bytes, beginning with an allowed prefix); refused for a key in `fixed` mode'}
+    DecryptRequest:
+      type: object
+      required: [ciphertext]
+      properties:
+        ciphertext: {type: string, description: 'As returned by encrypt: `vault:v<version>:<base64>`'}
+        context: {type: string, contentEncoding: base64, description: Same rule as for encrypt}
+    CiphertextResponse:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            ciphertext: {type: string, examples: ['vault:v1:ZWNpZXMxLi4u']}
+            key_version: {type: integer, minimum: 1}
+    Errors:
+      type: object
+      properties:
+        errors: {type: array, items: {type: string}}
+  responses:
+    BadRequest:
+      description: The request, the context or the ciphertext is not acceptable. Not retryable.
+      headers:
+        X-Hsmgate-Retryable: {$ref: '#/components/headers/Retryable'}
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Errors'}
+    Forbidden:
+      description: No client certificate that the policy knows, no grant for this key or operation, or no such key (the same answer for all three)
+      headers:
+        X-Hsmgate-Retryable: {$ref: '#/components/headers/Retryable'}
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Errors'}
+    TooLarge:
+      description: The request body is larger than the key allows
+      headers:
+        X-Hsmgate-Retryable: {$ref: '#/components/headers/Retryable'}
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Errors'}
+    Throttled:
+      description: The rate limit of this client and key is spent
+      headers:
+        Retry-After: {$ref: '#/components/headers/RetryAfter'}
+        X-Hsmgate-Retryable: {$ref: '#/components/headers/Retryable'}
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Errors'}
+    Unavailable:
+      description: The token is locked or not there, the queue to the token is full, or the audit log cannot be written. Retryable.
+      headers:
+        Retry-After: {$ref: '#/components/headers/RetryAfter'}
+        X-Hsmgate-Retryable: {$ref: '#/components/headers/Retryable'}
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Errors'}

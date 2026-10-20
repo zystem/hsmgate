@@ -24,5 +24,5 @@ cp deploy/hsmgate.example.yaml hsmgate.yaml    # edit: certificates, token, clie
 ./hsmgate unlock -config hsmgate.yaml -token card
 ```
 
-Docs: [transit-face.md](docs/transit-face.md) (the API), [operations.md](docs/operations.md) (unlock, rotation, spare card, lost card), [threat-model.md](docs/threat-model.md),
+Docs: [transit-face.md](docs/transit-face.md) (the API; [OpenAPI spec](api/openapi.yaml)), [operations.md](docs/operations.md) (unlock, rotation, spare card, lost card), [threat-model.md](docs/threat-model.md),
 [tokens/smartcard-hsm.md](docs/tokens/smartcard-hsm.md), [project-plan.md](docs/project-plan.md). Deployment: [deploy/](deploy/) (systemd unit; Docker: `Dockerfile` in the root and [deploy/docker/compose.yaml](deploy/docker/compose.yaml), see [Running in Docker](docs/operations.md)). One card means one machine or VM with the reader, not a scheduler.

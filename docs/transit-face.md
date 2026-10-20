@@ -68,3 +68,17 @@ Not run: a real kube-apiserver, mTLS between the plugin and hsmgate (the plugin 
 hsmgate with `tls:` (TLS 1.3, client certificate required, identity by CN), test CA made with openssl, soft token. **vault-kubernetes-kms v1.4.0** (`VAULT_CACERT`, `VAULT_CLIENT_CERT`, `VAULT_CLIENT_KEY`): `Status`/`Encrypt`/`Decrypt` through its gRPC socket worked.
 **OpenBao v2.6.1** (`seal "transit"` with `tls_ca_cert`, `tls_client_cert`, `tls_client_key`): init, a secret, restart, auto-unseal, secret read back. The audit names the clients `kms` and `openbao` by certificate.
 A certificate from the CA that the policy does not know is refused at `auth/token/lookup-self` (403), so the plugin exits at its start with "failed to connect"; with no certificate the TLS handshake fails. Not run: a real kube-apiserver, the card behind mTLS, certificate reload on SIGHUP (not implemented yet).
+
+## OpenAPI (Swagger)
+
+The API is described in [api/openapi.yaml](../api/openapi.yaml) (OpenAPI 3.1, with the `mutualTLS` security scheme). It is a contract, not decoration: `internal/face/transit/openapi_test.go` checks that the spec lists the routes the service has and that
+every answer the handler gives in its test scenarios (200, 400, 403, 413, 429, 503) is documented for that operation, with `X-Hsmgate-Retryable` and `Retry-After`.
+
+hsmgate does **not** serve a Swagger UI or the spec itself: the service answers only clients with a certificate of its CA, and a documentation page does not belong behind that door. To read the spec as a page, run a Swagger UI on your machine
+(not tried here), for example:
+
+```bash
+docker run --rm -p 8081:8080 -e SWAGGER_JSON=/spec/openapi.yaml -v "$PWD/api":/spec:ro swaggerapi/swagger-ui
+```
+
+"Try it out" from a browser will not reach the service (it needs a client certificate); use `curl --cert --key --cacert` as in the examples of this page. The spec is also in the release archive `hsmgate-deploy.tar.gz`.
