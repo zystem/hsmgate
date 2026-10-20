@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -19,7 +20,9 @@ import (
 	"github.com/zystem/hsmgate/internal/authn"
 	"github.com/zystem/hsmgate/internal/backend"
 	"github.com/zystem/hsmgate/internal/config"
+	"github.com/zystem/hsmgate/internal/face/kmsjson"
 	"github.com/zystem/hsmgate/internal/face/transit"
+	"github.com/zystem/hsmgate/internal/gate"
 	"github.com/zystem/hsmgate/internal/policy"
 )
 
@@ -27,6 +30,7 @@ import (
 const maxDrain = 10 * time.Minute
 
 type generation struct {
+	creds  map[string]kmsjson.Cred // the signing credentials of the second face, by access key id
 	cfg    *config.Config
 	tokens map[string]backend.Token
 	auth   *authn.Authenticator
@@ -40,6 +44,8 @@ type Server struct {
 
 	audit *audit.Log
 	face  *transit.Face
+	kms   *kmsjson.Face // nil when the second face is off
+	gate  *gate.Gate
 
 	mu  sync.RWMutex
 	gen *generation
@@ -75,8 +81,20 @@ func New(cfg *config.Config, auditOut io.Writer) (*Server, error) {
 	if wait == 0 {
 		wait = 2 * time.Second
 	}
-	s.face.Limit(conc, wait)
-	s.HTTP = &http.Server{Addr: cfg.Listen, Handler: s.face, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, MaxHeaderBytes: 16 << 10}
+	s.gate = gate.New(conc, wait)
+	s.face.Limit(s.gate)
+	var handler http.Handler = s.face
+	if cfg.KMSJSON.Enabled {
+		s.kms = &kmsjson.Face{Cfg: cfg, Tokens: gen.tokens, Policy: gen.pol, Audit: s.audit, Creds: gen.creds, Gate: s.gate, Created: time.Now()}
+		handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if kmsjson.IsKMSJSON(r) {
+				s.kms.ServeHTTP(w, r)
+				return
+			}
+			s.face.ServeHTTP(w, r)
+		})
+	}
+	s.HTTP = &http.Server{Addr: cfg.Listen, Handler: handler, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, MaxHeaderBytes: 16 << 10}
 	if cfg.InsecureLoopbackClient != "" {
 		if !loopback(cfg.Listen) {
 			closeTokens(gen.tokens)
@@ -84,10 +102,16 @@ func New(cfg *config.Config, auditOut io.Writer) (*Server, error) {
 		}
 		who := cfg.InsecureLoopbackClient
 		s.face.Identify = func(*http.Request) (string, bool) { return who, true }
+		if s.kms != nil {
+			s.kms.Identify = func(*http.Request) (string, bool) { return "", true } // no certificate: the client is the one of the credential
+		}
 		s.Insecure = true
 		return s, nil
 	}
 	s.face.Identify = identifier(gen.auth)
+	if s.kms != nil {
+		s.kms.Identify = identifier(gen.auth)
+	}
 	// the configuration of a connection is taken at its handshake, so a reload applies to the next connection (and requests are judged by the current CA anyway)
 	s.HTTP.TLSConfig = &tls.Config{GetConfigForClient: func(*tls.ClientHelloInfo) (*tls.Config, error) {
 		s.mu.RLock()
@@ -152,11 +176,15 @@ func (s *Server) prepare(cfg *config.Config, old *generation) (gen *generation, 
 		}
 		roots = tcfg.ClientCAs
 	}
+	creds, err := loadCreds(cfg)
+	if err != nil {
+		return nil, nil, fresh, err
+	}
 	var counters *policy.Counters
 	if old != nil {
 		counters = old.pol.Counters()
 	}
-	gen = &generation{cfg: cfg, tokens: tokens, auth: authn.New(cfg.Clients, roots), tlsCfg: tcfg, pol: policy.New(cfg, counters)}
+	gen = &generation{creds: creds, cfg: cfg, tokens: tokens, auth: authn.New(cfg.Clients, roots), tlsCfg: tcfg, pol: policy.New(cfg, counters)}
 	// a token is gone when no token of the new generation is the same physical token (by identity, not by name: a name can be given to another token)
 	removed = map[string]backend.Token{}
 	if old != nil {
@@ -229,6 +257,9 @@ func (s *Server) Reload(cfg *config.Config) error {
 	old := s.gen
 	s.mu.RUnlock()
 	oc := old.cfg
+	if cfg.KMSJSON.Enabled != oc.KMSJSON.Enabled {
+		return fmt.Errorf("kmsjson.enabled cannot change in a reload: restart")
+	}
 	if cfg.Listen != oc.Listen || cfg.AdminSocket != oc.AdminSocket || cfg.Audit.File != oc.Audit.File || cfg.Limits != oc.Limits || cfg.Transit.Mount != oc.Transit.Mount {
 		return fmt.Errorf("listen, admin_socket, audit.file, limits and transit.mount cannot change in a reload: restart")
 	}
@@ -241,6 +272,11 @@ func (s *Server) Reload(cfg *config.Config) error {
 	s.gen = gen
 	s.mu.Unlock()
 	waitOld := s.face.Reload(cfg, gen.tokens, gen.pol, identifier(gen.auth))
+	if s.kms != nil {
+		waitKMS := s.kms.Reload(cfg, gen.tokens, gen.pol, identifier(gen.auth), gen.creds)
+		waitFirst := waitOld
+		waitOld = func() { waitFirst(); waitKMS() }
+	}
 	// tokens the new configuration no longer uses are logged out when the requests that began with the old generation are done
 	go func() {
 		done := make(chan struct{})
@@ -337,4 +373,24 @@ func sameToken(a, b backend.Token) bool {
 	ia, oka := a.(interface{ Identity() any })
 	ib, okb := b.(interface{ Identity() any })
 	return oka && okb && ia.Identity() == ib.Identity()
+}
+
+// loadCreds reads the signing secrets of the clients that have a credential: each from its own file, which must be the kind of file a key is (owner, mode, size).
+func loadCreds(cfg *config.Config) (map[string]kmsjson.Cred, error) {
+	creds := map[string]kmsjson.Cred{}
+	for _, c := range cfg.Clients {
+		if c.SigV4 == nil {
+			continue
+		}
+		b, err := backend.ReadSecretFile(c.SigV4.SecretFile, 256)
+		if err != nil {
+			return nil, fmt.Errorf("client %s: sigv4.secret_file: %w", c.Name, err)
+		}
+		sec := []byte(strings.TrimSpace(string(b)))
+		if len(sec) < 20 {
+			return nil, fmt.Errorf("client %s: the signing secret is shorter than 20 bytes", c.Name)
+		}
+		creds[c.SigV4.AccessKeyID] = kmsjson.Cred{Client: c.Name, Secret: sec}
+	}
+	return creds, nil
 }

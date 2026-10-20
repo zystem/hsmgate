@@ -6,7 +6,7 @@ This page says what to take from the neighbours, what to change in the API, how 
 ## Revision 2026-10-19 (supersedes parts of sections 5, 8, 9)
 
 - Decided: Go, MIT, name `hsmgate`. CiNim's own protocol (v1) is **not carried over and no v2 native protocol is built for it**.
-- CiNim uses the **Vault/OpenBao Transit face**, see [transit-face.md](transit-face.md) (decided 2026-10-19; it replaces the AWS KMS choice made earlier the same day, which stays as the optional later face [specs/aws-kms.md](specs/aws-kms.md)). The service does the ECIES itself; named keys, a required context checked against policy, versions and `rewrap` map onto Transit.
+- CiNim uses the **Vault/OpenBao Transit face**, see [transit-face.md](transit-face.md) (decided 2026-10-19; it replaces the AWS KMS choice made earlier the same day, which became the second face [specs/kms-json.md](specs/kms-json.md)). The service does the ECIES itself; named keys, a required context checked against policy, versions and `rewrap` map onto Transit.
   The `hsm1` multi-recipient format and the native v2 API are dropped for the first release.
 - Section 8: P1 now contains the AWS KMS face spec and the `ecies1` vectors (done: `testdata/vectors/ecies1.json`, `internal/scheme/ecies`); P2 builds mTLS, policy, audit, the soft backend and the Transit operations (encrypt, decrypt, rewrap, keys); P4 "compat v1" is deleted and the native Kubernetes KMS v2 gRPC face is postponed (the `vault-kubernetes-kms` plugin already works through Transit, see transit-face.md); P7 is the client change described in transit-face.md.
 
@@ -15,7 +15,7 @@ This page says what to take from the neighbours, what to change in the API, how 
 - CiNim today: one KEK per shard wraps one DEK per organisation. New requirement: an organisation **may have its own KEK** (default: the shard's KEK). Up to about 30 organisations per KEK; several KEKs per server; several hsmgate instances per host;
   one hsmgate may serve more than one physical token.
 - Consequences for hsmgate: keys are addressed by name (alias) and each maps to (token, key id); a client's policy lists keys; a tenant's own KEK is simply another key (on the same token, another token, or another hsmgate) with its own grant.
-  Isolation between organisations with their own KEK is then by key, which makes the loss of server-side context checking (see awskms-face.md) matter less.
+  Isolation between organisations with their own KEK is then by key, which makes the loss of server-side context checking (see specs/kms-json.md) matter less.
 - Consequences for CiNim (its own task, not this project's): the DEK of an organisation records which KEK sealed it (`kek id` per tenant, not one for the shard); `kek_check` per KEK; `vaultKek()` becomes a lookup by tenant; moving a tenant to its own KEK is a rewrap of that DEK only.
 - A card holds roughly 70 EC keys at best (memory-bound, not a slot limit; vendor figures, not measured on our card).
 

@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/zystem/hsmgate/internal/config"
+	"github.com/zystem/hsmgate/internal/sigv4"
 )
 
 type ident struct {
@@ -245,5 +246,82 @@ func TestRefusedReloadChangesNothing(t *testing.T) {
 	pinned.Keys = map[string]config.Key{"bao-seal": {AAD: config.AAD{Mode: "fixed"}, Versions: []config.Version{{Token: "soft", Label: "m", Fingerprint: strings.Repeat("ab", 32)}}}}
 	if err := s.Reload(&pinned); err == nil || !strings.Contains(err.Error(), "pinned") {
 		t.Errorf("pin: %v", err)
+	}
+}
+
+// Both faces on one listener, behind the same mutual TLS: Transit by path, the other by its target header; credentials are read from files and change with a reload.
+func TestTheSecondFaceOnTheSameListener(t *testing.T) {
+	dir := t.TempDir()
+	ca := mk(t, "ca", nil, true, false)
+	srvCert := mk(t, "hsmgate", &ca, false, true)
+	good := mk(t, "openbao", &ca, false, false)
+	cfg := baseConfig(t, dir, ca, srvCert)
+	secretFile := filepath.Join(dir, "sigv4-secret")
+	os.WriteFile(secretFile, []byte("a-secret-for-signing-0123456789\n"), 0o600)
+	cfg.KMSJSON.Enabled = true
+	cfg.Keys["bao-seal"] = config.Key{KMSJSON: true, AAD: config.AAD{Mode: "fixed"}, Versions: cfg.Keys["bao-seal"].Versions}
+	cfg.Clients[0].SigV4 = &config.SigV4{AccessKeyID: "AKIDOPENBAOOPENBAO", SecretFile: secretFile}
+	cfg.Clients[0].Keys["bao-seal"] = config.Grant{Ops: []string{"encrypt", "decrypt", "derive"}}
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	s, err := New(cfg, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	l, _ := net.Listen("tcp", "127.0.0.1:0")
+	go s.Serve(l)
+	defer s.HTTP.Close()
+	pool := x509.NewCertPool()
+	pool.AddCert(ca.x)
+	cl := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool, Certificates: []tls.Certificate{good.cert}}}}
+	base := "https://" + l.Addr().String()
+	kms := func(op, body string, secret string) (int, string) {
+		req, _ := http.NewRequest("POST", base+"/", strings.NewReader(body))
+		req.Header.Set("X-Amz-Target", "TrentService."+op)
+		req.Header.Set("Content-Type", "application/x-amz-json-1.1")
+		sigv4.Sign(req, []byte(body), "AKIDOPENBAOOPENBAO", []byte(secret), "local", "kms", time.Now())
+		resp, err := cl.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(b)
+	}
+	secret := "a-secret-for-signing-0123456789"
+	st, out := kms("GetPublicKey", `{"KeyId":"bao-seal"}`, secret)
+	if st != 200 || !strings.Contains(out, `"KeyUsage":"KEY_AGREEMENT"`) {
+		t.Fatalf("GetPublicKey: %d %s", st, out)
+	}
+	// and Transit is served on the same port
+	req, _ := http.NewRequest("PUT", base+"/v1/transit/encrypt/bao-seal", strings.NewReader(`{"plaintext":"`+base64.StdEncoding.EncodeToString([]byte("k"))+`"}`))
+	if resp, err := cl.Do(req); err != nil || resp.StatusCode != 200 {
+		t.Errorf("Transit next to it: %v", err)
+	}
+	// the secret is read when the generation is made: a new file content changes who can sign, at the reload
+	os.WriteFile(secretFile, []byte("another-secret-for-signing-9876543210\n"), 0o600)
+	if st, _ := kms("GetPublicKey", `{"KeyId":"bao-seal"}`, secret); st != 200 {
+		t.Errorf("before the reload the old secret still works: %d", st)
+	}
+	if err := s.Reload(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if st, out := kms("GetPublicKey", `{"KeyId":"bao-seal"}`, secret); st != 400 || !strings.Contains(out, "InvalidSignatureException") {
+		t.Errorf("after the reload the old secret: %d %s", st, out)
+	}
+	if st, _ := kms("GetPublicKey", `{"KeyId":"bao-seal"}`, "another-secret-for-signing-9876543210"); st != 200 {
+		t.Errorf("after the reload the new secret: %d", st)
+	}
+	// a secret file that others can read stops the reload, and nothing changes
+	os.Chmod(secretFile, 0o644)
+	if err := s.Reload(cfg); err == nil {
+		t.Error("a world-readable secret file was accepted")
+	}
+	// the face cannot be switched on or off by a reload
+	off := *cfg
+	off.KMSJSON.Enabled = false
+	if err := s.Reload(&off); err == nil {
+		t.Error("kmsjson.enabled changed in a reload")
 	}
 }

@@ -26,6 +26,19 @@ steps:
       - event: pull_request
       - event: tag
 
+  kmsjson_sdk:
+    # the KMS-JSON face against the vendor's official Go SDK (a module of its own: test/kmsjson-sdk)
+    image: golang:1.26.9-bookworm
+    commands:
+      - git config --global --add safe.directory "$CI_WORKSPACE"
+      - cd test/kmsjson-sdk && go test -count=1 ./...
+    depends_on:
+      - test
+    when:
+      - event: push
+      - event: pull_request
+      - event: tag
+
   build:
     # cgo (the PKCS#11 binding): the binary is dynamic, so it is built where it will run: Debian bookworm
     image: golang:1.26.9-bookworm

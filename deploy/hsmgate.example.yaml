@@ -6,6 +6,8 @@ tls:
   client_ca: /etc/hsmgate/clients-ca.pem   # only certificates from this CA get past the handshake
 admin_socket: /run/hsmgate/admin.sock # unlock and status; mode 0600, a short path (unix sockets allow ~108 bytes)
 audit: {file: /var/log/hsmgate/audit.log}
+# optional second face (docs/specs/kms-json.md): ECDH for clients that sign requests; enabling it needs a restart
+# kmsjson: {enabled: true, region: local}
 
 tokens:
   - name: card
@@ -51,3 +53,9 @@ clients:
     identity: {cn: kube-kms}
     keys:
       k8s-etcd: {ops: [encrypt, decrypt], per_minute: 600}
+  # the KMS-JSON face (docs/specs/kms-json.md): needs `kmsjson: true` on the key (aad mode fixed) and a signing credential on the client
+  # - name: sealer
+  #   identity: {cn: sealer}
+  #   sigv4: {access_key_id: AKIDEXAMPLEEXAMPLE1, secret_file: /etc/hsmgate/sealer.sigv4}   # mode 0600, at least 20 bytes
+  #   keys:
+  #     ecdh-key: {ops: [derive], per_minute: 120}

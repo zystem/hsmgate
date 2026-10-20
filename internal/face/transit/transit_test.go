@@ -17,6 +17,7 @@ import (
 	"github.com/zystem/hsmgate/internal/audit"
 	"github.com/zystem/hsmgate/internal/backend"
 	"github.com/zystem/hsmgate/internal/config"
+	"github.com/zystem/hsmgate/internal/gate"
 	"github.com/zystem/hsmgate/internal/policy"
 )
 
@@ -439,7 +440,7 @@ func TestKeyInfoHasABudgetAndConcurrencyIsBounded(t *testing.T) {
 	}
 	// one slot, held: the next operation is told to come back later, not queued for ever
 	r2 := newRig(t, nil)
-	r2.face.Limit(1, 50*time.Millisecond)
+	r2.face.Limit(gate.New(1, 50*time.Millisecond))
 	block := make(chan struct{})
 	r2.face.Tokens["soft"] = slowToken{r2.face.Tokens["soft"], block}
 	body := map[string]string{"ciphertext": "vault:v1:" + b64("ecies1.x.y.z")}
@@ -454,7 +455,7 @@ func TestKeyInfoHasABudgetAndConcurrencyIsBounded(t *testing.T) {
 			resp.Body.Close()
 		}
 	}()
-	for i := 0; i < 200 && len(r2.face.sem) == 0; i++ { // wait until it really has the slot
+	for i := 0; i < 200 && r2.face.Gate().Running() == 0; i++ { // wait until it really has the slot
 		time.Sleep(5 * time.Millisecond)
 	}
 	st, _, h := r2.call("openbao", "PUT", "/v1/transit/decrypt/bao-seal", body)
@@ -475,7 +476,7 @@ func (s slowToken) Point(l string) ([]byte, error) { <-s.block; return s.Token.P
 // The line is finite: with the slot taken and the waiting places full, the next request is refused at once, not after the queue time.
 func TestAdmissionIsAFiniteLine(t *testing.T) {
 	r := newRig(t, nil)
-	r.face.Limit(1, 5*time.Second)
+	r.face.Limit(gate.New(1, 5*time.Second))
 	block := make(chan struct{})
 	r.face.Tokens["soft"] = slowToken{r.face.Tokens["soft"], block}
 	body, _ := json.Marshal(map[string]string{"ciphertext": "vault:v1:" + b64("ecies1.x.y.z")})
@@ -491,7 +492,7 @@ func TestAdmissionIsAFiniteLine(t *testing.T) {
 	wg.Add(2) // one runs, one waits: the line (2 places) is full
 	go send(&wg)
 	go send(&wg)
-	for i := 0; i < 400 && len(r.face.adm) < 2; i++ {
+	for i := 0; i < 400 && r.face.Gate().InLine() < 2; i++ {
 		time.Sleep(5 * time.Millisecond)
 	}
 	start := time.Now()

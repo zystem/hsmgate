@@ -19,6 +19,11 @@ type Config struct {
 	Transit                struct {
 		Mount string `yaml:"mount"`
 	} `yaml:"transit"`
+	// KMSJSON turns on the second face: a subset of the JSON API of cloud key services of the same name-shape (docs/specs/kms-json.md). It shares the listener with Transit.
+	KMSJSON struct {
+		Enabled bool   `yaml:"enabled"`
+		Region  string `yaml:"region"` // the region string of the credential scope that clients sign with; default "local"
+	} `yaml:"kmsjson"`
 	// AdminSocket is a unix socket (mode 0600) for unlock and status; unset: no admin door.
 	AdminSocket string `yaml:"admin_socket"`
 	// Limits bound the work that reaches the tokens at once (a card serves one operation at a time). Changing them needs a restart.
@@ -61,6 +66,9 @@ type Key struct {
 	Versions []Version `yaml:"versions"`
 	AAD      AAD       `yaml:"aad"`
 	MaxBytes int       `yaml:"max_bytes"`
+	// KMSJSON lets clients with the "derive" right use the key through the KMS-JSON face: ECDH with a key that stays on the token. That face has no context, so whoever may derive
+	// can open anything sealed to the key: such a key must be in "fixed" mode (a key in context mode would lose the isolation of its contexts) and is best dedicated to this use.
+	KMSJSON bool `yaml:"kmsjson"`
 }
 
 // Version is one version of a key. Replicas are other tokens that hold the same key (a spare card made from a DKEK backup): they are tried, in order,
@@ -96,6 +104,13 @@ type Client struct {
 	Name     string           `yaml:"name"`
 	Identity Identity         `yaml:"identity"`
 	Keys     map[string]Grant `yaml:"keys"`
+	// SigV4 is the credential that this client signs its requests with on the KMS-JSON face (inside the same mutual TLS). The secret is read from a file (mode 0600), never from this file.
+	SigV4 *SigV4 `yaml:"sigv4"`
+}
+
+type SigV4 struct {
+	AccessKeyID string `yaml:"access_key_id"`
+	SecretFile  string `yaml:"secret_file"`
 }
 
 // Identity: any one that is set must match. URI is a URI SAN, SHA256 the hex SHA-256 of the certificate, CN the last resort.
@@ -263,7 +278,7 @@ func (c *Config) Validate() error {
 				return fmt.Errorf("client %s key %s: per_minute and per_day must be 0..%d (0 is no limit)", cl.Name, key, maxRate)
 			}
 			for _, op := range g.Ops {
-				if op != "encrypt" && op != "decrypt" && op != "rewrap" {
+				if op != "encrypt" && op != "decrypt" && op != "rewrap" && op != "derive" {
 					return fmt.Errorf("client %s key %s: unknown op %q", cl.Name, key, op)
 				}
 			}
@@ -275,6 +290,66 @@ func (c *Config) Validate() error {
 					return fmt.Errorf("client %s key %s: an empty context prefix would allow every context", cl.Name, key)
 				}
 			}
+		}
+	}
+	return c.validateKMSJSON()
+}
+
+// validateKMSJSON: the second face has rules of its own.
+func (c *Config) validateKMSJSON() error {
+	if c.KMSJSON.Region == "" {
+		c.KMSJSON.Region = "local"
+	}
+	for _, r := range c.KMSJSON.Region {
+		if !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '-') {
+			return fmt.Errorf("kmsjson.region must be lowercase letters, digits and dashes")
+		}
+	}
+	for name, k := range c.Keys {
+		if k.KMSJSON && k.AAD.Mode != "fixed" {
+			return fmt.Errorf("key %s: kmsjson needs aad mode fixed (that face has no context, so a key in context mode would lose the isolation of its contexts)", name)
+		}
+	}
+	akids := map[string]string{}
+	for _, cl := range c.Clients {
+		derives := false
+		for key, g := range cl.Keys {
+			for _, op := range g.Ops {
+				if op == "derive" {
+					derives = true
+					if !c.Keys[key].KMSJSON {
+						return fmt.Errorf("client %s key %s: the right derive needs kmsjson: true on the key", cl.Name, key)
+					}
+				}
+			}
+		}
+		if cl.SigV4 != nil {
+			a := cl.SigV4
+			if len(a.AccessKeyID) < 16 || len(a.AccessKeyID) > 128 || strings.Trim(a.AccessKeyID, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789") != "" {
+				return fmt.Errorf("client %s: sigv4.access_key_id must be 16 to 128 letters and digits", cl.Name)
+			}
+			if a.SecretFile == "" {
+				return fmt.Errorf("client %s: sigv4.secret_file is required", cl.Name)
+			}
+			if other, dup := akids[a.AccessKeyID]; dup {
+				return fmt.Errorf("clients %s and %s have the same sigv4.access_key_id", other, cl.Name)
+			}
+			akids[a.AccessKeyID] = cl.Name
+		}
+		if derives && cl.SigV4 == nil {
+			return fmt.Errorf("client %s: derive needs a sigv4 credential", cl.Name)
+		}
+		if cl.SigV4 != nil && !c.KMSJSON.Enabled {
+			return fmt.Errorf("client %s has a sigv4 credential but kmsjson.enabled is false", cl.Name)
+		}
+	}
+	if c.KMSJSON.Enabled {
+		any := false
+		for _, k := range c.Keys {
+			any = any || k.KMSJSON
+		}
+		if !any {
+			return fmt.Errorf("kmsjson.enabled but no key has kmsjson: true")
 		}
 	}
 	return nil

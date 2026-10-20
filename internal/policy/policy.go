@@ -146,3 +146,8 @@ func (p *Policy) ContextOK(client, key string, ctx []byte) bool {
 	}
 	return false
 }
+
+// CheckList spends the small budget of listing calls of a client (they touch no token).
+func (p *Policy) CheckList(client string) Decision {
+	return p.spend(client+"\x00list", MetaPerMinute, 0)
+}

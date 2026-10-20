@@ -9,18 +9,18 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 	"unicode/utf8"
 
 	"github.com/zystem/hsmgate/internal/audit"
 	"github.com/zystem/hsmgate/internal/backend"
 	"github.com/zystem/hsmgate/internal/config"
+	"github.com/zystem/hsmgate/internal/gate"
+	"github.com/zystem/hsmgate/internal/keyops"
 	"github.com/zystem/hsmgate/internal/policy"
 	"github.com/zystem/hsmgate/internal/scheme/ecies"
 )
@@ -36,20 +36,25 @@ type Face struct {
 	Identify Identify
 
 	mu    sync.RWMutex
-	sem   chan struct{} // operations that run on a token at once; nil: no bound
-	adm   chan struct{} // operations that run or wait (twice the above): a request beyond it is refused at once
-	queue time.Duration
-	track *tracker // requests of this generation that are in flight
+	gate  *gate.Gate // the line to the tokens, shared with the other face; nil: no bound
+	track *tracker   // requests of this generation that are in flight
 }
 
 // tracker counts the requests of one generation, so that a reload can tell when the tokens it dropped are no longer in use.
 type tracker struct{ wg sync.WaitGroup }
 
-// Limit bounds the operations that may run or wait for a token at once, and how long one waits for its turn.
-func (f *Face) Limit(concurrent int, wait time.Duration) {
+// Limit sets the line to the tokens. The same Gate may be given to another face.
+func (f *Face) Limit(g *gate.Gate) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.sem, f.adm, f.queue = make(chan struct{}, concurrent), make(chan struct{}, 2*concurrent), wait
+	f.gate = g
+}
+
+// Gate is the line to the tokens (nil if none was set).
+func (f *Face) Gate() *gate.Gate {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.gate
 }
 
 // Reload replaces the whole generation (configuration, tokens, policy and how clients are identified) at once for the requests that come after;
@@ -79,7 +84,7 @@ func (f *Face) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f.mu.Unlock()
 	}
 	f.mu.RLock()
-	g := &Face{Cfg: f.Cfg, Tokens: f.Tokens, Policy: f.Policy, Audit: f.Audit, Identify: f.Identify, sem: f.sem, adm: f.adm, queue: f.queue}
+	g := &Face{Cfg: f.Cfg, Tokens: f.Tokens, Policy: f.Policy, Audit: f.Audit, Identify: f.Identify, gate: f.gate}
 	t := f.track
 	if t != nil {
 		t.wg.Add(1) // under the read lock: Reload swaps the tracker under the write lock, so no request joins a generation that is being waited for
@@ -98,29 +103,12 @@ const (
 
 // acquire waits for a turn at the tokens; false means the caller was told to come back later.
 func (f *Face) acquire(w http.ResponseWriter, r *http.Request) (release func(), ok bool) {
-	if f.sem == nil {
-		return func() {}, true
-	}
-	// a finite line: at most concurrent operations run and concurrent more wait; the next one is refused without waiting at all
-	select {
-	case f.adm <- struct{}{}:
-	default:
+	release, ok = f.gate.Take(r.Context())
+	if !ok {
 		w.Header().Set("Retry-After", "2")
 		fail(w, 503, "busy", true)
-		return nil, false
 	}
-	t := time.NewTimer(f.queue)
-	defer t.Stop()
-	select {
-	case f.sem <- struct{}{}:
-		return func() { <-f.sem; <-f.adm }, true
-	case <-t.C:
-	case <-r.Context().Done():
-	}
-	<-f.adm
-	w.Header().Set("Retry-After", "2")
-	fail(w, 503, "busy", true)
-	return nil, false
+	return release, ok
 }
 
 func (f *Face) serve(w http.ResponseWriter, r *http.Request) {
@@ -346,27 +334,7 @@ func (f *Face) aadOf(client, name string, k config.Key, ctx *string) (aad []byte
 }
 
 // pointOf is the public key of a version, from the first holder that answers.
-func (f *Face) pointOf(v config.Version) ([]byte, error) {
-	var last error
-	for _, h := range v.Holders() {
-		pt, err := f.Tokens[h.Token].Point(h.Label)
-		if err == nil {
-			if err = pinned(v, pt); err == nil {
-				return pt, nil
-			}
-		}
-		last = err
-	}
-	return nil, last
-}
-
-// pinned: a version with a fingerprint is served only by holders of that key. A card that was swapped for another one is "unavailable", not trusted.
-func pinned(v config.Version, point []byte) error {
-	if v.Fingerprint != "" && !strings.EqualFold(v.Fingerprint, ecies.Fingerprint(point)) {
-		return fmt.Errorf("%w: the holder's key is not the pinned one", backend.ErrUnavailable)
-	}
-	return nil
-}
+func (f *Face) pointOf(v config.Version) ([]byte, error) { return keyops.PointOf(f.Tokens, v) }
 
 func (f *Face) seal(k config.Key, plain, aad []byte) (string, int, error) {
 	ver := len(k.Versions)
@@ -402,7 +370,7 @@ func (f *Face) open(k config.Key, ct string, aad []byte) ([]byte, error) {
 		tok := f.Tokens[h.Token]
 		point, err := tok.Point(h.Label)
 		if err == nil {
-			err = pinned(k.Versions[n-1], point)
+			err = keyops.Pinned(k.Versions[n-1], point)
 		}
 		if err == nil {
 			var plain []byte

@@ -41,6 +41,10 @@ The spare card needs its own PIN entry (`hsmgate unlock -token spare`) and sits 
 2. Restore the key onto a new card from the DKEK backup and the shares (they are kept apart from the card and from the PIN). Add it as a token and as a replica (or replace the first holder), `kill -HUP`, `hsmgate unlock`.
 3. If there is no backup, texts sealed under that key are lost for good. That is what the backup, and a periodic restore drill on the second card, are for.
 
+## The KMS-JSON face
+
+Enable it with `kmsjson: {enabled: true}` (a restart; a reload refuses to toggle it). Each client that uses it has a `sigv4` credential whose secret file is mode 0600; replace the file and send SIGHUP to rotate the secret. A refusal for a wrong secret and a refusal for a client that does not match the certificate are in the audit log as denied calls. See [specs/kms-json.md](specs/kms-json.md).
+
 ## Several processes, several tokens
 
 One hsmgate process serves one configuration: several keys, several clients, several tokens (cards in one or more readers), each key version pointing at its holders. Several processes on a host take separate `listen` ports and admin sockets, and one card must not be opened
