@@ -24,13 +24,15 @@ Kubernetes KMS v2 and Transit only encrypt and decrypt; on an ECDH-only token (a
 | `GetPublicKey` | `KeyId`, `PublicKey` (DER SPKI), `KeySpec` `ECC_NIST_P256`, `KeyUsage` `KEY_AGREEMENT`, `KeyAgreementAlgorithms` `["ECDH"]` |
 | `DescribeKey` | `KeyMetadata` (state, usage, numeric `CreationDate`; extras `HsmgateVersion`, `HsmgateLatestVersion`) |
 | `ListKeys`, `ListAliases` | the keys the client may use (`alias/<name>`) |
-| `DeriveSharedSecret` | `KeyId`, `KeyAgreementAlgorithm` `ECDH`, `SharedSecret` (the raw ECDH result, 32 bytes) |
+| `DeriveSharedSecret` | `KeyId`, `KeyAgreementAlgorithm` `ECDH`, `SharedSecret` (the raw ECDH result, 32 bytes: the X coordinate) |
 
 `DeriveSharedSecret` checks the algorithm is `ECDH`, that the peer key is a P-256 DER SPKI and **on the curve before the token is asked**; `Recipient` is refused; `DryRun` answers `DryRunOperationException` after the policy check. Everything else: `UnsupportedOperationException`.
 
 **Key ids**: `name`, `alias/name`, our ARN form, and the extension `name@N` for version N (the plain forms mean the latest version).
 
 **Errors**: unknown key and ungranted key give the *same* `AccessDeniedException` (no probing); bad input `ValidationException`; rate or a full line to the token `ThrottlingException`; locked or unreachable token `KeyUnavailableException` (HTTP 500, retryable); audit not writable `KMSInternalException`. Signature problems: `MissingAuthenticationTokenException`, `UnrecognizedClientException`, `IncompleteSignatureException`, `InvalidSignatureException`.
+
+**Checked against the real service (2026-10-20):** for an `ECC_NIST_P256` / `KEY_AGREEMENT` key in the vendor's cloud, `DeriveSharedSecret` returned a 32-byte `SharedSecret` equal to a local ECDH of the same peer key with the key's `GetPublicKey` output, which is what this face returns. The real answer also carries `KeyOrigin` (not sent by this face; the SDKs treat it as optional) and a full ARN in `KeyId`.
 
 ## 3. Authentication
 
