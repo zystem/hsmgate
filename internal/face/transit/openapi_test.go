@@ -52,6 +52,7 @@ func TestSpecListsTheRoutesThatExist(t *testing.T) {
 		"/v1/transit/encrypt/{name}": {"put", "post"},
 		"/v1/transit/decrypt/{name}": {"put", "post"},
 		"/v1/transit/rewrap/{name}":  {"put", "post"},
+		"/":                          {"post"}, // the KMS-JSON face (its own tests are in internal/face/kmsjson)
 	}
 	if len(s.Paths) != len(want) {
 		t.Errorf("the spec has %d paths, the service %d", len(s.Paths), len(want))

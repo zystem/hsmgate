@@ -175,20 +175,26 @@ func (f *Face) serve(w http.ResponseWriter, r *http.Request) {
 
 	// who: the certificate, then the signature, and they must agree. A request with no certificate at all is judged after the signature: only a credential marked no_cert may be used so.
 	src := peerAddr(r)
-	if f.Fails.Blocked(src, f.now()) {
-		w.Header().Set("Retry-After", "60")
-		refuse(400, "ThrottlingException", "too many refused signatures from this address", "throttled_auth", true)
-		return
-	}
 	client, ok := f.Identify(r)
 	certless := false
 	if !ok {
 		if !f.noCertificate(r) {
-			f.Fails.Add(src, f.now())
 			refuse(403, "AccessDeniedException", "the client is not known to the service", "unauthenticated", false)
 			return
 		}
 		certless, client = true, ""
+		// only a request with no certificate is counted and blocked by address: a client that showed a certificate is already known, and a peer must not be able to lock out
+		// the clients behind the same address (a node, a NAT) by sending bad signatures
+		if f.Fails.Blocked(src, f.now()) {
+			w.Header().Set("Retry-After", "60")
+			refuse(400, "ThrottlingException", "too many refused signatures from this address", "throttled_auth", true)
+			return
+		}
+	}
+	count := func() {
+		if certless {
+			f.Fails.Add(src, f.now())
+		}
 	}
 	v := &sigv4.Verifier{Region: f.Cfg.KMSJSON.Region, Service: "kms", Now: f.Now, Secrets: func(akid string) ([]byte, bool) {
 		c, ok := f.Creds[akid]
@@ -205,18 +211,18 @@ func (f *Face) serve(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, sigv4.ErrMalformed):
 			typ, result = "IncompleteSignatureException", "malformed_signature"
 		}
-		f.Fails.Add(src, f.now())
+		count()
 		refuse(400, typ, err.Error(), result, false)
 		return
 	}
 	cred := f.Creds[akid]
 	if certless && !cred.NoCert {
-		f.Fails.Add(src, f.now())
+		count()
 		refuse(403, "AccessDeniedException", "the client is not known to the service", "unauthenticated", false)
 		return
 	}
 	if len(cred.From) > 0 && !fromAllowed(cred.From, src) {
-		f.Fails.Add(src, f.now())
+		count()
 		refuse(403, "AccessDeniedException", "the credential may not be used from this address", "address_refused", false)
 		return
 	}

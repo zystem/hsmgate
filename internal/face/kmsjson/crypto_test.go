@@ -328,22 +328,32 @@ func TestACredentialWithoutACertificate(t *testing.T) {
 	}
 }
 
-func TestRefusedSignaturesAreCounted(t *testing.T) {
+func TestRefusedSignaturesOfACertlessPeerAreCounted(t *testing.T) {
 	r := cryptoRig(t)
-	for i := 0; i < failLimit; i++ {
-		r.call("app", akid, "GetPublicKey", map[string]string{"KeyId": "ecdh"}, func(req *http.Request, b []byte) {
+	pt := base64.StdEncoding.EncodeToString([]byte("x"))
+	bad := func(akid string) {
+		r.call("-", akid, "Encrypt", map[string]any{"KeyId": "seal", "Plaintext": pt}, func(req *http.Request, b []byte) {
+			req.Header.Set("X-Test-NoCert", "1")
 			sigv4.Sign(req, b, akid, []byte("a-wrong-secret-a-wrong-secret-0000"), "local", "kms", r.now)
 		})
 	}
-	// from this address nothing is judged any more, not even a good request
-	st, out := r.app("GetPublicKey", map[string]string{"KeyId": "ecdh"})
+	for i := 0; i < failLimit; i++ {
+		bad("AKIDBOTBOTBOTBOT00")
+	}
+	// from this address nothing without a certificate is judged any more, not even a good request
+	st, out := r.certless("AKIDBOTBOTBOTBOT00", "Encrypt", map[string]any{"KeyId": "seal", "Plaintext": pt})
 	if st != 400 || typ(out) != "ThrottlingException" {
 		t.Errorf("after %d refusals: %d %v", failLimit, st, out)
 	}
+	// but a client that shows a certificate is not locked out by them (a node, a NAT)
+	if st, out := r.app("Encrypt", map[string]any{"KeyId": "seal", "Plaintext": pt}); st != 200 {
+		t.Errorf("a client with a certificate: %d %v", st, out)
+	}
 	// and it ends with the window
 	r.face.Now = func() time.Time { return r.now.Add(2 * time.Minute) }
-	if st, _, _ := r.call("app", akid, "GetPublicKey", map[string]string{"KeyId": "ecdh"}, func(req *http.Request, b []byte) {
-		sigv4.Sign(req, b, akid, secret, "local", "kms", r.now.Add(2*time.Minute))
+	if st, _, _ := r.call("-", "AKIDBOTBOTBOTBOT00", "Encrypt", map[string]any{"KeyId": "seal", "Plaintext": pt}, func(req *http.Request, b []byte) {
+		req.Header.Set("X-Test-NoCert", "1")
+		sigv4.Sign(req, b, "AKIDBOTBOTBOTBOT00", secret, "local", "kms", r.now.Add(2*time.Minute))
 	}); st != 200 {
 		t.Errorf("after the window: %d", st)
 	}
