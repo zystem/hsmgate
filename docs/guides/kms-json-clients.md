@@ -94,9 +94,35 @@ creation_rules:
 
 `aws-encryption-sdk` with a `StrictAwsKmsMasterKeyProvider` over `arn:aws:kms:<region>:000000000000:key/<name>`, `AWS_ENDPOINT_URL_KMS`, `AWS_CA_BUNDLE` and a `no_cert` client: encrypt and decrypt round-tripped with `GenerateDataKey` and `Decrypt`. It stores the key identifier in each message and compares it when it reads, so hsmgate **answers with the identifier the client named the key with** when that is a full identifier of this key (`arn:<partition>:kms:<region>:<account>:key/<name>`), and with its own `arn:hsmgate:…` when the key was named by name or alias. The default algorithm suite signs and puts `aws-crypto-public-key` into the encryption context, so such a key must be in `aad.mode: context` with `allow: ["aws-crypto-public-key=", ...]`; a key in `fixed` mode takes only a suite without signing (`AES_256_GCM_HKDF_SHA512_COMMIT_KEY`) and no context of the caller.
 
-## Terraform, others
+## HashiCorp Vault: seal `awskms` (tried, Vault 2.2.0)
 
-Not tried. Programs that call only `Encrypt`, `Decrypt`, `GenerateDataKey`, `Sign`, `Verify`, `GenerateMac`, `VerifyMac` and `GenerateRandom` are expected to work; programs that manage keys (`CreateKey`, rotation, tags, key policies; the Terraform provider reads some of them) will not, because keys here are made in the configuration and on the token.
+Same `seal "awskms"` block as for OpenBao (above), but Vault's wrapper hands its own HTTP client to the SDK, which then refuses `AWS_CA_BUNDLE` ("unable to add custom RootCAs"): make Vault trust the CA of the service with `SSL_CERT_FILE=/path/ca.pem` (or the system store). `operator init`, a secret, stop, start: it unsealed by itself (`describekey`, `encrypt`, `decrypt` in the audit).
+
+## cosign (tried, 3.1.4): `awskms://`
+
+`cosign sign-blob` and `verify-blob` with `--key awskms://<host>:<port>/alias/<name>` work, signing through the face and verifying with the public key from `GetPublicKey`. Three things to know: cosign accepts a key **id** only as a UUID, so name the key by **alias** (`alias/<name>`), which hsmgate keys always have; it builds `https://<host>:<port>` itself, so the endpoint must be TLS; and it cannot show a client certificate, while signing needs one: put a **TLS front that presents the certificate** in front of hsmgate (a few lines of Go with `httputil.ReverseProxy`; keep the `Host` header, the signature covers it) and make cosign trust the front with `SSL_CERT_FILE`.
+
+## Terraform (tried, 1.16.6, provider aws)
+
+The data sources and resources that only use keys work against the face: `data "aws_kms_key"` (`DescribeKey`), `resource "aws_kms_ciphertext"` (`Encrypt`), `data "aws_kms_secrets"` (`Decrypt`), `data "aws_kms_public_key"` (`GetPublicKey`); a second `plan` shows no changes. Provider settings: `endpoints { kms = "https://…" }`, `custom_ca_bundle`, `skip_credentials_validation`, `skip_requesting_account_id`, `skip_metadata_api_check`, `skip_region_validation`. Resources that **make or manage** keys (`aws_kms_key`, `aws_kms_alias`, grants, policies, rotation) do not work: keys here are made in the configuration and on the token.
+
+## SDKs and services tried
+
+| What | Version | Result |
+|---|---|---|
+| Go SDK v2 (`test/kmsjson-sdk`, in CI) | kms 1.61 | all operations |
+| boto3 (`test/kmsjson-boto3`, in CI) | 1.43 | all operations |
+| Node.js SDK v3 (`@aws-sdk/client-kms`) | current | Encrypt, Decrypt, GenerateDataKey, Sign, Verify, GenerateMac, VerifyMac, GenerateRandom, DescribeKey |
+| Java SDK v2 (`software.amazon.awssdk:kms`) | 2.31 | the same; `InvalidCiphertextException` arrives as the SDK's own type; trust the CA with `-Djavax.net.ssl.trustStore` |
+| AWS Encryption SDK for Python | current | round trip (see above) |
+| MongoDB client-side field encryption (`pymongo[encryption]`, libmongocrypt) | current | `create_data_key` and decrypt through the face; `master_key = {region, key: "arn:aws:kms:…:key/<name>", endpoint: "host:port"}`, `kms_tls_options` with the CA; a client without a certificate (`no_cert`) is enough |
+| SOPS | 3.13.3 | see above |
+| OpenBao, HashiCorp Vault | 2.6.1, 2.2.0 | auto-unseal |
+| aws CLI | 1.45 | see above |
+
+None of them depends on the ciphertext being AES: the blob is opaque to clients, they only carry it back.
+
+Not tried: the Kubernetes `aws-encryption-provider` (for EKS only; etcd encryption here is done by `vault-kubernetes-kms` through Transit), MySQL `keyring_aws` (Enterprise), MinIO KES (its AWS back end is Secrets Manager, not this API).
 
 ## What differs from the cloud service
 
