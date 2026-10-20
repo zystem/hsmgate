@@ -49,13 +49,14 @@ func newRig(t *testing.T, mutate func(*config.Config, map[string]backend.Token, 
 	write := func(n, v string) string { p := filepath.Join(dir, n); os.WriteFile(p, []byte(v), 0o600); return p }
 	k1 := write("k1", strings.Repeat("01", 32))
 	k2 := write("k2", strings.Repeat("02", 32))
+	k3 := write("k3", strings.Repeat("03", 32))
 	cfg, err := config.Parse([]byte(`
 kmsjson: {enabled: true, region: local}
-tokens: [{name: soft, type: soft, keys: {m1: ` + k1 + `, m2: ` + k2 + `}}]
+tokens: [{name: soft, type: soft, keys: {m1: ` + k1 + `, m2: ` + k2 + `, m3: ` + k3 + `}}]
 keys:
   etcd: {kmsjson: true, versions: [{token: soft, label: m1}], aad: {mode: fixed}}
-  rot:  {kmsjson: true, versions: [{token: soft, label: m1}], aad: {mode: fixed}}
-  plain: {versions: [{token: soft, label: m1}], aad: {mode: fixed}}
+  rot:  {kmsjson: true, versions: [{token: soft, label: m2}], aad: {mode: fixed}}
+  plain: {versions: [{token: soft, label: m3}], aad: {mode: fixed}}
 clients:
   - {name: shop, identity: {cn: shop}, sigv4: {access_key_id: ` + akid + `, secret_file: /unused}, keys: {etcd: {ops: [derive]}, rot: {ops: [derive]}, plain: {ops: [encrypt]}}}
   - {name: viewer, identity: {cn: viewer}, sigv4: {access_key_id: AKIDVIEWERVIEWER00, secret_file: /unused}, keys: {etcd: {ops: [encrypt]}}}

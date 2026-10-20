@@ -18,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -36,17 +37,20 @@ func cryptoRig(t *testing.T) *rig {
 	k3 := write("k3", strings.Repeat("03", 32))
 	k4 := write("k4", strings.Repeat("04", 32))
 	k5 := write("k5", strings.Repeat("05", 32))
+	k6 := write("k6", strings.Repeat("06", 32))
+	k7 := write("k7", strings.Repeat("07", 32))
+	k8 := write("k8", strings.Repeat("08", 32))
 	cfg, err := config.Parse([]byte(`
 kmsjson: {enabled: true, region: local}
-tokens: [{name: soft, type: soft, keys: {m1: ` + k1 + `, m2: ` + k2 + `, m3: ` + k3 + `, m4: ` + k4 + `, m5: ` + k5 + `}}]
+tokens: [{name: soft, type: soft, keys: {m1: ` + k1 + `, m2: ` + k2 + `, m3: ` + k3 + `, m4: ` + k4 + `, m5: ` + k5 + `, m6: ` + k6 + `, m7: ` + k7 + `, m8: ` + k8 + `}}]
 keys:
   seal:  {kmsjson: true, kmsjson_usage: encrypt_decrypt, versions: [{token: soft, label: m1}], aad: {mode: fixed}}
   seal2: {kmsjson: true, kmsjson_usage: encrypt_decrypt, versions: [{token: soft, label: m2}], aad: {mode: fixed}}
-  org:   {kmsjson: true, kmsjson_usage: encrypt_decrypt, versions: [{token: soft, label: m1}, {token: soft, label: m2}], aad: {mode: context, allow: ["purpose=dek"]}}
+  org:   {kmsjson: true, kmsjson_usage: encrypt_decrypt, versions: [{token: soft, label: m6}, {token: soft, label: m7}], aad: {mode: context, allow: ["purpose=dek"]}}
   sig:   {kmsjson: true, kmsjson_usage: sign_verify, versions: [{token: soft, label: m3}], aad: {mode: fixed}}
   mac:   {kmsjson: true, kmsjson_usage: generate_verify_mac, versions: [{token: soft, label: m4}], aad: {mode: fixed}}
   macrot: {kmsjson: true, kmsjson_usage: generate_verify_mac, versions: [{token: soft, label: m5}], aad: {mode: fixed}}
-  ecdh:  {kmsjson: true, versions: [{token: soft, label: m1}], aad: {mode: fixed}}
+  ecdh:  {kmsjson: true, versions: [{token: soft, label: m8}], aad: {mode: fixed}}
 clients:
   - {name: app, identity: {cn: app}, sigv4: {access_key_id: ` + akid + `, secret_file: /unused}, keys: {seal: {ops: [encrypt, decrypt]}, seal2: {ops: [encrypt]}, org: {ops: [encrypt, decrypt]}, ecdh: {ops: [derive, encrypt]}, sig: {ops: [sign, verify]}, mac: {ops: [generate_mac, verify_mac]}, macrot: {ops: [generate_mac, verify_mac]}}}
   - {name: bot, sigv4: {access_key_id: AKIDBOTBOTBOTBOT00, secret_file: /unused, no_cert: true, allow_from: [127.0.0.0/8]}, keys: {seal: {ops: [encrypt, decrypt]}, sig: {ops: [sign, verify]}, mac: {ops: [generate_mac, verify_mac]}}}
@@ -429,8 +433,13 @@ func TestSignAndVerify(t *testing.T) {
 	if st, out := r.app("DeriveSharedSecret", map[string]any{"KeyId": "sig", "KeyAgreementAlgorithm": "ECDH", "PublicKey": "AA=="}); st != 400 || typ(out) != "InvalidKeyUsageException" {
 		t.Errorf("derive with a signing key: %d %v", st, out)
 	}
-	if a := r.audit.String(); !strings.Contains(a, `"op":"sign"`) || !strings.Contains(a, "digest=") || strings.Contains(a, "a message to sign") {
-		t.Errorf("audit: %s", a)
+	if a := r.audit.String(); !strings.Contains(a, `"op":"sign"`) || strings.Contains(a, "digest=") || strings.Contains(a, "a message to sign") {
+		t.Errorf("by default the audit holds no piece of the hash: %s", a)
+	}
+	r.cfg.KMSJSON.AuditMessagePrefix = true // asked for
+	r.app("Sign", map[string]any{"KeyId": "sig", "Message": msg, "SigningAlgorithm": "ECDSA_SHA_256"})
+	if a := r.audit.String(); !strings.Contains(a, "digest=") || strings.Contains(a, "a message to sign") {
+		t.Errorf("when asked for, the audit holds a prefix of the hash and never the message: %s", a)
 	}
 }
 
@@ -535,8 +544,13 @@ func TestGenerateAndVerifyMac(t *testing.T) {
 		t.Errorf("DescribeKey: %v", d)
 	}
 	// the audit holds a piece of the hash of the message, not the message
-	if a := r.audit.String(); !strings.Contains(a, `"op":"generatemac"`) || !strings.Contains(a, "msg=") || strings.Contains(a, "message to authenticate") {
+	if a := r.audit.String(); !strings.Contains(a, `"op":"generatemac"`) || strings.Contains(a, "msg=") || strings.Contains(a, "message to authenticate") {
 		t.Errorf("audit: %s", a)
+	}
+	r.cfg.KMSJSON.AuditMessagePrefix = true
+	r.app("GenerateMac", map[string]any{"KeyId": "mac", "Message": msg, "MacAlgorithm": "HMAC_SHA_256"})
+	if a := r.audit.String(); !strings.Contains(a, "msg=") || strings.Contains(a, "message to authenticate") {
+		t.Errorf("when asked for: %s", a)
 	}
 }
 
@@ -726,3 +740,96 @@ func mustB64(t *testing.T, v any) []byte {
 	}
 	return b
 }
+
+// The audit of 2026-10-21 (CR-02): the name and the version in the blob are authenticated. Two keys with the same key material and context (a configuration that Validate now refuses,
+// but that a bug or a later edit could still make) must not open each other's blobs by a changed name.
+func TestBlobCannotBeRelabelled(t *testing.T) {
+	r := cryptoRig(t)
+	r.cfg.Keys["orgcopy"] = r.cfg.Keys["org"] // same material, same context rules (set directly: Validate would refuse it)
+	r.cfg.Clients[2].Keys["orgcopy"] = config.Grant{Ops: []string{"decrypt"}}
+	r.policyReload()
+	ctx := map[string]string{"purpose": "dek", "tenant": "private"}
+	st, out := r.app("Encrypt", map[string]any{"KeyId": "org", "EncryptionContext": ctx, "Plaintext": base64.StdEncoding.EncodeToString([]byte("original-key secret"))})
+	if st != 200 {
+		t.Fatal(st, out)
+	}
+	blob := mustB64(t, out["CiphertextBlob"])
+	_, ver, text, err := parseBlob(blob)
+	if err != nil {
+		t.Fatal(err)
+	}
+	relabelled := base64.StdEncoding.EncodeToString(makeBlob("orgcopy", ver, text))
+	st, out, _ = r.call("reader", "AKIDVIEWERVIEWER00", "Decrypt", map[string]any{"EncryptionContext": ctx, "CiphertextBlob": relabelled}, nil)
+	if st == 200 {
+		t.Fatalf("a blob relabelled to another key was opened: %v", out)
+	}
+	// the same for the version: a further version with the same key material (the blob was made with the last one)
+	k := r.cfg.Keys["org"]
+	k.Versions = append(k.Versions, k.Versions[len(k.Versions)-1])
+	r.cfg.Keys["org"] = k
+	st, _ = r.app("Decrypt", map[string]any{"EncryptionContext": ctx, "CiphertextBlob": base64.StdEncoding.EncodeToString(makeBlob("org", ver+1, text))})
+	if st == 200 {
+		t.Error("a blob relabelled to another version was opened")
+	}
+	// and the honest blob still opens
+	if st, _ := r.app("Decrypt", map[string]any{"EncryptionContext": ctx, "CiphertextBlob": base64.StdEncoding.EncodeToString(blob)}); st != 200 {
+		t.Errorf("the honest blob: %d", st)
+	}
+}
+
+// CR-03: the cache returns a copy made under its lock; put and clear wipe its own memory. Run under -race.
+func TestMacCacheIsRaceFree(t *testing.T) {
+	k := NewMacKeys()
+	key := bytes.Repeat([]byte{0x42}, 32)
+	k.put("id", key, time.Now().Add(time.Hour))
+	var wg sync.WaitGroup
+	wg.Add(3)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 5000; i++ {
+			if b, ok := k.get("id", time.Now()); ok && !bytes.Equal(b, key) {
+				t.Error("a torn key")
+				return
+			}
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 5000; i++ {
+			k.put("id", key, time.Now().Add(time.Hour))
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 500; i++ {
+			k.clear()
+			k.put("id", key, time.Now().Add(time.Hour))
+		}
+	}()
+	wg.Wait()
+	got, ok := k.get("id", time.Now())
+	k.clear()
+	if ok && !bytes.Equal(got, key) {
+		t.Error("the copy was changed by clear")
+	}
+}
+
+// The limit of a key holds for what comes out as for what goes in (the audit, CR-05).
+func TestDecryptHonoursMaxBytes(t *testing.T) {
+	r := cryptoRig(t)
+	pt, _ := r.face.Tokens["soft"].Point("m1")
+	key := r.cfg.Keys["seal"]
+	key.MaxBytes = 8
+	r.cfg.Keys["seal"] = key
+	text, err := ecies.Wrap(pt, bytes.Repeat([]byte("x"), 100), bindAAD("seal", 1, []byte(key.FixedAAD("seal"))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, out := r.app("Decrypt", map[string]any{"CiphertextBlob": base64.StdEncoding.EncodeToString(makeBlob("seal", 1, text))})
+	if st != 400 || typ(out) != "InvalidCiphertextException" {
+		t.Errorf("a plaintext over max_bytes: %d %v", st, out)
+	}
+}
+
+// policyReload rebuilds the policy from the (edited) configuration of the rig.
+func (r *rig) policyReload() { r.face.Policy = policy.New(r.cfg, nil) }

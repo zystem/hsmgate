@@ -95,10 +95,10 @@ clients:
 func TestKMSJSONRules(t *testing.T) {
 	base := `
 kmsjson: {enabled: true}
-tokens: [{name: t, type: soft, keys: {m: /x}}]
+tokens: [{name: t, type: soft, keys: {m: /x, n: /y}}]
 keys:
   d: {kmsjson: true, versions: [{token: t, label: m}], aad: {mode: fixed}}
-  c: {versions: [{token: t, label: m}], aad: {mode: context, allow: ["a/"]}}
+  c: {versions: [{token: t, label: n}], aad: {mode: context, allow: ["a/"]}}
 clients:
 `
 	ok := "  - {name: a, identity: {cn: x}, sigv4: {access_key_id: AKIAEXAMPLEEXAMPLE1, secret_file: /s}, keys: {d: {ops: [derive]}}}\n"
@@ -161,10 +161,10 @@ func TestKMSJSONUsage(t *testing.T) {
 }
 
 func TestNoCertRules(t *testing.T) {
-	v := "versions: [{token: t, label: m}]"
-	base := "kmsjson: {enabled: true}\ntokens: [{name: t, type: soft, keys: {m: /x}}]\nkeys:\n" +
-		"  s: {kmsjson: true, kmsjson_usage: encrypt_decrypt, " + v + ", aad: {mode: fixed}}\n" +
-		"  e: {kmsjson: true, " + v + ", aad: {mode: fixed}}\n  plain: {" + v + ", aad: {mode: fixed}}\nclients:\n"
+	v := func(label string) string { return "versions: [{token: t, label: " + label + "}]" }
+	base := "kmsjson: {enabled: true}\ntokens: [{name: t, type: soft, keys: {m: /x, n: /y, o: /z, p: /w, q: /u}}]\nkeys:\n" +
+		"  s: {kmsjson: true, kmsjson_usage: encrypt_decrypt, " + v("m") + ", aad: {mode: fixed}}\n" +
+		"  e: {kmsjson: true, " + v("n") + ", aad: {mode: fixed}}\n  plain: {" + v("o") + ", aad: {mode: fixed}}\nclients:\n"
 	cl := func(sig, keys string) string {
 		return "  - {name: a, sigv4: {access_key_id: AKIAEXAMPLEEXAMPLE1, secret_file: /s, " + sig + "}, keys: {" + keys + "}}\n"
 	}
@@ -172,9 +172,9 @@ func TestNoCertRules(t *testing.T) {
 		t.Fatalf("a valid client without a certificate: %v", err)
 	}
 	// signing and MAC keys are allowed without a certificate too (cosign, Terraform and others cannot show one)
-	more := "  sg: {kmsjson: true, kmsjson_usage: sign_verify, versions: [{token: t, label: n}], aad: {mode: fixed}}\n"
-	more2 := "  mk: {kmsjson: true, kmsjson_usage: generate_verify_mac, versions: [{token: t, label: o}], aad: {mode: fixed}}\n"
-	withTokens := strings.Replace(base, "keys: {m: /x}", "keys: {m: /x, n: /y, o: /z}", 1)
+	more := "  sg: {kmsjson: true, kmsjson_usage: sign_verify, " + v("p") + ", aad: {mode: fixed}}\n"
+	more2 := "  mk: {kmsjson: true, kmsjson_usage: generate_verify_mac, " + v("q") + ", aad: {mode: fixed}}\n"
+	withTokens := base
 	clients := "  - {name: a, sigv4: {access_key_id: AKIAEXAMPLEEXAMPLE1, secret_file: /s, no_cert: true, allow_from: [10.0.0.0/8]}, keys: {sg: {ops: [sign, verify]}, mk: {ops: [generate_mac, verify_mac]}}}\n"
 	if _, err := Parse([]byte(strings.Replace(withTokens, "clients:\n", more+more2+"clients:\n", 1) + clients)); err != nil {
 		t.Errorf("a client without a certificate with a signing key and a MAC key: %v", err)
@@ -286,5 +286,37 @@ func TestMetricsRules(t *testing.T) {
 		if _, err := Parse([]byte(y)); err == nil {
 			t.Errorf("%s was accepted", name)
 		}
+	}
+}
+
+// The audit of 2026-10-21 (CR-01): with the KMS-JSON face in use, two keys must not rest on one private key, however the labels, the ids or the token names are written.
+func TestOnePrivateKeyOneName(t *testing.T) {
+	keys := func(a, b string) string {
+		return "  a: {kmsjson: true, versions: [{token: " + a + "}], aad: {mode: fixed}}\n  b: {versions: [{token: " + b + "}], aad: {mode: fixed}}\nclients:\n"
+	}
+	soft := "tokens: [{name: t, type: soft, keys: {m: /x, alias: /x, n: /y}}, {name: t2, type: soft, keys: {m: /x}}]\n"
+	p11 := "tokens: [{name: c, type: pkcs11, module: /m.so, token_label: card, keys: {m: 04AB, alias: 04ab, n: 05}}, {name: c2, type: pkcs11, module: /m.so, token_label: card, keys: {z: 04ab}}]\n"
+	on := "kmsjson: {enabled: true}\n"
+	for name, y := range map[string]string{
+		"a soft key under a second label":           on + soft + "keys:\n" + keys("t, label: m", "t, label: alias"),
+		"a soft file under a second token name":     on + soft + "keys:\n" + keys("t, label: m", "t2, label: m"),
+		"a CKA_ID under a second label, other case": on + p11 + "keys:\n" + keys("c, label: m", "c, label: alias"),
+		"a CKA_ID under a second token name":        on + p11 + "keys:\n" + keys("c, label: m", "c2, label: z"),
+		"one fingerprint pinned twice":              on + soft + "keys:\n  a: {kmsjson: true, versions: [{token: t, label: m, fingerprint: " + strings.Repeat("ab", 32) + "}], aad: {mode: fixed}}\n  b: {versions: [{token: t, label: n, fingerprint: " + strings.ToUpper(strings.Repeat("ab", 32)) + "}], aad: {mode: fixed}}\nclients:\n",
+	} {
+		if _, err := Parse([]byte(y)); err == nil {
+			t.Errorf("%s was accepted", name)
+		}
+	}
+	// different keys are fine; the spare of one key (a replica) is the same key by definition; and without the face the old freedom stays (Transit-only configurations)
+	if _, err := Parse([]byte(on + soft + "keys:\n" + keys("t, label: m", "t, label: n"))); err != nil {
+		t.Errorf("two keys: %v", err)
+	}
+	spare := on + soft + "keys:\n  a: {kmsjson: true, versions: [{token: t, label: m, replicas: [{token: t2, label: m}]}], aad: {mode: fixed}}\nclients:\n"
+	if _, err := Parse([]byte(spare)); err != nil {
+		t.Errorf("a key and its spare: %v", err)
+	}
+	if _, err := Parse([]byte(soft + "keys:\n  a: {versions: [{token: t, label: m}], aad: {mode: fixed}}\n  b: {versions: [{token: t, label: alias}], aad: {mode: fixed}}\nclients:\n")); err != nil {
+		t.Errorf("a Transit-only configuration keeps its freedom: %v", err)
 	}
 }

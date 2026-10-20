@@ -172,6 +172,9 @@ func (s *Server) prepare(cfg *config.Config, old *generation) (gen *generation, 
 			}
 		}
 	}
+	if err := VerifyDistinct(cfg, tokens); err != nil {
+		return nil, nil, fresh, err
+	}
 	if err := VerifyReplicas(cfg, tokens); err != nil {
 		return nil, nil, fresh, err
 	}
@@ -225,6 +228,45 @@ func loadTLS(cfg *config.Config) (*tls.Config, error) {
 		auth = tls.VerifyClientCertIfGiven
 	}
 	return &tls.Config{MinVersion: tls.VersionTLS13, ClientAuth: auth, ClientCAs: pool, Certificates: []tls.Certificate{cert}, NextProtos: []string{"h2", "http/1.1"}}, nil
+}
+
+// VerifyDistinct: with the KMS-JSON face in use, two keys of the configuration must not hold the same public key (and so the same private key) whatever their labels, ids or token
+// names say (audit of 2026-10-21, CR-01; config.distinctKeys does the part that the configuration alone can tell). A holder that does not answer now is skipped here; a pinned
+// fingerprint covers it, and the next reload looks again.
+func VerifyDistinct(cfg *config.Config, tokens map[string]backend.Token) error {
+	inUse := cfg.KMSJSON.Enabled
+	for _, k := range cfg.Keys {
+		inUse = inUse || k.KMSJSON
+	}
+	if !inUse {
+		return nil
+	}
+	names := make([]string, 0, len(cfg.Keys))
+	for n := range cfg.Keys {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	owner := map[string]string{}
+	for _, name := range names {
+		for i, v := range cfg.Keys[name].Versions {
+			for _, h := range v.Holders() {
+				tok, ok := tokens[h.Token]
+				if !ok {
+					continue
+				}
+				pt, err := tok.Point(h.Label)
+				if err != nil {
+					continue
+				}
+				fp := fingerprintOf(pt)
+				if other, taken := owner[fp]; taken && other != name {
+					return fmt.Errorf("keys %s and %s (version %d) hold the same public key %s: with the KMS-JSON face in use every key needs a private key of its own", other, name, i+1, fp[:16])
+				}
+				owner[fp] = name
+			}
+		}
+	}
+	return nil
 }
 
 // VerifyReplicas: every holder of a key version that answers must have the same public key (and the pinned one, if the version has a fingerprint).

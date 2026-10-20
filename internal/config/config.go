@@ -7,6 +7,8 @@ import (
 	"net/netip"
 	"net/url"
 	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -27,6 +29,9 @@ type Config struct {
 		// MacCacheSeconds: how long the MAC key derived from a key on the token is kept in memory (0: not at all, one ECDH on the token for every MAC). A cache makes MACs fast and puts
 		// a key derived from the token's key into the memory of the process for that time.
 		MacCacheSeconds int `yaml:"mac_cache_seconds"`
+		// AuditMessagePrefix: write the first 6 bytes of the hash of a signed or authenticated message into the audit line (to tie a line to a message). Off by default: the hash of a
+		// message with little variety can be guessed from its prefix by whoever reads the log (audit of 2026-10-21).
+		AuditMessagePrefix bool `yaml:"audit_message_prefix"`
 	} `yaml:"kmsjson"`
 	// Metrics: GET /metrics on the admin socket, off unless enabled. Detail "basic" (the default) counts decisions by face and outcome class only; "full" adds the operation and the
 	// result words of the audit log. What is counted tells when secrets are used and how much is refused, so it is treated as sensitive (docs/threat-model.md).
@@ -396,26 +401,13 @@ func (c *Config) validateKMSJSON() error {
 			}
 		case UsageEncryptDecrypt:
 		case UsageSignVerify, UsageMAC:
-			// a private key signs or does ECDH, not both: no other key may use a label that a signing key uses
-			for other, ok := range c.Keys {
-				if other == name {
-					continue
-				}
-				for _, v := range k.Versions {
-					for _, h := range v.Holders() {
-						for _, ov := range ok.Versions {
-							for _, oh := range ov.Holders() {
-								if oh == h {
-									return fmt.Errorf("key %s (%s) and key %s use the same key %s/%s: a key signs, makes MACs or does ECDH, never two of them", name, k.KMSJSONUsage, other, h.Token, h.Label)
-								}
-							}
-						}
-					}
-				}
-			}
+			// a private key signs, makes MACs or does ECDH, never two of them: see distinctKeys
 		default:
 			return fmt.Errorf("key %s: kmsjson_usage must be key_agreement, encrypt_decrypt, sign_verify or generate_verify_mac", name)
 		}
+	}
+	if err := c.distinctKeys(); err != nil {
+		return err
 	}
 	akids := map[string]string{}
 	for _, cl := range c.Clients {
@@ -504,6 +496,64 @@ func (c *Config) CertOptional() bool {
 		}
 	}
 	return false
+}
+
+// physicalKey names the key a holder points at as well as the configuration can tell, without asking the token: the file of a soft key; the module, token and CKA_ID of a PKCS#11 key.
+func (c *Config) physicalKey(tokenName, label string) string {
+	for _, t := range c.Tokens {
+		if t.Name != tokenName {
+			continue
+		}
+		ref := t.Keys[label]
+		if t.Type == "soft" {
+			return "file:" + filepath.Clean(ref)
+		}
+		return "p11:" + t.Module + "|" + t.TokenLabel + "|" + t.TokenSerial + "|" + strings.ToLower(ref)
+	}
+	return "unknown:" + tokenName + "/" + label
+}
+
+// distinctKeys: once the KMS-JSON face is in use, no two keys of the configuration may rest on the same private key (audit of 2026-10-21, CR-01). That face gives raw ECDH
+// (DeriveSharedSecret), signatures and MACs, and a private key that does any of these under one name and another under a second name loses the separation: a client that may
+// derive on one name can compute what is sealed, signed or authenticated under the other (the MAC key of a derived-key MAC is one ECDH away). The check is on what the
+// configuration says (the file, the CKA_ID of the module and token, pinned fingerprints); the service also compares the public keys when the tokens answer (server.VerifyDistinct).
+// The holders of one key version (a spare card) are one key by definition.
+func (c *Config) distinctKeys() error {
+	inUse := false
+	for _, k := range c.Keys {
+		inUse = inUse || k.KMSJSON
+	}
+	if !c.KMSJSON.Enabled && !inUse {
+		return nil
+	}
+	owner := map[string]string{} // physical key or fingerprint -> name of the key
+	names := make([]string, 0, len(c.Keys))
+	for n := range c.Keys {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	claim := func(id, name string) error {
+		if other, taken := owner[id]; taken && other != name {
+			return fmt.Errorf("keys %s and %s rest on the same private key (%s): with the KMS-JSON face in use every key needs a private key of its own, or a derive on one name computes what is sealed, signed or authenticated under the other", other, name, strings.TrimPrefix(id, "fp:"))
+		}
+		owner[id] = name
+		return nil
+	}
+	for _, name := range names {
+		for _, v := range c.Keys[name].Versions {
+			for _, h := range v.Holders() {
+				if err := claim(c.physicalKey(h.Token, h.Label), name); err != nil {
+					return err
+				}
+			}
+			if v.Fingerprint != "" {
+				if err := claim("fp:"+strings.ToLower(v.Fingerprint), name); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // FixedAAD is the constant additional data of a key in mode fixed.

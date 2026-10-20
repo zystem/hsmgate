@@ -1,6 +1,7 @@
 package sigv4
 
 import (
+	"encoding/hex"
 	"net/http"
 	"strings"
 	"testing"
@@ -142,4 +143,23 @@ func FuzzVerify(f *testing.F) {
 			}
 		}
 	})
+}
+
+// A request that says UNSIGNED-PAYLOAD leaves the body outside the signature: it is refused, whatever the body (found by the audit of 2026-10-21, CR-04).
+func TestUnsignedPayloadIsRefused(t *testing.T) {
+	now := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
+	v := &Verifier{Region: "local", Service: "kms", Secrets: lookup, Now: func() time.Time { return now }}
+	for _, h := range []string{"UNSIGNED-PAYLOAD", "STREAMING-AWS4-HMAC-SHA256-PAYLOAD", "STREAMING-UNSIGNED-PAYLOAD-TRAILER", "nonsense"} {
+		r, body := signed(t, `{"KeyId":"k"}`, now)
+		r.Header.Set("X-Amz-Content-Sha256", h)
+		if _, err := v.Verify(r, body); err == nil {
+			t.Errorf("%q was accepted", h)
+		}
+	}
+	// the real hash, in either case, is fine (the header is not among the signed ones here; the signature covers the hash of the body all the same)
+	r, body := signed(t, `{"KeyId":"k"}`, now)
+	r.Header.Set("X-Amz-Content-Sha256", strings.ToUpper(hex.EncodeToString(sum(body))))
+	if _, err := v.Verify(r, body); err != nil {
+		t.Errorf("the real hash: %v", err)
+	}
 }

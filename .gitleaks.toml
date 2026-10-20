@@ -1,0 +1,11 @@
+# The three findings of the scan of 2026-10-21 are made-up credentials in the tests (never used anywhere else); everything else is scanned as by default.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "credentials made up for the tests"
+paths = [
+  '''internal/server/server_test\.go''',
+  '''test/kmsjson-sdk/sdk_test\.go''',
+  '''test/kmsjson-boto3/test_boto3\.py''',
+]

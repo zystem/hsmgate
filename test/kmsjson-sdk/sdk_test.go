@@ -107,25 +107,27 @@ func run(m *testing.M) int {
 	os.WriteFile(f("k2.hex"), bytes.Repeat([]byte("09"), 32), 0o600)
 	os.WriteFile(f("k3.hex"), bytes.Repeat([]byte("0b"), 32), 0o600)
 	os.WriteFile(f("k4.hex"), bytes.Repeat([]byte("0d"), 32), 0o600)
+	os.WriteFile(f("k5.hex"), bytes.Repeat([]byte("0e"), 32), 0o600)
+	os.WriteFile(f("k6.hex"), bytes.Repeat([]byte("0f"), 32), 0o600)
 	l, _ := net.Listen("tcp", "127.0.0.1:0")
 	addr := l.Addr().String()
 	l.Close()
 	os.WriteFile(f("hsmgate.yaml"), []byte(fmt.Sprintf(`listen: %s
 tls: {cert: %s, key: %s, client_ca: %s}
 kmsjson: {enabled: true, region: local}
-tokens: [{name: soft, type: soft, keys: {m1: %s, m2: %s, m3: %s, m4: %s}}]
+tokens: [{name: soft, type: soft, keys: {m1: %s, m2: %s, m3: %s, m4: %s, m5: %s, m6: %s}}]
 keys:
   etcd: {kmsjson: true, versions: [{token: soft, label: m1}, {token: soft, label: m2}], aad: {mode: fixed}}
   mac: {kmsjson: true, kmsjson_usage: generate_verify_mac, versions: [{token: soft, label: m4}], aad: {mode: fixed}}
   sig: {kmsjson: true, kmsjson_usage: sign_verify, versions: [{token: soft, label: m3}], aad: {mode: fixed}}
-  seal: {kmsjson: true, kmsjson_usage: encrypt_decrypt, versions: [{token: soft, label: m1}], aad: {mode: fixed}}
-  hidden: {versions: [{token: soft, label: m1}], aad: {mode: fixed}}
+  seal: {kmsjson: true, kmsjson_usage: encrypt_decrypt, versions: [{token: soft, label: m5}], aad: {mode: fixed}}
+  hidden: {versions: [{token: soft, label: m6}], aad: {mode: fixed}}
 clients:
   - name: sdk
     identity: {cn: sdk-client}
     sigv4: {access_key_id: %s, secret_file: %s}
     keys: {etcd: {ops: [derive]}, seal: {ops: [encrypt, decrypt]}, sig: {ops: [sign, verify]}, mac: {ops: [generate_mac, verify_mac]}}
-`, addr, f("srv.pem"), f("srv.key"), f("ca.pem"), f("k1.hex"), f("k2.hex"), f("k3.hex"), f("k4.hex"), akid, f("sigv4-secret"))), 0o600)
+`, addr, f("srv.pem"), f("srv.key"), f("ca.pem"), f("k1.hex"), f("k2.hex"), f("k3.hex"), f("k4.hex"), f("k5.hex"), f("k6.hex"), akid, f("sigv4-secret"))), 0o600)
 	cmd := exec.Command(bin, "serve", "-config", f("hsmgate.yaml"))
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {

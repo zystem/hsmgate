@@ -109,14 +109,11 @@ func (v *Verifier) Verify(r *http.Request, body []byte) (string, error) {
 	if !ok {
 		return "", ErrUnknown
 	}
+	// The signature must cover the body: the hash of the body is what the canonical request holds. A header that claims another payload mode (UNSIGNED-PAYLOAD, STREAMING-...) would
+	// leave the body outside the signature, so a body could be exchanged under a valid Authorization: it is refused; a header with the real hash is accepted.
 	payload := hex.EncodeToString(sum(body))
-	if h := r.Header.Get("X-Amz-Content-Sha256"); h != "" && h != "UNSIGNED-PAYLOAD" {
-		if !strings.EqualFold(h, payload) {
-			return "", ErrPayload
-		}
-	}
-	if h := r.Header.Get("X-Amz-Content-Sha256"); h == "UNSIGNED-PAYLOAD" {
-		payload = h
+	if h := r.Header.Get("X-Amz-Content-Sha256"); h != "" && !strings.EqualFold(h, payload) {
+		return "", ErrPayload
 	}
 	canon, err := canonicalRequest(r, names, payload)
 	if err != nil {

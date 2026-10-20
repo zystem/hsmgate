@@ -31,7 +31,7 @@ import (
 )
 
 const (
-	blobMagic    = "HGK1"
+	blobMagic    = "HGK2"
 	algorithm    = "SYMMETRIC_DEFAULT"
 	maxPlaintext = 4096 // the limit of the cloud service for Encrypt
 	maxRandom    = 1024
@@ -239,6 +239,16 @@ func anyLine(ctx []byte, ok func([]byte) bool) bool {
 	return false
 }
 
+// bindAAD is what the AEAD authenticates for a blob: the domain, the name of the key, its version and the additional data of the request. The name and the version are also in the
+// clear in the blob, so that Decrypt can find the key; because they are authenticated here, a blob cannot be relabelled to another key (even one with the same key material and
+// context) or to another version (audit 2026-10-21, CR-02). The blob format is "HGK2"; "HGK1" blobs (which bound nothing) were never in a release and are not read.
+func bindAAD(name string, ver int, aad []byte) []byte {
+	b := append([]byte("hsmgate/kmsjson/blob/v2\x00"), byte(len(name)))
+	b = append(b, name...)
+	b = binary.BigEndian.AppendUint16(b, uint16(ver))
+	return append(b, aad...)
+}
+
 func makeBlob(name string, ver int, text string) []byte {
 	b := append([]byte(blobMagic), byte(len(name)))
 	b = append(b, name...)
@@ -279,7 +289,7 @@ func (c *call) seal(name string, ver int, key config.Key, plain, aad []byte) ([]
 		f.tokenFailure(c.refuse, err)
 		return nil, false
 	}
-	text, err := ecies.Wrap(point, plain, aad)
+	text, err := ecies.Wrap(point, plain, bindAAD(name, ver, aad))
 	if err != nil {
 		c.refuse(500, "KMSInternalException", "internal error", "internal_error", true)
 		return nil, false
@@ -287,7 +297,7 @@ func (c *call) seal(name string, ver int, key config.Key, plain, aad []byte) ([]
 	return makeBlob(name, ver, text), true
 }
 
-func (c *call) open(key config.Key, ver int, text string, aad []byte) ([]byte, bool) {
+func (c *call) open(name string, key config.Key, ver int, text string, aad []byte) ([]byte, bool) {
 	f := c.f
 	release, ok := f.Gate.Take(c.r.Context())
 	if !ok {
@@ -295,7 +305,7 @@ func (c *call) open(key config.Key, ver int, text string, aad []byte) ([]byte, b
 		return nil, false
 	}
 	defer release()
-	plain, err := keyops.Open(f.Tokens, key.Versions[ver-1], text, aad)
+	plain, err := keyops.Open(f.Tokens, key.Versions[ver-1], text, bindAAD(name, ver, aad))
 	if err != nil {
 		if errors.Is(err, ecies.ErrDamaged) || errors.Is(err, ecies.ErrWrongKey) {
 			c.refuse(400, "InvalidCiphertextException", "the ciphertext cannot be opened with this key and context", "bad_ciphertext", false)
@@ -304,7 +314,21 @@ func (c *call) open(key config.Key, ver int, text string, aad []byte) ([]byte, b
 		}
 		return nil, false
 	}
+	// the limit of the key holds for what comes out as for what goes in (the Transit face does the same): a blob made elsewhere, or under a larger limit, is not opened to more
+	if len(plain) > maxOf(key) {
+		wipe(plain)
+		c.refuse(400, "InvalidCiphertextException", "the data is larger than max_bytes of this key", "too_large", false)
+		return nil, false
+	}
 	return plain, true
+}
+
+// maxOf is the largest plaintext of a key: its max_bytes, else the default of the service.
+func maxOf(k config.Key) int {
+	if k.MaxBytes > 0 {
+		return k.MaxBytes
+	}
+	return config.DefaultMaxBytes
 }
 
 func wipe(b []byte) {
@@ -325,8 +349,8 @@ func (c *call) encrypt(req cryptoReq) {
 		return
 	}
 	max := maxPlaintext
-	if key.MaxBytes > 0 && key.MaxBytes < max {
-		max = key.MaxBytes
+	if m := maxOf(key); m < max {
+		max = m
 	}
 	if len(req.Plaintext) == 0 || len(req.Plaintext) > max {
 		c.refuse(400, "ValidationException", "Plaintext must be 1 to "+itoa(max)+" bytes", "bad_request", false)
@@ -379,7 +403,7 @@ func (c *call) decrypt(req cryptoReq) {
 		c.refuse(400, "DryRunOperationException", "the request would have succeeded, but the DryRun option is set", "dry_run", false)
 		return
 	}
-	plain, ok := c.open(key, ver, text, aad)
+	plain, ok := c.open(name, key, ver, text, aad)
 	if !ok {
 		return
 	}
@@ -410,7 +434,7 @@ func (c *call) reencrypt(req cryptoReq) {
 		c.refuse(400, "DryRunOperationException", "the request would have succeeded, but the DryRun option is set", "dry_run", false)
 		return
 	}
-	plain, ok := c.open(skey, sver, text, saad)
+	plain, ok := c.open(sname, skey, sver, text, saad)
 	if !ok {
 		return
 	}
@@ -523,7 +547,7 @@ func (c *call) sign(req cryptoReq) {
 	if !ok {
 		return
 	}
-	c.ev.Context = "digest=" + hex.EncodeToString(digest[:6]) // public by nature; ties a line of the log to a message without keeping it
+	c.messageMark("digest", digest)
 	if req.DryRun {
 		c.refuse(400, "DryRunOperationException", "the request would have succeeded, but the DryRun option is set", "dry_run", false)
 		return
@@ -554,7 +578,7 @@ func (c *call) verify(req cryptoReq) {
 	if !ok {
 		return
 	}
-	c.ev.Context = "digest=" + hex.EncodeToString(digest[:6])
+	c.messageMark("digest", digest)
 	if len(req.Signature) == 0 || len(req.Signature) > 128 {
 		c.refuse(400, "ValidationException", "Signature must be an ASN.1 DER ECDSA signature", "bad_request", false)
 		return
@@ -600,6 +624,14 @@ func (c *call) verify(req cryptoReq) {
 	c.succeed(map[string]any{"KeyId": c.f.arnFor(req.KeyID, name), "SignatureValid": true, "SigningAlgorithm": "ECDSA_SHA_256"})
 }
 
+// messageMark puts a short prefix of the hash of a message into the audit line when the configuration asks for it (kmsjson.audit_message_prefix). It is off by default: the hash of
+// a message with little variety can be tested against guesses by whoever reads the log.
+func (c *call) messageMark(label string, hash []byte) {
+	if c.f.Cfg.KMSJSON.AuditMessagePrefix {
+		c.ev.Context = label + "=" + hex.EncodeToString(hash[:6])
+	}
+}
+
 // ---- MAC
 
 const maxMacMessage = 4096
@@ -631,7 +663,7 @@ func (k *macCache) get(id string, now time.Time) ([]byte, bool) {
 		delete(k.m, id)
 		return nil, false
 	}
-	return e.key, true
+	return append([]byte{}, e.key...), true // a copy made under the lock: put and clear wipe the cache's own memory (audit 2026-10-21, CR-03)
 }
 
 // clear drops every derived key (a reload: the configuration, the clients or the tokens may have changed).
@@ -674,7 +706,7 @@ func (c *call) macKey(name string, ver int, key config.Key) ([]byte, bool) {
 		if point, err := keyops.PointOf(f.Tokens, key.Versions[ver-1]); err == nil { // no token operation: the public key is kept
 			id += "|" + ecies.Fingerprint(point)
 			if k, ok := f.MacKeys.get(id, f.now()); ok {
-				return append([]byte{}, k...), true
+				return k, true
 			}
 		}
 	}
@@ -726,7 +758,7 @@ func (c *call) mac(op string, req cryptoReq) {
 		return
 	}
 	sum := sha256.Sum256(req.Message)
-	c.ev.Context = "msg=" + hex.EncodeToString(sum[:6]) // public by nature; ties a line of the log to a message without keeping it
+	c.messageMark("msg", sum[:])
 	if req.DryRun {
 		c.refuse(400, "DryRunOperationException", "the request would have succeeded, but the DryRun option is set", "dry_run", false)
 		return

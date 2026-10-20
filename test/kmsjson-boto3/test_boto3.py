@@ -63,19 +63,19 @@ def setUpModule():
     write(f("ca.pem"), pem_cert(ca)); write(f("srv.pem"), pem_cert(srv)); write(f("srv.key"), pem_key(sk))
     write(f("cli.pem"), pem_cert(cli)); write(f("cli.key"), pem_key(ck))
     write(f("sigv4-secret"), (SECRET + "\n").encode())
-    write(f("k1.hex"), b"07" * 32); write(f("k2.hex"), b"09" * 32); write(f("k3.hex"), b"0b" * 32); write(f("k4.hex"), b"0d" * 32)
+    write(f("k1.hex"), b"07" * 32); write(f("k2.hex"), b"09" * 32); write(f("k3.hex"), b"0b" * 32); write(f("k4.hex"), b"0d" * 32); write(f("k5.hex"), b"0e" * 32); write(f("k6.hex"), b"0f" * 32)
     s = socket.socket(); s.bind(("127.0.0.1", 0)); addr = "127.0.0.1:%d" % s.getsockname()[1]; s.close()
     write(f("hsmgate.yaml"), f"""listen: {addr}
 tls: {{cert: {f('srv.pem')}, key: {f('srv.key')}, client_ca: {f('ca.pem')}}}
 audit: {{file: {f('audit.log')}}}
 kmsjson: {{enabled: true, region: local}}
-tokens: [{{name: soft, type: soft, keys: {{m1: {f('k1.hex')}, m2: {f('k2.hex')}, m3: {f('k3.hex')}, m4: {f('k4.hex')}}}}}]
+tokens: [{{name: soft, type: soft, keys: {{m1: {f('k1.hex')}, m2: {f('k2.hex')}, m3: {f('k3.hex')}, m4: {f('k4.hex')}, m5: {f('k5.hex')}, m6: {f('k6.hex')}}}}}]
 keys:
   etcd: {{kmsjson: true, versions: [{{token: soft, label: m1}}, {{token: soft, label: m2}}], aad: {{mode: fixed}}}}
   mac: {{kmsjson: true, kmsjson_usage: generate_verify_mac, versions: [{{token: soft, label: m4}}], aad: {{mode: fixed}}}}
   sig: {{kmsjson: true, kmsjson_usage: sign_verify, versions: [{{token: soft, label: m3}}], aad: {{mode: fixed}}}}
-  seal: {{kmsjson: true, kmsjson_usage: encrypt_decrypt, versions: [{{token: soft, label: m1}}], aad: {{mode: fixed}}}}
-  hidden: {{versions: [{{token: soft, label: m1}}], aad: {{mode: fixed}}}}
+  seal: {{kmsjson: true, kmsjson_usage: encrypt_decrypt, versions: [{{token: soft, label: m5}}], aad: {{mode: fixed}}}}
+  hidden: {{versions: [{{token: soft, label: m6}}], aad: {{mode: fixed}}}}
 clients:
   - name: boto
     identity: {{cn: boto-client}}

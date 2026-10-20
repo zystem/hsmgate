@@ -9,6 +9,9 @@
 - Tried with: the official Go SDK and boto3 (CI), Node.js SDK v3, Java SDK v2, OpenBao and HashiCorp Vault `seal "awskms"`, SOPS 3.13.3, cosign 3.1.4, Terraform 1.16.6 (data sources and `aws_kms_ciphertext`), MongoDB client-side field encryption, AWS Encryption SDK for Python, the aws CLI; Sign and MAC on a SmartCard-HSM; shapes and errors compared with the real service.
 - Fuzz tests for the signature verifier, the ciphertext blob and the request bodies; a scheduled fuzz step in CI.
 
+### Fixed before release (audit of 2026-10-21, see docs/audit-response-2026-10-21.md)
+- With the KMS-JSON face in use no two keys may rest on the same private key (CR-01); ciphertext blobs authenticate the key name and version (CR-02, format `HGK2`); the derived MAC key cache returns a copy under its lock (CR-03); `UNSIGNED-PAYLOAD` and similar payload modes are refused (CR-04); Decrypt honours `max_bytes` (CR-05); the audit no longer holds a prefix of the message hash unless `kmsjson.audit_message_prefix` is set; the test requirements use `cryptography` 50.0.2.
+
 ### Changed
 - The operation, key and client names of a request nobody is known for are logged as `unknown` in both faces.
 - Docs: the OpenSC PKCS#11 module exposes no AES; the card itself is not said to lack it.

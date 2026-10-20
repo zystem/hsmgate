@@ -345,8 +345,11 @@ func TestSignGivesDERThatVerifies(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	x, y := elliptic.Unmarshal(elliptic.P256(), f.priv.PublicKey().Bytes())
-	if !ecdsa.VerifyASN1(&ecdsa.PublicKey{Curve: elliptic.P256(), X: x, Y: y}, digest[:], sig) {
+	pub, err := ecdsa.ParseUncompressedPublicKey(elliptic.P256(), f.priv.PublicKey().Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ecdsa.VerifyASN1(pub, digest[:], sig) {
 		t.Error("the signature does not verify")
 	}
 	if _, err := p.Sign("m", digest[:5]); err == nil {

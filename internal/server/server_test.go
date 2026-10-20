@@ -337,7 +337,9 @@ func TestClientWithoutACertificate(t *testing.T) {
 	secretFile := filepath.Join(dir, "sdk-secret")
 	os.WriteFile(secretFile, []byte("a-long-secret-for-the-sdk-client-0123456789\n"), 0o600)
 	cfg.KMSJSON.Enabled = true
-	cfg.Keys["seal"] = config.Key{KMSJSON: true, KMSJSONUsage: config.UsageEncryptDecrypt, AAD: config.AAD{Mode: "fixed"}, Versions: cfg.Keys["bao-seal"].Versions}
+	os.WriteFile(filepath.Join(dir, "k2"), []byte(strings.Repeat("22", 32)), 0o600)
+	cfg.Tokens[0].Keys["m2"] = filepath.Join(dir, "k2") // every key of the configuration has a private key of its own
+	cfg.Keys["seal"] = config.Key{KMSJSON: true, KMSJSONUsage: config.UsageEncryptDecrypt, AAD: config.AAD{Mode: "fixed"}, Versions: []config.Version{{Token: "soft", Label: "m2"}}}
 	cfg.Clients = append(cfg.Clients, config.Client{Name: "sdk", Keys: map[string]config.Grant{"seal": {Ops: []string{"encrypt", "decrypt"}}},
 		SigV4: &config.SigV4{AccessKeyID: "AKIDSDKSDKSDKSDK00", SecretFile: secretFile, NoCert: true, AllowFrom: []string{"127.0.0.0/8"}}})
 	if err := cfg.Validate(); err != nil {
@@ -397,5 +399,34 @@ func TestClientWithoutACertificate(t *testing.T) {
 	}
 	if st, out := kms(bare, "AKIDSDKSDKSDKSDK00", secret, "Encrypt", `{"KeyId":"seal","Plaintext":"`+pt+`"}`); st != 403 || !strings.Contains(out, "AccessDenied") {
 		t.Errorf("from another address: %d %s", st, out)
+	}
+}
+
+// The audit of 2026-10-21 (CR-01): the same key in two files (a copy, under other labels) is not seen by the configuration alone; the service compares the public keys when it starts.
+func TestACopyOfAKeyIsRefusedWhenTheFaceIsInUse(t *testing.T) {
+	dir := t.TempDir()
+	ca := mk(t, "ca", nil, true, false)
+	srvCert := mk(t, "hsmgate", &ca, false, true)
+	cfg := baseConfig(t, dir, ca, srvCert)
+	os.WriteFile(filepath.Join(dir, "copy"), []byte(strings.Repeat("11", 32)), 0o600) // the content of k1
+	cfg.Tokens[0].Keys["m2"] = filepath.Join(dir, "copy")
+	cfg.Keys["other"] = config.Key{Versions: []config.Version{{Token: "soft", Label: "m2"}}, AAD: config.AAD{Mode: "fixed"}}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("without the face the freedom stays: %v", err)
+	}
+	if s, err := New(cfg, &bytes.Buffer{}); err != nil {
+		t.Fatalf("without the face a copy is accepted: %v", err)
+	} else {
+		s.Close()
+	}
+	cfg.KMSJSON.Enabled = true
+	cfg.Keys["bao-seal"] = config.Key{KMSJSON: true, AAD: config.AAD{Mode: "fixed"}, Versions: cfg.Keys["bao-seal"].Versions}
+	cfg.Clients[0].SigV4 = &config.SigV4{AccessKeyID: "AKIDOPENBAOOPENBAO", SecretFile: filepath.Join(dir, "x")}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("the configuration alone cannot see a copy: %v", err)
+	}
+	os.WriteFile(filepath.Join(dir, "x"), []byte("a-secret-for-signing-0123456789\n"), 0o600)
+	if _, err := New(cfg, &bytes.Buffer{}); err == nil || !strings.Contains(err.Error(), "same public key") {
+		t.Errorf("a copy of a key was accepted with the face in use: %v", err)
 	}
 }
