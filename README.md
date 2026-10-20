@@ -8,7 +8,7 @@ Status: **working service** (steps P0-P6 of the plan). Tried on: OpenBao (seal `
 What exists: the `ecies1` sealed format in Go ([internal/scheme/ecies](internal/scheme/ecies)), checked against test vectors made by the Nim implementation
 in CiNim's `kekd` ([testdata/vectors/ecies1.json](testdata/vectors/ecies1.json), a test key: never use it).
 
-Decisions (P0): name `hsmgate`, language Go, licence MIT. First client: CiNim, through the Transit face ([docs/transit-face.md](docs/transit-face.md)); no own protocol. Later: Kubernetes KMS v2, AWS KMS JSON ([alternative](docs/awskms-face.md)).
+Decisions (P0): name `hsmgate`, language Go, licence MIT. First client: CiNim, through the Transit face ([docs/transit-face.md](docs/transit-face.md)); no own protocol. Etcd encryption through `vault-kubernetes-kms`; AWS KMS is designed only (see [docs/specs](docs/specs/README.md)).
 
 ```
 go test ./...
@@ -24,5 +24,5 @@ cp deploy/hsmgate.example.yaml hsmgate.yaml    # edit: certificates, token, clie
 ./hsmgate unlock -config hsmgate.yaml -token card
 ```
 
-Docs: [transit-face.md](docs/transit-face.md) (the API; [OpenAPI spec](api/openapi.yaml)), [operations.md](docs/operations.md) (unlock, rotation, spare card, lost card), [threat-model.md](docs/threat-model.md),
+Docs: **[specifications](docs/specs/README.md)** ([Transit](docs/specs/transit.md), [sealed format](docs/specs/ecies1.md), [Kubernetes KMS v2](docs/specs/kubernetes-kms-v2.md), [AWS KMS](docs/specs/aws-kms.md); [OpenAPI](api/openapi.yaml)), [transit-face.md](docs/transit-face.md) (design and what was tried), [operations.md](docs/operations.md) (unlock, rotation, spare card, lost card), [threat-model.md](docs/threat-model.md),
 [tokens/smartcard-hsm.md](docs/tokens/smartcard-hsm.md), [project-plan.md](docs/project-plan.md). Deployment: [deploy/](deploy/) (systemd unit; Docker: `Dockerfile` in the root and [deploy/docker/compose.yaml](deploy/docker/compose.yaml), see [Running in Docker](docs/operations.md)). One card means one machine or VM with the reader, not a scheduler.

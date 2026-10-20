@@ -1,7 +1,9 @@
 # The Transit face: the API for CiNim
 
+> The contract is written in [specs/transit.md](specs/transit.md) (and [specs/ecies1.md](specs/ecies1.md), [specs/kubernetes-kms-v2.md](specs/kubernetes-kms-v2.md), [specs/aws-kms.md](specs/aws-kms.md)). This page is the design and the record of what was tried.
+
 Decision (2026-10-19): CiNim talks to hsmgate through the **Vault/OpenBao Transit API** (`encrypt`, `decrypt`, `rewrap`, `keys/<name>`). No own protocol. The AWS KMS option (`DeriveSharedSecret`) is kept only as a
-possible later face: [awskms-face.md](awskms-face.md).
+possible later face: [specs/aws-kms.md](specs/aws-kms.md).
 
 Why Transit: plain JSON over HTTPS, no request signing, a **context** that the service can check, named keys with versions and `rewrap`, and the same face serves OpenBao (seal `transit`), SOPS and `vault-kubernetes-kms` for etcd.
 The service does the ECIES itself (the token does only ECDH, so a card without AES works); it sees data keys in plaintext while it wraps or unwraps, and says so in the threat model.
