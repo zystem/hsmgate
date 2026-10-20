@@ -80,9 +80,23 @@ clients:
 
 **Removing the provider** (checked the same day): `identity` first and `kms` second, restart; rewrite every Secret (`kubectl get secrets -A -o json | kubectl replace -f -`, 20 Secrets here); then remove the provider and restart. After that all 20 Secrets were read without the plug-in, and the apiserver had no `kms-providers` check. Do not stop the plug-in before the rewrite: a Secret that stays under the provider is unreadable without it. On this host the last restart failed once with `listen tcp :6443: bind: address already in use`: `tailscaled` (a `tailscale serve` rule for 6443) had taken the port on the tailnet address while k3s was stopped; turning the rule off let k3s start. That is a property of that host, not of KMS; any restart of the apiserver is a window for it.
 
-## 3. The way that does not exist: a native KMS v2 face
+## 3. Deliberately not built: a native KMS v2 face, or a bridge of our own
 
-hsmgate could serve the three RPCs itself on a unix socket and drop the plug-in. It was **postponed** because the plug-in does the job and a native face would add gRPC and a second authentication path for no new function. If it is built, it must:
+**The decision (2026-10-20): the plug-in stays; nothing is built.** The reasons:
+
+- `kube-apiserver` talks to a KMS plug-in only over a **local unix socket**. When hsmgate is on another machine (the usual case: one card, several control-plane nodes), something local on every control-plane node must translate "socket" into "network". That is what the plug-in is. A gRPC face inside hsmgate would remove it only where hsmgate and the apiserver share a host (like the single-node k3s of the test), which is not the general case.
+- The plug-in works: it was run against a real apiserver (§2), and the calls it makes are held by an automated test (`kms_v2_test.go`) that fails when the contract of the Transit API changes.
+
+**What the plug-in costs, so that the decision can be revisited:**
+
+| Cost | Detail |
+|---|---|
+| a third-party program in the path of every DEK | it sees the DEK in plaintext, as hsmgate does: two parties to trust instead of one; its releases have to be followed |
+| one more component on every control-plane node | it must be running before the apiserver, with a client certificate of hsmgate on the node |
+| `Status` is expensive | every poll (about once a minute) is an `encrypt` and a `decrypt` (an ECDH on the card) and two `keys` reads; the probe is built into the plug-in and cannot be made light |
+| no context | the plug-in never sends one, so its key is in `fixed` mode: whoever holds a certificate with a grant on that key can open the DEKs of every cluster that uses it. Give each cluster its own key |
+
+**When to build something:** if the probe load on the card matters, or a third-party program in the DEK path is not acceptable, build a **small bridge of our own** (a separate binary in this repository, about 300 lines: `k8s.io/kms/apis/v2` on a unix socket on one side, `internal/client` on the other), not a gRPC face inside the service. It would answer `Status` from the state of the token (`token_state` of `keys/{name}`) without an ECDH, put one party of our own in the path, and be covered by the same simulator test. If the apiserver and hsmgate do share a host and the extra hop is the only objection, a gRPC face on a unix socket with `SO_PEERCRED` identity is the other way; it must then:
 
 - serve `Status`, `Encrypt`, `Decrypt` as in §1 on a unix socket (mode 0600), identify the caller by `SO_PEERCRED` (uid/gid), map it to a client of the policy, and then use the same keys, grants, limits, audit and token as Transit;
 - return `Status.healthz` not `ok` while the token is locked or absent, and `key_id` = the latest version of the key;
