@@ -26,6 +26,21 @@ steps:
       - event: pull_request
       - event: tag
 
+  fuzz:
+    # the parsers that face the network, a minute each; runs on a schedule (a cron job of the repository in Woodpecker), not on every push
+    image: golang:1.26.9-bookworm
+    commands:
+      - git config --global --add safe.directory "$CI_WORKSPACE"
+      - go test -run '^$' -fuzz '^FuzzDecryptRequest$' -fuzztime 60s ./internal/face/transit
+      - go test -run '^$' -fuzz '^FuzzUnwrap$' -fuzztime 60s ./internal/scheme/ecies
+      - go test -run '^$' -fuzz '^FuzzRoundTrip$' -fuzztime 30s ./internal/scheme/ecies
+      - go test -run '^$' -fuzz '^FuzzParse$' -fuzztime 60s ./internal/config
+      - go test -run '^$' -fuzz '^FuzzVerify$' -fuzztime 60s ./internal/sigv4
+      - go test -run '^$' -fuzz '^FuzzParseBlob$' -fuzztime 60s ./internal/face/kmsjson
+      - go test -run '^$' -fuzz '^FuzzRequestBody$' -fuzztime 60s ./internal/face/kmsjson
+    when:
+      - event: cron
+
   kmsjson_sdk:
     # the KMS-JSON face against the vendor's official Go SDK (a module of its own: test/kmsjson-sdk)
     image: golang:1.26.9-bookworm
