@@ -1,6 +1,6 @@
 # Kubernetes KMS v2 (etcd encryption by the card)
 
-**Status: served through a plug-in; verified with a gRPC client and with a real kube-apiserver (k3s v1.36.5) using a software key; not yet with a card; a native gRPC face is not built.**
+**Status: served through a plug-in; verified with a gRPC client and with a real kube-apiserver (k3s v1.36.5) using a software key; not yet with a card; a native gRPC face or a bridge of our own is deliberately not built (§3).**
 
 Kubernetes can encrypt Secrets in etcd with a key it does not hold: `kube-apiserver` calls a *KMS plug-in* over a local gRPC socket, and the plug-in sends the apiserver's data keys to a key service. hsmgate is that key service; the key is on the card. There are two ways to connect them. Only the first exists.
 
