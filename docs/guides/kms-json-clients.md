@@ -72,9 +72,27 @@ seal "awskms" {
 
 with `AWS_CA_BUNDLE` set in the environment of OpenBao and a client with `no_cert: true`. The seal uses `Encrypt`, `Decrypt` and `DescribeKey`. OpenBao 2.6 warns that this seal moves into an external plugin in the next minor release; Transit (`seal "transit"`, with a certificate) does not have that problem.
 
-## SOPS, Terraform, others
+## SOPS (tried)
 
-Not tried. SOPS (`kms:` entries with an endpoint) and programs that call only `Encrypt`, `Decrypt`, `GenerateDataKey`, `Sign`, `Verify`, `GenerateMac`, `VerifyMac` and `GenerateRandom` are expected to work; programs that manage keys (`CreateKey`, rotation, tags, key policies; the Terraform provider reads some of them) will not, because keys here are made in the configuration and on the token.
+SOPS 3.13.3 against a local service with a `no_cert` client and a key with `kmsjson_usage: encrypt_decrypt`:
+
+```bash
+export AWS_ACCESS_KEY_ID=AKIDAPPAPPAPPAPP0001 AWS_SECRET_ACCESS_KEY="$(cat app.sigv4)" AWS_REGION=local AWS_CA_BUNDLE=ca.pem
+export AWS_ENDPOINT_URL_KMS=https://hsmgate.example:8443
+```
+
+```yaml
+# .sops.yaml
+creation_rules:
+  - path_regex: .*
+    kms: arn:aws:kms:local:000000000000:key/app
+```
+
+`sops encrypt -i file.yaml` and `sops decrypt file.yaml` worked, as did a wrong secret (refused with a signature error). **SOPS accepts only identifiers that begin with `arn:aws…`** (`arn:hsmgate:…` is refused by SOPS itself: "no valid ARN found"). hsmgate does not care about the partition and the account part of an identifier: it reads the key from the `:key/<name>` or `:alias/<name>` at the end, so write the key as `arn:aws:kms:<region>:000000000000:key/<name>` for SOPS; that text is then stored in the encrypted files. The data key of SOPS is sealed with `Encrypt` and opened with `Decrypt`.
+
+## Terraform, others
+
+Not tried. Programs that call only `Encrypt`, `Decrypt`, `GenerateDataKey`, `Sign`, `Verify`, `GenerateMac`, `VerifyMac` and `GenerateRandom` are expected to work; programs that manage keys (`CreateKey`, rotation, tags, key policies; the Terraform provider reads some of them) will not, because keys here are made in the configuration and on the token.
 
 ## What differs from the cloud service
 
