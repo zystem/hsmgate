@@ -108,24 +108,34 @@ The client certificate is itself a secret in the cluster, so the security of the
 
 `hsmgate encrypt` and `hsmgate decrypt` take the same connection flags (also as environment variables): `-addr`, `-transit-key`, `-mount` (default `transit`), `-ca`, `-cert`, `-keyfile`, `-wait`. Plain HTTP is accepted for a loopback address only (development). Exit codes: 0 done, 1 failed (the reason is on standard error), 2 wrong usage.
 
-The same two flags name the sources in both commands, and they can be given together:
+**One family of flags, the same in both commands.** What goes in has `-in...`, what comes out has `-out...`; in `encrypt` the input is the value and the output is the ciphertext, in `decrypt` the other way round.
 
-| Flag | In `encrypt` | In `decrypt` |
-|---|---|---|
-| `-in-dir DIR` | every regular file of DIR (not those starting with a dot) is a value; the file name is the field name | every regular file of DIR is a ciphertext (a mounted Secret); the file name is the field name |
-| `-in-file SRC[=TARGET]` (repeat) | SRC holds one value; TARGET is its **field name** (default: the base name of SRC) | SRC holds one ciphertext; TARGET is the **path** it is written to (default: `-out-dir`/base name of SRC) |
-| `-in FILE` / standard input | one value (alone, not with the two above) | one ciphertext to standard output (alone) |
+| Input | Output | What it does | Context |
+|---|---|---|---|
+| `-in FILE` (default `-`: standard input) | `-out FILE` (default `-`: standard output) | one value | `-context C` |
+| `-in-dir DIR` | `-out-dir DIR` | every regular file of DIR (not those starting with a dot) to a file of the same name | `-context-prefix P` + the name of the ciphertext file |
+| `-in-files a,b,c` | `-out-files x,y,z` | the files **in pairs, by position**: a to x, b to y, c to z | the same |
 
-`-k8s NAMESPACE/SECRET` (with `-in-dir`/`-in-file`) or `-k8s NAMESPACE/SECRET/FIELD` (one value) sets the context `k8s/NAMESPACE/SECRET/<field>` and prints a `Secret` manifest; `-context` gives a bare context and prints a bare ciphertext. In `decrypt` the context is `-context-prefix` followed by the field name (the base name of the ciphertext file). Two sources for one field (`encrypt`) or one destination (`decrypt`) is an error, and nothing is done. A file is limited to 1 MiB, and by the `max_bytes` of the key (8192 by default).
+`-in-files` and `-out-files` are comma-separated lists (the flag may also be repeated; spaces around an element are removed, a path with a comma in it cannot be given). **If the lists are of different length the command stops with an error** (exit 2) and does nothing. `-in-files` may be used with `-out-dir` instead of `-out-files`: the outputs then have the names of the inputs. `-in-dir` and `-in-files` can be given together.
+
+**The context** of a value is the prefix followed by the base name of the **ciphertext file**: the input of `decrypt`, the output of `encrypt`. That name is the field name in the Secret, so sealing and opening agree. Two values with the same name (the same context), or two outputs to the same place, are refused.
+
+**`encrypt -k8s`** prints a Secret manifest instead of writing ciphertext files: `-k8s NAMESPACE/SECRET/FIELD` for one value, `-k8s NAMESPACE/SECRET` with `-in-dir`/`-in-files` (the field names are the base names of the input files; `-context-prefix` becomes `k8s/NAMESPACE/SECRET/`). It cannot be combined with `-out-dir`/`-out-files`.
+
+All values are sealed or opened first; the files are written only if all succeeded (atomically, mode `-mode`: 0440 for `decrypt`, 0644 for `encrypt`). A value is limited to 1 MiB and to the `max_bytes` of the key (8192 by default). `encrypt` removes one trailing newline of each value unless `-raw` is given.
 
 Examples:
 
 ```bash
-# a whole directory and one more file, as one Secret
-hsmgate encrypt -k8s shop/app-files -in-dir ./plain -in-file ./certs/keystore.p12=keystore > app-files.yaml
-# in the pod: all of them to /vault/secrets, and one of them also to a path the application wants
-hsmgate decrypt -context-prefix 'k8s/$(POD_NAMESPACE)/app-files/' -in-dir /enc -out-dir /vault/secrets \
-                -in-file /enc/keystore=/etc/ssl/app/keystore.p12
+# one Secret manifest from a directory and one more file
+hsmgate encrypt -k8s shop/app-files -in-dir ./plain -in-files ./certs/keystore.p12 > app-files.yaml
+# ciphertext files instead of a manifest (for a mounted volume or a Git repository)
+hsmgate encrypt -in-files ./a,./b -out-files ./enc/a,./enc/b -context-prefix k8s/shop/app-files/
+# in the pod: everything to /vault/secrets
+hsmgate decrypt -context-prefix 'k8s/$(POD_NAMESPACE)/app-files/' -in-dir /enc -out-dir /vault/secrets
+# or two files to places the application wants
+hsmgate decrypt -context-prefix 'k8s/$(POD_NAMESPACE)/app-files/' \
+    -in-files /enc/application.yaml,/enc/keystore -out-files /etc/app/application.yaml,/etc/ssl/app/keystore.p12
 ```
 
-Binary files work (the value is bytes, not text). The files are written all together or not at all, atomically, with mode 0440 by default (`-mode`).
+Note that in the last example the Secret's fields are `application.yaml` and `keystore`: the output name `keystore.p12` is only where the value goes, the context comes from the ciphertext file `keystore`.
