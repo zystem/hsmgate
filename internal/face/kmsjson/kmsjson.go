@@ -69,6 +69,8 @@ type Face struct {
 	Now      func() time.Time // for tests
 	// NoCertificate says that the connection of a request showed no client certificate; nil: judged from the TLS state. For tests.
 	NoCertificate func(*http.Request) bool
+	// MacKeys keeps derived MAC keys for kmsjson.mac_cache_seconds; shared by the generations.
+	MacKeys *macCache
 	// Fails counts the refused signatures by the address of the peer; created by the first request, shared by the generations.
 	Fails *Failures
 
@@ -103,7 +105,7 @@ func (f *Face) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f.mu.Unlock()
 	}
 	f.mu.RLock()
-	g := &Face{Cfg: f.Cfg, Tokens: f.Tokens, Policy: f.Policy, Audit: f.Audit, Identify: f.Identify, Creds: f.Creds, Gate: f.Gate, Created: f.Created, Now: f.Now, NoCertificate: f.NoCertificate, Fails: f.Fails}
+	g := &Face{Cfg: f.Cfg, Tokens: f.Tokens, Policy: f.Policy, Audit: f.Audit, Identify: f.Identify, Creds: f.Creds, Gate: f.Gate, Created: f.Created, Now: f.Now, NoCertificate: f.NoCertificate, Fails: f.Fails, MacKeys: f.MacKeys}
 	t := f.track
 	t.wg.Add(1) // under the read lock, as in the Transit face
 	f.mu.RUnlock()
@@ -291,7 +293,7 @@ func (f *Face) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	version := key.Versions[ver-1]
 
-	if key.Usage() == config.UsageEncryptDecrypt {
+	if key.Usage() == config.UsageEncryptDecrypt || key.Usage() == config.UsageMAC {
 		switch op {
 		case "DescribeKey":
 			if f.Policy.CheckMeta(client, name) != policy.Allow {
@@ -440,6 +442,11 @@ func (f *Face) arn(name string) string {
 func (f *Face) metadata(name string, ver int, k config.Key) map[string]any {
 	created := float64(f.Created.Unix())
 	state := "Enabled"
+	if k.Usage() == config.UsageMAC {
+		return map[string]any{"KeyId": name, "Arn": f.arn(name), "CreationDate": created, "Enabled": true, "Description": "key " + name + " of the key service",
+			"KeyUsage": "GENERATE_VERIFY_MAC", "KeyState": state, "KeySpec": "HMAC_256", "CustomerMasterKeySpec": "HMAC_256", "MacAlgorithms": []string{"HMAC_SHA_256"},
+			"KeyManager": "CUSTOMER", "MultiRegion": false, "HsmgateVersion": ver, "HsmgateLatestVersion": len(k.Versions)}
+	}
 	if k.Usage() == config.UsageSignVerify {
 		return map[string]any{"KeyId": name, "Arn": f.arn(name), "CreationDate": created, "Enabled": true, "Description": "key " + name + " of the key service",
 			"KeyUsage": "SIGN_VERIFY", "KeyState": state, "KeySpec": keySpec, "CustomerMasterKeySpec": keySpec, "SigningAlgorithms": []string{"ECDSA_SHA_256"},

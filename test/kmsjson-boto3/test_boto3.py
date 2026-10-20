@@ -63,15 +63,16 @@ def setUpModule():
     write(f("ca.pem"), pem_cert(ca)); write(f("srv.pem"), pem_cert(srv)); write(f("srv.key"), pem_key(sk))
     write(f("cli.pem"), pem_cert(cli)); write(f("cli.key"), pem_key(ck))
     write(f("sigv4-secret"), (SECRET + "\n").encode())
-    write(f("k1.hex"), b"07" * 32); write(f("k2.hex"), b"09" * 32); write(f("k3.hex"), b"0b" * 32)
+    write(f("k1.hex"), b"07" * 32); write(f("k2.hex"), b"09" * 32); write(f("k3.hex"), b"0b" * 32); write(f("k4.hex"), b"0d" * 32)
     s = socket.socket(); s.bind(("127.0.0.1", 0)); addr = "127.0.0.1:%d" % s.getsockname()[1]; s.close()
     write(f("hsmgate.yaml"), f"""listen: {addr}
 tls: {{cert: {f('srv.pem')}, key: {f('srv.key')}, client_ca: {f('ca.pem')}}}
 audit: {{file: {f('audit.log')}}}
 kmsjson: {{enabled: true, region: local}}
-tokens: [{{name: soft, type: soft, keys: {{m1: {f('k1.hex')}, m2: {f('k2.hex')}, m3: {f('k3.hex')}}}}}]
+tokens: [{{name: soft, type: soft, keys: {{m1: {f('k1.hex')}, m2: {f('k2.hex')}, m3: {f('k3.hex')}, m4: {f('k4.hex')}}}}}]
 keys:
   etcd: {{kmsjson: true, versions: [{{token: soft, label: m1}}, {{token: soft, label: m2}}], aad: {{mode: fixed}}}}
+  mac: {{kmsjson: true, kmsjson_usage: generate_verify_mac, versions: [{{token: soft, label: m4}}], aad: {{mode: fixed}}}}
   sig: {{kmsjson: true, kmsjson_usage: sign_verify, versions: [{{token: soft, label: m3}}], aad: {{mode: fixed}}}}
   seal: {{kmsjson: true, kmsjson_usage: encrypt_decrypt, versions: [{{token: soft, label: m1}}], aad: {{mode: fixed}}}}
   hidden: {{versions: [{{token: soft, label: m1}}], aad: {{mode: fixed}}}}
@@ -79,7 +80,7 @@ clients:
   - name: boto
     identity: {{cn: boto-client}}
     sigv4: {{access_key_id: {AKID}, secret_file: {f('sigv4-secret')}}}
-    keys: {{etcd: {{ops: [derive]}}, seal: {{ops: [encrypt, decrypt]}}, sig: {{ops: [sign, verify]}}}}
+    keys: {{etcd: {{ops: [derive]}}, seal: {{ops: [encrypt, decrypt]}}, sig: {{ops: [sign, verify]}}, mac: {{ops: [generate_mac, verify_mac]}}}}
 """.encode())
     PROC = subprocess.Popen([BIN, "serve", "-config", f("hsmgate.yaml")])
     host, port = addr.split(":")
@@ -130,8 +131,8 @@ class KMSJSON(unittest.TestCase):
         md = c.describe_key(KeyId="etcd")["KeyMetadata"]
         self.assertEqual((md["KeyId"], md["Enabled"], md["KeyState"], md["KeyUsage"]), ("etcd", True, "Enabled", "KEY_AGREEMENT"))
         self.assertIn("CreationDate", md)
-        self.assertEqual(sorted(k["KeyId"] for k in c.list_keys()["Keys"]), ["etcd", "seal", "sig"])
-        self.assertEqual(sorted(a["AliasName"] for a in c.list_aliases()["Aliases"]), ["alias/etcd", "alias/seal", "alias/sig"])
+        self.assertEqual(sorted(k["KeyId"] for k in c.list_keys()["Keys"]), ["etcd", "mac", "seal", "sig"])
+        self.assertEqual(sorted(a["AliasName"] for a in c.list_aliases()["Aliases"]), ["alias/etcd", "alias/mac", "alias/seal", "alias/sig"])
 
     def test_encrypt_decrypt_and_data_keys(self):
         c = mtls_client()
@@ -166,6 +167,18 @@ class KMSJSON(unittest.TestCase):
         with self.assertRaises(ClientError) as e:
             c.verify(KeyId="sig", Message=b"other", Signature=sg["Signature"], SigningAlgorithm="ECDSA_SHA_256")
         self.assertEqual(code(e), "KMSInvalidSignatureException")
+
+    def test_generate_and_verify_mac(self):
+        c = mtls_client()
+        md = c.describe_key(KeyId="mac")["KeyMetadata"]
+        self.assertEqual((md["KeyUsage"], md["KeySpec"], md["MacAlgorithms"]), ("GENERATE_VERIFY_MAC", "HMAC_256", ["HMAC_SHA_256"]))
+        msg = b"message to authenticate"
+        g = c.generate_mac(KeyId="alias/mac", Message=msg, MacAlgorithm="HMAC_SHA_256")
+        self.assertEqual(len(g["Mac"]), 32)
+        self.assertTrue(c.verify_mac(KeyId="mac", Message=msg, Mac=g["Mac"], MacAlgorithm="HMAC_SHA_256")["MacValid"])
+        with self.assertRaises(ClientError) as e:
+            c.verify_mac(KeyId="mac", Message=b"other", Mac=g["Mac"], MacAlgorithm="HMAC_SHA_256")
+        self.assertEqual(code(e), "KMSInvalidMacException")
 
     def test_errors(self):
         c = mtls_client()

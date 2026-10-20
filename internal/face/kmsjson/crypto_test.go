@@ -2,10 +2,15 @@ package kmsjson
 
 import (
 	"bytes"
+	"crypto/ecdh"
 	"crypto/ecdsa"
+	"crypto/hkdf"
+	"crypto/hmac"
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
+	"github.com/zystem/hsmgate/internal/keyops"
+	"github.com/zystem/hsmgate/internal/scheme/ecies"
 	"github.com/zystem/hsmgate/internal/sigv4"
 	"net/http"
 	"net/http/httptest"
@@ -29,17 +34,21 @@ func cryptoRig(t *testing.T) *rig {
 	k1 := write("k1", strings.Repeat("01", 32))
 	k2 := write("k2", strings.Repeat("02", 32))
 	k3 := write("k3", strings.Repeat("03", 32))
+	k4 := write("k4", strings.Repeat("04", 32))
+	k5 := write("k5", strings.Repeat("05", 32))
 	cfg, err := config.Parse([]byte(`
 kmsjson: {enabled: true, region: local}
-tokens: [{name: soft, type: soft, keys: {m1: ` + k1 + `, m2: ` + k2 + `, m3: ` + k3 + `}}]
+tokens: [{name: soft, type: soft, keys: {m1: ` + k1 + `, m2: ` + k2 + `, m3: ` + k3 + `, m4: ` + k4 + `, m5: ` + k5 + `}}]
 keys:
   seal:  {kmsjson: true, kmsjson_usage: encrypt_decrypt, versions: [{token: soft, label: m1}], aad: {mode: fixed}}
   seal2: {kmsjson: true, kmsjson_usage: encrypt_decrypt, versions: [{token: soft, label: m2}], aad: {mode: fixed}}
   org:   {kmsjson: true, kmsjson_usage: encrypt_decrypt, versions: [{token: soft, label: m1}, {token: soft, label: m2}], aad: {mode: context, allow: ["purpose=dek"]}}
   sig:   {kmsjson: true, kmsjson_usage: sign_verify, versions: [{token: soft, label: m3}], aad: {mode: fixed}}
+  mac:   {kmsjson: true, kmsjson_usage: generate_verify_mac, versions: [{token: soft, label: m4}], aad: {mode: fixed}}
+  macrot: {kmsjson: true, kmsjson_usage: generate_verify_mac, versions: [{token: soft, label: m5}], aad: {mode: fixed}}
   ecdh:  {kmsjson: true, versions: [{token: soft, label: m1}], aad: {mode: fixed}}
 clients:
-  - {name: app, identity: {cn: app}, sigv4: {access_key_id: ` + akid + `, secret_file: /unused}, keys: {seal: {ops: [encrypt, decrypt]}, seal2: {ops: [encrypt]}, org: {ops: [encrypt, decrypt]}, ecdh: {ops: [derive, encrypt]}, sig: {ops: [sign, verify]}}}
+  - {name: app, identity: {cn: app}, sigv4: {access_key_id: ` + akid + `, secret_file: /unused}, keys: {seal: {ops: [encrypt, decrypt]}, seal2: {ops: [encrypt]}, org: {ops: [encrypt, decrypt]}, ecdh: {ops: [derive, encrypt]}, sig: {ops: [sign, verify]}, mac: {ops: [generate_mac, verify_mac]}, macrot: {ops: [generate_mac, verify_mac]}}}
   - {name: bot, sigv4: {access_key_id: AKIDBOTBOTBOTBOT00, secret_file: /unused, no_cert: true, allow_from: [127.0.0.0/8]}, keys: {seal: {ops: [encrypt, decrypt]}}}
   - {name: reader, identity: {cn: reader}, sigv4: {access_key_id: AKIDVIEWERVIEWER00, secret_file: /unused}, keys: {seal: {ops: [decrypt]}}}
 `))
@@ -56,7 +65,7 @@ clients:
 		Identify: func(r *http.Request) (string, bool) { c := r.Header.Get("X-Test-Client"); return c, c != "-" },
 		Creds: map[string]Cred{akid: {Client: "app", Secret: secret}, "AKIDVIEWERVIEWER00": {Client: "reader", Secret: secret},
 			"AKIDBOTBOTBOTBOT00": {Client: "bot", Secret: secret, NoCert: true, From: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}}},
-		NoCertificate: func(r *http.Request) bool { return r.Header.Get("X-Test-NoCert") == "1" }, Fails: NewFailures()}
+		NoCertificate: func(r *http.Request) bool { return r.Header.Get("X-Test-NoCert") == "1" }, Fails: NewFailures(), MacKeys: NewMacKeys()}
 	srv := httptest.NewServer(f)
 	t.Cleanup(srv.Close)
 	return &rig{t, srv, f, buf, cfg, now, dir}
@@ -447,5 +456,148 @@ func TestAlgorithmOfAnotherKeyType(t *testing.T) {
 	}
 	if st, out := r.app("Encrypt", map[string]any{"KeyId": "seal", "Plaintext": []byte("m"), "EncryptionAlgorithm": "garbage"}); st != 400 || typ(out) != "ValidationException" {
 		t.Errorf("garbage: %d %v", st, out)
+	}
+}
+
+func TestGenerateAndVerifyMac(t *testing.T) {
+	r := cryptoRig(t)
+	msg := []byte("message to authenticate")
+	st, g := r.app("GenerateMac", map[string]any{"KeyId": "alias/mac", "Message": msg, "MacAlgorithm": "HMAC_SHA_256"})
+	if st != 200 || g["MacAlgorithm"] != "HMAC_SHA_256" || !strings.HasSuffix(g["KeyId"].(string), ":key/mac") {
+		t.Fatalf("GenerateMac: %d %v", st, g)
+	}
+	mac, _ := base64.StdEncoding.DecodeString(g["Mac"].(string))
+	// the key is the one the design says: HKDF of the ECDH of the private key with the fixed point
+	priv, _ := ecdh.P256().NewPrivateKey(bytes.Repeat([]byte{4}, 32))
+	peer, err := ecdh.P256().NewPublicKey(keyops.MacPoint())
+	if err != nil {
+		t.Fatal(err)
+	}
+	z, _ := priv.ECDH(peer)
+	fp := ecies.Fingerprint(priv.PublicKey().Bytes())
+	mk, _ := hkdf.Key(sha256.New, z, []byte("hsmgate/mac/v1"), "mac|"+fp, 32)
+	h := hmac.New(sha256.New, mk)
+	h.Write(msg)
+	if !bytes.Equal(mac, h.Sum(nil)) {
+		t.Errorf("the MAC is not HMAC-SHA-256 under the derived key")
+	}
+	// the same message gives the same MAC; another message, another; another key, another
+	_, g2 := r.app("GenerateMac", map[string]any{"KeyId": "mac", "Message": msg, "MacAlgorithm": "HMAC_SHA_256"})
+	if g2["Mac"] != g["Mac"] {
+		t.Error("a MAC is not repeatable")
+	}
+	_, g3 := r.app("GenerateMac", map[string]any{"KeyId": "macrot", "Message": msg, "MacAlgorithm": "HMAC_SHA_256"})
+	if g3["Mac"] == g["Mac"] {
+		t.Error("two keys give one MAC")
+	}
+	// VerifyMac
+	if st, out := r.app("VerifyMac", map[string]any{"KeyId": "mac", "Message": msg, "Mac": mac, "MacAlgorithm": "HMAC_SHA_256"}); st != 200 || out["MacValid"] != true {
+		t.Errorf("VerifyMac: %d %v", st, out)
+	}
+	bad := append([]byte{}, mac...)
+	bad[0] ^= 1
+	for name, body := range map[string]map[string]any{
+		"another message": {"KeyId": "mac", "Message": []byte("other"), "Mac": mac, "MacAlgorithm": "HMAC_SHA_256"},
+		"a damaged mac":   {"KeyId": "mac", "Message": msg, "Mac": bad, "MacAlgorithm": "HMAC_SHA_256"},
+		"another key":     {"KeyId": "macrot", "Message": msg, "Mac": mac, "MacAlgorithm": "HMAC_SHA_256"},
+		"a short mac":     {"KeyId": "mac", "Message": msg, "Mac": mac[:5], "MacAlgorithm": "HMAC_SHA_256"},
+	} {
+		if st, out := r.app("VerifyMac", body); st != 400 || typ(out) != "KMSInvalidMacException" {
+			t.Errorf("%s: %d %v", name, st, out)
+		}
+	}
+	for name, c := range map[string]struct {
+		op   string
+		body map[string]any
+		typ  string
+	}{
+		"algorithm of another size": {"GenerateMac", map[string]any{"KeyId": "mac", "Message": msg, "MacAlgorithm": "HMAC_SHA_512"}, "InvalidKeyUsageException"},
+		"nonsense algorithm":        {"GenerateMac", map[string]any{"KeyId": "mac", "Message": msg, "MacAlgorithm": "x"}, "ValidationException"},
+		"empty message":             {"GenerateMac", map[string]any{"KeyId": "mac", "MacAlgorithm": "HMAC_SHA_256"}, "ValidationException"},
+		"empty mac":                 {"VerifyMac", map[string]any{"KeyId": "mac", "Message": msg, "MacAlgorithm": "HMAC_SHA_256"}, "ValidationException"},
+		"dry run":                   {"GenerateMac", map[string]any{"KeyId": "mac", "Message": msg, "MacAlgorithm": "HMAC_SHA_256", "DryRun": true}, "DryRunOperationException"},
+		"a signing key":             {"GenerateMac", map[string]any{"KeyId": "sig", "Message": msg, "MacAlgorithm": "HMAC_SHA_256"}, "InvalidKeyUsageException"},
+		"a sealing key":             {"VerifyMac", map[string]any{"KeyId": "seal", "Message": msg, "Mac": mac, "MacAlgorithm": "HMAC_SHA_256"}, "InvalidKeyUsageException"},
+	} {
+		if st, out := r.app(c.op, c.body); st != 400 || typ(out) != c.typ {
+			t.Errorf("%s: %d %v", name, st, out)
+		}
+	}
+	// a MAC key is not for other operations, and says what it is
+	if st, out := r.app("Encrypt", map[string]any{"KeyId": "mac", "Plaintext": "eA=="}); st != 400 || typ(out) != "InvalidKeyUsageException" {
+		t.Errorf("encrypt: %d %v", st, out)
+	}
+	if st, out := r.app("GetPublicKey", map[string]any{"KeyId": "mac"}); st != 400 || typ(out) != "UnsupportedOperationException" {
+		t.Errorf("GetPublicKey: %d %v", st, out)
+	}
+	_, d := r.app("DescribeKey", map[string]any{"KeyId": "mac"})
+	if md, _ := d["KeyMetadata"].(map[string]any); md["KeyUsage"] != "GENERATE_VERIFY_MAC" || md["KeySpec"] != "HMAC_256" {
+		t.Errorf("DescribeKey: %v", d)
+	}
+	// the audit holds a piece of the hash of the message, not the message
+	if a := r.audit.String(); !strings.Contains(a, `"op":"generatemac"`) || !strings.Contains(a, "msg=") || strings.Contains(a, "message to authenticate") {
+		t.Errorf("audit: %s", a)
+	}
+}
+
+type countingToken struct {
+	backend.Token
+	n *int
+}
+
+func (c countingToken) Derive(label string, peer []byte) ([]byte, error) {
+	*c.n++
+	return c.Token.Derive(label, peer)
+}
+
+func TestMacKeyCache(t *testing.T) {
+	r := cryptoRig(t)
+	n := 0
+	r.face.Tokens["soft"] = countingToken{r.face.Tokens["soft"], &n}
+	gen := func() {
+		r.app("GenerateMac", map[string]any{"KeyId": "mac", "Message": []byte("m"), "MacAlgorithm": "HMAC_SHA_256"})
+	}
+	gen()
+	gen()
+	if n != 2 {
+		t.Errorf("without a cache every MAC asks the token: %d", n)
+	}
+	n = 0
+	r.cfg.KMSJSON.MacCacheSeconds = 60
+	gen()
+	gen()
+	gen()
+	if n != 1 {
+		t.Errorf("with a cache the token is asked once: %d", n)
+	}
+	r.face.Now = func() time.Time { return r.now.Add(2 * time.Minute) }
+	gen()
+	if n != 2 {
+		t.Errorf("after the time the key is derived again: %d", n)
+	}
+}
+
+func TestMacVersions(t *testing.T) {
+	r := cryptoRig(t)
+	msg := []byte("m")
+	_, g := r.app("GenerateMac", map[string]any{"KeyId": "mac", "Message": msg, "MacAlgorithm": "HMAC_SHA_256"})
+	mac, _ := base64.StdEncoding.DecodeString(g["Mac"].(string))
+	// a second version of the key: the earlier MACs still verify (the latest is tried first, then the earlier), new ones differ
+	key := r.cfg.Keys["mac"]
+	key.Versions = append(key.Versions, config.Version{Token: "soft", Label: "m5"})
+	r.cfg.Keys["mac"] = key
+	if st, out := r.app("VerifyMac", map[string]any{"KeyId": "mac", "Message": msg, "Mac": mac, "MacAlgorithm": "HMAC_SHA_256"}); st != 200 || out["MacValid"] != true {
+		t.Errorf("the old MAC after rotation: %d %v", st, out)
+	}
+	_, g2 := r.app("GenerateMac", map[string]any{"KeyId": "mac", "Message": msg, "MacAlgorithm": "HMAC_SHA_256"})
+	if g2["Mac"] == g["Mac"] {
+		t.Error("the new version gives the old MAC")
+	}
+	// a version asked for by name@N is the only one tried
+	if st, out := r.app("VerifyMac", map[string]any{"KeyId": "mac@2", "Message": msg, "Mac": mac, "MacAlgorithm": "HMAC_SHA_256"}); st != 400 || typ(out) != "KMSInvalidMacException" {
+		t.Errorf("version 2 against a MAC of version 1: %d %v", st, out)
+	}
+	if st, out := r.app("VerifyMac", map[string]any{"KeyId": "mac@1", "Message": msg, "Mac": mac, "MacAlgorithm": "HMAC_SHA_256"}); st != 200 || out["MacValid"] != true {
+		t.Errorf("version 1: %d %v", st, out)
 	}
 }

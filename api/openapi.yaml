@@ -34,7 +34,7 @@ paths:
       description: >
         A subset of the JSON API that cloud key services of this shape speak, selected by the header `X-Amz-Target: TrentService.<Operation>`.
         Operations: GetPublicKey, DescribeKey, ListKeys, ListAliases, DeriveSharedSecret (keys with kmsjson_usage key_agreement);
-        Encrypt, Decrypt, ReEncrypt, GenerateDataKey, GenerateDataKeyWithoutPlaintext (keys with kmsjson_usage encrypt_decrypt); Sign, Verify (kmsjson_usage sign_verify, ECDSA_SHA_256); GenerateRandom.
+        Encrypt, Decrypt, ReEncrypt, GenerateDataKey, GenerateDataKeyWithoutPlaintext (keys with kmsjson_usage encrypt_decrypt); Sign, Verify (kmsjson_usage sign_verify, ECDSA_SHA_256); GenerateMac, VerifyMac (kmsjson_usage generate_verify_mac, HMAC_SHA_256); GenerateRandom.
         Every request is signed (AWS4-HMAC-SHA256, service kms) and, unless the client has sigv4.no_cert, comes over mutual TLS.
         Errors are `{"__type": ..., "message": ...}`. See docs/specs/kms-json.md. The service is not affiliated with the makers of any cloud service.
       parameters:

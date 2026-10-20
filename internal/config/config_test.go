@@ -211,3 +211,31 @@ func TestSignVerifyRules(t *testing.T) {
 		t.Error("sign on an ECDH key was accepted")
 	}
 }
+
+func TestMacRules(t *testing.T) {
+	v := func(label string) string { return "versions: [{token: t, label: " + label + "}]" }
+	base := "kmsjson: {enabled: true, mac_cache_seconds: 30}\ntokens: [{name: t, type: soft, keys: {m: /x, n: /y}}]\nkeys:\n"
+	mac := "  mac: {kmsjson: true, kmsjson_usage: generate_verify_mac, " + v("m") + ", aad: {mode: fixed}}\n"
+	cl := func(ops string) string {
+		return "clients:\n  - {name: a, identity: {cn: x}, sigv4: {access_key_id: AKIAEXAMPLEEXAMPLE1, secret_file: /s}, keys: {mac: {ops: [" + ops + "]}}}\n"
+	}
+	if _, err := Parse([]byte(base + mac + cl("generate_mac, verify_mac"))); err != nil {
+		t.Fatalf("a valid MAC key: %v", err)
+	}
+	for name, c := range map[string]string{
+		"encrypt on a MAC key":              base + mac + cl("encrypt"),
+		"sign on a MAC key":                 base + mac + cl("sign"),
+		"the same token key for ECDH":       base + mac + "  e: {kmsjson: true, " + v("m") + ", aad: {mode: fixed}}\n" + cl("generate_mac"),
+		"the same token key for signing":    base + mac + "  s: {kmsjson: true, kmsjson_usage: sign_verify, " + v("m") + ", aad: {mode: fixed}}\n" + cl("generate_mac"),
+		"the same token key in the Transit": base + mac + "  tr: {" + v("m") + ", aad: {mode: fixed}}\n" + cl("generate_mac"),
+		"a cache for too long":              "kmsjson: {enabled: true, mac_cache_seconds: 99999}\ntokens: [{name: t, type: soft, keys: {m: /x}}]\nkeys:\n" + mac + cl("generate_mac"),
+	} {
+		if _, err := Parse([]byte(c)); err == nil {
+			t.Errorf("%s was accepted", name)
+		}
+	}
+	plain := base + "  e: {kmsjson: true, " + v("m") + ", aad: {mode: fixed}}\nclients:\n  - {name: a, identity: {cn: x}, sigv4: {access_key_id: AKIAEXAMPLEEXAMPLE1, secret_file: /s}, keys: {e: {ops: [verify_mac]}}}\n"
+	if _, err := Parse([]byte(plain)); err == nil {
+		t.Error("verify_mac on an ECDH key was accepted")
+	}
+}

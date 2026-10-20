@@ -85,7 +85,7 @@ func New(cfg *config.Config, auditOut io.Writer) (*Server, error) {
 	s.face.Limit(s.gate)
 	var handler http.Handler = s.face
 	if cfg.KMSJSON.Enabled {
-		s.kms = &kmsjson.Face{Cfg: cfg, Tokens: gen.tokens, Policy: gen.pol, Audit: s.audit, Creds: gen.creds, Gate: s.gate, Created: time.Now(), Fails: kmsjson.NewFailures()}
+		s.kms = &kmsjson.Face{Cfg: cfg, Tokens: gen.tokens, Policy: gen.pol, Audit: s.audit, Creds: gen.creds, Gate: s.gate, Created: time.Now(), Fails: kmsjson.NewFailures(), MacKeys: kmsjson.NewMacKeys()}
 		handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if kmsjson.IsKMSJSON(r) {
 				s.kms.ServeHTTP(w, r)

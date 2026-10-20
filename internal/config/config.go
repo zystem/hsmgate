@@ -24,6 +24,9 @@ type Config struct {
 	KMSJSON struct {
 		Enabled bool   `yaml:"enabled"`
 		Region  string `yaml:"region"` // the region string of the credential scope that clients sign with; default "local"
+		// MacCacheSeconds: how long the MAC key derived from a key on the token is kept in memory (0: not at all, one ECDH on the token for every MAC). A cache makes MACs fast and puts
+		// a key derived from the token's key into the memory of the process for that time.
+		MacCacheSeconds int `yaml:"mac_cache_seconds"`
 	} `yaml:"kmsjson"`
 	// AdminSocket is a unix socket (mode 0600) for unlock and status; unset: no admin door.
 	AdminSocket string `yaml:"admin_socket"`
@@ -72,7 +75,8 @@ type Key struct {
 	KMSJSON bool `yaml:"kmsjson"`
 	// KMSJSONUsage: "key_agreement" (the default: DeriveSharedSecret, the client seals and opens) or "encrypt_decrypt" (Encrypt, Decrypt, ReEncrypt, GenerateDataKey: the service seals
 	// and opens, as in the Transit face, and the request's EncryptionContext is the additional data) or "sign_verify" (Sign and Verify: ECDSA P-256 with SHA-256, the signature made on the
-	// token; the key label must be used by no other key). One key has one usage: the right to derive would open anything sealed to the key.
+	// token; the key label must be used by no other key) or "generate_verify_mac" (GenerateMac and VerifyMac: HMAC-SHA-256 with a key derived on the token by ECDH, see
+	// internal/keyops/mac.go; the key label must be used by no other key). One key has one usage: the right to derive would open anything sealed to the key.
 	KMSJSONUsage string `yaml:"kmsjson_usage"`
 }
 
@@ -80,6 +84,7 @@ const (
 	UsageKeyAgreement   = "key_agreement"
 	UsageEncryptDecrypt = "encrypt_decrypt"
 	UsageSignVerify     = "sign_verify"
+	UsageMAC            = "generate_verify_mac"
 )
 
 // Usage of a key on the KMS-JSON face.
@@ -324,7 +329,7 @@ func (c *Config) Validate() error {
 				return fmt.Errorf("client %s key %s: per_minute and per_day must be 0..%d (0 is no limit)", cl.Name, key, maxRate)
 			}
 			for _, op := range g.Ops {
-				if op != "encrypt" && op != "decrypt" && op != "rewrap" && op != "derive" && op != "sign" && op != "verify" {
+				if op != "encrypt" && op != "decrypt" && op != "rewrap" && op != "derive" && op != "sign" && op != "verify" && op != "generate_mac" && op != "verify_mac" {
 					return fmt.Errorf("client %s key %s: unknown op %q", cl.Name, key, op)
 				}
 			}
@@ -346,6 +351,9 @@ func (c *Config) validateKMSJSON() error {
 	if c.KMSJSON.Region == "" {
 		c.KMSJSON.Region = "local"
 	}
+	if c.KMSJSON.MacCacheSeconds < 0 || c.KMSJSON.MacCacheSeconds > 3600 {
+		return fmt.Errorf("kmsjson.mac_cache_seconds must be 0 to 3600")
+	}
 	for _, r := range c.KMSJSON.Region {
 		if !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '-') {
 			return fmt.Errorf("kmsjson.region must be lowercase letters, digits and dashes")
@@ -361,7 +369,7 @@ func (c *Config) validateKMSJSON() error {
 				return fmt.Errorf("key %s: kmsjson key agreement needs aad mode fixed (DeriveSharedSecret has no context, so a key in context mode would lose the isolation of its contexts); use kmsjson_usage: encrypt_decrypt for a key with contexts", name)
 			}
 		case UsageEncryptDecrypt:
-		case UsageSignVerify:
+		case UsageSignVerify, UsageMAC:
 			// a private key signs or does ECDH, not both: no other key may use a label that a signing key uses
 			for other, ok := range c.Keys {
 				if other == name {
@@ -372,7 +380,7 @@ func (c *Config) validateKMSJSON() error {
 						for _, ov := range ok.Versions {
 							for _, oh := range ov.Holders() {
 								if oh == h {
-									return fmt.Errorf("key %s (sign_verify) and key %s use the same key %s/%s: a key signs or does ECDH, not both", name, other, h.Token, h.Label)
+									return fmt.Errorf("key %s (%s) and key %s use the same key %s/%s: a key signs, makes MACs or does ECDH, never two of them", name, k.KMSJSONUsage, other, h.Token, h.Label)
 								}
 							}
 						}
@@ -380,7 +388,7 @@ func (c *Config) validateKMSJSON() error {
 				}
 			}
 		default:
-			return fmt.Errorf("key %s: kmsjson_usage must be key_agreement, encrypt_decrypt or sign_verify", name)
+			return fmt.Errorf("key %s: kmsjson_usage must be key_agreement, encrypt_decrypt, sign_verify or generate_verify_mac", name)
 		}
 	}
 	akids := map[string]string{}
@@ -394,6 +402,12 @@ func (c *Config) validateKMSJSON() error {
 				}
 				if k.KMSJSON && k.Usage() == UsageSignVerify && op != "sign" && op != "verify" {
 					return fmt.Errorf("client %s key %s: a key with the usage sign_verify has the rights sign and verify only, not %s", cl.Name, key, op)
+				}
+				if (op == "generate_mac" || op == "verify_mac") && !(k.KMSJSON && k.Usage() == UsageMAC) {
+					return fmt.Errorf("client %s key %s: the right %s needs kmsjson: true and the usage generate_verify_mac on the key", cl.Name, key, op)
+				}
+				if k.KMSJSON && k.Usage() == UsageMAC && op != "generate_mac" && op != "verify_mac" {
+					return fmt.Errorf("client %s key %s: a key with the usage generate_verify_mac has the rights generate_mac and verify_mac only, not %s", cl.Name, key, op)
 				}
 				if op == "derive" {
 					derives = true

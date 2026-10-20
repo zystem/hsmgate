@@ -106,15 +106,17 @@ func run(m *testing.M) int {
 	os.WriteFile(f("k1.hex"), bytes.Repeat([]byte("07"), 32), 0o600)
 	os.WriteFile(f("k2.hex"), bytes.Repeat([]byte("09"), 32), 0o600)
 	os.WriteFile(f("k3.hex"), bytes.Repeat([]byte("0b"), 32), 0o600)
+	os.WriteFile(f("k4.hex"), bytes.Repeat([]byte("0d"), 32), 0o600)
 	l, _ := net.Listen("tcp", "127.0.0.1:0")
 	addr := l.Addr().String()
 	l.Close()
 	os.WriteFile(f("hsmgate.yaml"), []byte(fmt.Sprintf(`listen: %s
 tls: {cert: %s, key: %s, client_ca: %s}
 kmsjson: {enabled: true, region: local}
-tokens: [{name: soft, type: soft, keys: {m1: %s, m2: %s, m3: %s}}]
+tokens: [{name: soft, type: soft, keys: {m1: %s, m2: %s, m3: %s, m4: %s}}]
 keys:
   etcd: {kmsjson: true, versions: [{token: soft, label: m1}, {token: soft, label: m2}], aad: {mode: fixed}}
+  mac: {kmsjson: true, kmsjson_usage: generate_verify_mac, versions: [{token: soft, label: m4}], aad: {mode: fixed}}
   sig: {kmsjson: true, kmsjson_usage: sign_verify, versions: [{token: soft, label: m3}], aad: {mode: fixed}}
   seal: {kmsjson: true, kmsjson_usage: encrypt_decrypt, versions: [{token: soft, label: m1}], aad: {mode: fixed}}
   hidden: {versions: [{token: soft, label: m1}], aad: {mode: fixed}}
@@ -122,8 +124,8 @@ clients:
   - name: sdk
     identity: {cn: sdk-client}
     sigv4: {access_key_id: %s, secret_file: %s}
-    keys: {etcd: {ops: [derive]}, seal: {ops: [encrypt, decrypt]}, sig: {ops: [sign, verify]}}
-`, addr, f("srv.pem"), f("srv.key"), f("ca.pem"), f("k1.hex"), f("k2.hex"), f("k3.hex"), akid, f("sigv4-secret"))), 0o600)
+    keys: {etcd: {ops: [derive]}, seal: {ops: [encrypt, decrypt]}, sig: {ops: [sign, verify]}, mac: {ops: [generate_mac, verify_mac]}}
+`, addr, f("srv.pem"), f("srv.key"), f("ca.pem"), f("k1.hex"), f("k2.hex"), f("k3.hex"), f("k4.hex"), akid, f("sigv4-secret"))), 0o600)
 	cmd := exec.Command(bin, "serve", "-config", f("hsmgate.yaml"))
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
@@ -219,11 +221,11 @@ func TestDescribeListAndTheTypesOfTheSDK(t *testing.T) {
 		t.Errorf("%+v", md)
 	}
 	ks, err := c.ListKeys(context.Background(), &kms.ListKeysInput{})
-	if err != nil || len(ks.Keys) != 3 || ks.Truncated { // "hidden" has no kmsjson and is not listed
+	if err != nil || len(ks.Keys) != 4 || ks.Truncated { // "hidden" has no kmsjson and is not listed
 		t.Errorf("%+v %v", ks, err)
 	}
 	as, err := c.ListAliases(context.Background(), &kms.ListAliasesInput{})
-	if err != nil || len(as.Aliases) != 3 {
+	if err != nil || len(as.Aliases) != 4 {
 		t.Errorf("%+v %v", as, err)
 	}
 }
@@ -352,5 +354,31 @@ func TestSignAndVerify(t *testing.T) {
 	_, err = c.Verify(ctx, &kms.VerifyInput{KeyId: aws.String("sig"), Message: []byte("other"), Signature: sg.Signature, SigningAlgorithm: types.SigningAlgorithmSpecEcdsaSha256})
 	if got := code(err); got != "KMSInvalidSignatureException" {
 		t.Errorf("a signature of another message: %s", got)
+	}
+}
+
+func TestGenerateAndVerifyMac(t *testing.T) {
+	c := client(secret)
+	ctx := context.Background()
+	msg := []byte("message to authenticate")
+	d, err := c.DescribeKey(ctx, &kms.DescribeKeyInput{KeyId: aws.String("mac")})
+	if err != nil || d.KeyMetadata.KeyUsage != types.KeyUsageTypeGenerateVerifyMac || d.KeyMetadata.KeySpec != types.KeySpecHmac256 || len(d.KeyMetadata.MacAlgorithms) != 1 {
+		t.Fatalf("DescribeKey: %+v %v", d, err)
+	}
+	g, err := c.GenerateMac(ctx, &kms.GenerateMacInput{KeyId: aws.String("alias/mac"), Message: msg, MacAlgorithm: types.MacAlgorithmSpecHmacSha256})
+	if err != nil || len(g.Mac) != 32 || g.MacAlgorithm != types.MacAlgorithmSpecHmacSha256 {
+		t.Fatalf("GenerateMac: %+v %v", g, err)
+	}
+	v, err := c.VerifyMac(ctx, &kms.VerifyMacInput{KeyId: aws.String("mac"), Message: msg, Mac: g.Mac, MacAlgorithm: types.MacAlgorithmSpecHmacSha256})
+	if err != nil || !v.MacValid {
+		t.Errorf("VerifyMac: %+v %v", v, err)
+	}
+	_, err = c.VerifyMac(ctx, &kms.VerifyMacInput{KeyId: aws.String("mac"), Message: []byte("other"), Mac: g.Mac, MacAlgorithm: types.MacAlgorithmSpecHmacSha256})
+	if got := code(err); got != "KMSInvalidMacException" {
+		t.Errorf("a MAC of another message: %s", got)
+	}
+	_, err = c.GenerateMac(ctx, &kms.GenerateMacInput{KeyId: aws.String("mac"), Message: msg, MacAlgorithm: types.MacAlgorithmSpecHmacSha512})
+	if got := code(err); got != "InvalidKeyUsageException" {
+		t.Errorf("HMAC_SHA_512: %s", got)
 	}
 }

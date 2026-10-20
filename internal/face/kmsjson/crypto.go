@@ -8,6 +8,7 @@ package kmsjson
 import (
 	"bytes"
 	"crypto/ecdsa"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/x509"
@@ -19,6 +20,8 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/zystem/hsmgate/internal/audit"
 	"github.com/zystem/hsmgate/internal/config"
@@ -66,13 +69,15 @@ type cryptoReq struct {
 	Message                        []byte            `json:"Message"`
 	MessageType                    string            `json:"MessageType"`
 	SigningAlgorithm               string            `json:"SigningAlgorithm"`
+	MacAlgorithm                   string            `json:"MacAlgorithm"`
+	Mac                            []byte            `json:"Mac"`
 	Signature                      []byte            `json:"Signature"`
 	Recipient                      json.RawMessage   `json:"Recipient"`
 }
 
 func isCryptoOp(op string) bool {
 	switch op {
-	case "Encrypt", "Decrypt", "ReEncrypt", "GenerateDataKey", "GenerateDataKeyWithoutPlaintext", "GenerateRandom", "Sign", "Verify":
+	case "Encrypt", "Decrypt", "ReEncrypt", "GenerateDataKey", "GenerateDataKeyWithoutPlaintext", "GenerateRandom", "Sign", "Verify", "GenerateMac", "VerifyMac":
 		return true
 	}
 	return false
@@ -95,6 +100,8 @@ func (c *call) crypto(op string, body []byte) {
 	switch op {
 	case "GenerateRandom":
 		c.random(req)
+	case "GenerateMac", "VerifyMac":
+		c.mac(op, req)
 	case "Sign":
 		c.sign(req)
 	case "Verify":
@@ -114,7 +121,7 @@ func (c *call) crypto(op string, body []byte) {
 // (InvalidKeyUsageException); any other string is a malformed request.
 var knownAlgorithms = map[string]bool{"RSAES_OAEP_SHA_1": true, "RSAES_OAEP_SHA_256": true, "SM2PKE": true, "SYMMETRIC_DEFAULT": true,
 	"RSASSA_PKCS1_V1_5_SHA_256": true, "RSASSA_PKCS1_V1_5_SHA_384": true, "RSASSA_PKCS1_V1_5_SHA_512": true, "RSASSA_PSS_SHA_256": true, "RSASSA_PSS_SHA_384": true,
-	"RSASSA_PSS_SHA_512": true, "ECDSA_SHA_256": true, "ECDSA_SHA_384": true, "ECDSA_SHA_512": true, "SM2DSA": true}
+	"RSASSA_PSS_SHA_512": true, "ECDSA_SHA_256": true, "ECDSA_SHA_384": true, "ECDSA_SHA_512": true, "SM2DSA": true, "HMAC_SHA_224": true, "HMAC_SHA_256": true, "HMAC_SHA_384": true, "HMAC_SHA_512": true}
 
 func (c *call) badAlgorithm(field, given string) {
 	if knownAlgorithms[given] {
@@ -141,8 +148,11 @@ func (c *call) target(id string, ver int, op string, ctx map[string]string) (nam
 	key = f.Cfg.Keys[name]
 	c.ev.Key = name
 	want := config.UsageEncryptDecrypt
-	if op == "sign" || op == "verify" {
+	switch op {
+	case "sign", "verify":
 		want = config.UsageSignVerify
+	case "generate_mac", "verify_mac":
+		want = config.UsageMAC
 	}
 	if key.Usage() != want {
 		c.refuse(400, "InvalidKeyUsageException", usageErrText, "bad_usage", false)
@@ -164,7 +174,7 @@ func (c *call) target(id string, ver int, op string, ctx map[string]string) (nam
 		c.refuse(400, "InvalidCiphertextException", "the ciphertext is not valid for this key", "bad_ciphertext", false)
 		return
 	}
-	if want == config.UsageSignVerify { // no additional data: a signature has none
+	if want == config.UsageSignVerify || want == config.UsageMAC { // no additional data: a signature or a MAC has none
 		return name, ver, key, nil, true
 	}
 	aad, ok = c.aadOf(name, key, ctx)
@@ -573,4 +583,157 @@ func (c *call) verify(req cryptoReq) {
 		return
 	}
 	c.succeed(map[string]any{"KeyId": c.f.arn(name), "SignatureValid": true, "SigningAlgorithm": "ECDSA_SHA_256"})
+}
+
+// ---- MAC
+
+const maxMacMessage = 4096
+
+type macEntry struct {
+	key     []byte
+	expires time.Time
+}
+
+// macCache keeps the MAC keys derived from the keys on the token for kmsjson.mac_cache_seconds. Shared by the generations; an entry is named by the fingerprint of the public key
+// and the version, so a key that was replaced is never answered from the old entry.
+type macCache struct {
+	mu sync.Mutex
+	m  map[string]macEntry
+}
+
+func (k *macCache) get(id string, now time.Time) ([]byte, bool) {
+	if k == nil {
+		return nil, false
+	}
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	e, ok := k.m[id]
+	if !ok {
+		return nil, false
+	}
+	if !now.Before(e.expires) {
+		wipe(e.key)
+		delete(k.m, id)
+		return nil, false
+	}
+	return e.key, true
+}
+
+func (k *macCache) put(id string, key []byte, until time.Time) {
+	if k == nil {
+		return
+	}
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	if k.m == nil {
+		k.m = map[string]macEntry{}
+	}
+	if old, ok := k.m[id]; ok {
+		wipe(old.key)
+	}
+	k.m[id] = macEntry{append([]byte{}, key...), until}
+}
+
+// NewMacKeys makes the cache of derived MAC keys.
+func NewMacKeys() *macCache { return &macCache{m: map[string]macEntry{}} }
+
+// macKey is the MAC key of a version, from the cache or from the token.
+func (c *call) macKey(name string, ver int, key config.Key) ([]byte, bool) {
+	f := c.f
+	ttl := time.Duration(f.Cfg.KMSJSON.MacCacheSeconds) * time.Second
+	id := name + "@" + itoa(ver)
+	if ttl > 0 {
+		if point, err := keyops.PointOf(f.Tokens, key.Versions[ver-1]); err == nil { // no token operation: the public key is kept
+			id += "|" + ecies.Fingerprint(point)
+			if k, ok := f.MacKeys.get(id, f.now()); ok {
+				return append([]byte{}, k...), true
+			}
+		}
+	}
+	release, ok := f.Gate.Take(c.r.Context())
+	if !ok {
+		c.refuse(400, "ThrottlingException", "the service is busy", "busy", true)
+		return nil, false
+	}
+	defer release()
+	k, err := keyops.MacKey(f.Tokens, key.Versions[ver-1])
+	if err != nil {
+		f.tokenFailure(c.refuse, err)
+		return nil, false
+	}
+	if ttl > 0 {
+		f.MacKeys.put(id, k, f.now().Add(ttl))
+	}
+	return k, true
+}
+
+func hmacSum(key, msg []byte) []byte {
+	m := hmac.New(sha256.New, key)
+	m.Write(msg)
+	return m.Sum(nil)
+}
+
+func (c *call) mac(op string, req cryptoReq) {
+	generate := op == "GenerateMac"
+	right := "verify_mac"
+	if generate {
+		right = "generate_mac"
+	}
+	if req.MacAlgorithm != "HMAC_SHA_256" {
+		c.badAlgorithm("MacAlgorithm", req.MacAlgorithm)
+		return
+	}
+	// a version is asked for by "name@N"; else a MAC is made with the latest and checked against the latest and then the earlier ones (a MAC carries no version)
+	_, pinned, _ := c.f.resolve(req.KeyID)
+	name, ver, key, _, ok := c.target(req.KeyID, 0, right, nil)
+	if !ok {
+		return
+	}
+	if len(req.Message) == 0 || len(req.Message) > maxMacMessage {
+		c.refuse(400, "ValidationException", "Message must be 1 to "+itoa(maxMacMessage)+" bytes", "bad_request", false)
+		return
+	}
+	if !generate && (len(req.Mac) == 0 || len(req.Mac) > 64) {
+		c.refuse(400, "ValidationException", "Mac must be 1 to 64 bytes", "bad_request", false)
+		return
+	}
+	sum := sha256.Sum256(req.Message)
+	c.ev.Context = "msg=" + hex.EncodeToString(sum[:6]) // public by nature; ties a line of the log to a message without keeping it
+	if req.DryRun {
+		c.refuse(400, "DryRunOperationException", "the request would have succeeded, but the DryRun option is set", "dry_run", false)
+		return
+	}
+	if generate {
+		k, ok := c.macKey(name, ver, key)
+		if !ok {
+			return
+		}
+		defer wipe(k)
+		c.succeed(map[string]any{"Mac": b64(hmacSum(k, req.Message)), "MacAlgorithm": "HMAC_SHA_256", "KeyId": c.f.arn(name)})
+		return
+	}
+	versions := []int{ver}
+	if pinned == 0 {
+		versions = versions[:0]
+		for v := len(key.Versions); v >= 1; v-- {
+			versions = append(versions, v)
+		}
+	}
+	valid := false
+	for _, v := range versions {
+		k, ok := c.macKey(name, v, key)
+		if !ok {
+			return
+		}
+		valid = hmac.Equal(hmacSum(k, req.Message), req.Mac) || valid
+		wipe(k)
+		if valid {
+			break
+		}
+	}
+	if !valid {
+		c.refuse(400, "KMSInvalidMacException", "the MAC is not valid for this message and key", "bad_mac", false)
+		return
+	}
+	c.succeed(map[string]any{"KeyId": c.f.arn(name), "MacValid": true, "MacAlgorithm": "HMAC_SHA_256"})
 }

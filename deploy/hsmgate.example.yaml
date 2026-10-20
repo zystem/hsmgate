@@ -7,7 +7,7 @@ tls:
 admin_socket: /run/hsmgate/admin.sock # unlock and status; mode 0600, a short path (unix sockets allow ~108 bytes)
 audit: {file: /var/log/hsmgate/audit.log}
 # optional second face (docs/specs/kms-json.md): ECDH for clients that sign requests; enabling it needs a restart
-# kmsjson: {enabled: true, region: local}
+# kmsjson: {enabled: true, region: local, mac_cache_seconds: 0}
 
 tokens:
   - name: card
@@ -60,6 +60,7 @@ clients:
   #   keys:
   #     ecdh-key: {ops: [derive], per_minute: 120}     # a key with kmsjson_usage: key_agreement (the default)
   #     app-key: {ops: [encrypt, decrypt]}              # a key with kmsjson_usage: encrypt_decrypt: the service seals
+  #     mac-key: {ops: [generate_mac, verify_mac]}      # a key with kmsjson_usage: generate_verify_mac: HMAC-SHA-256 under a key derived on the token (its own key, not shared)
   #     release-key: {ops: [sign, verify]}              # a key with kmsjson_usage: sign_verify: ECDSA on the token (its own key, not shared)
   # a program that cannot show a certificate (docs/specs/kms-json.md, section 5): the signature alone, from listed addresses, a sealing key only, a secret of 32 bytes or more
   # - name: spring-app
