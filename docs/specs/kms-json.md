@@ -10,7 +10,7 @@ The face is **not** that service, is **not affiliated with, endorsed by or spons
 
 ## 1. Why this face exists
 
-Kubernetes KMS v2 and Transit only encrypt and decrypt; on an ECDH-only token (a SmartCard-HSM has no AES) the service has to do the sealing and sees every data key. With `DeriveSharedSecret` the service is an ECDH oracle with a policy.
+Kubernetes KMS v2 and Transit only encrypt and decrypt; on a token that is used for ECDH only (a SmartCard-HSM through the OpenSC module, which exposes no AES) the service has to do the sealing and sees every data key. With `DeriveSharedSecret` the service is an ECDH oracle with a policy.
 
 - **Seal** (client side, no call): fetch the public key (`GetPublicKey`, DER SubjectPublicKeyInfo, pin its fingerprint), make an ephemeral key, ECDH, derive, seal as in [ecies1.md](ecies1.md).
 - **Open**: send the ephemeral public key to `DeriveSharedSecret`; the token does ECDH; the client derives the key and opens locally.

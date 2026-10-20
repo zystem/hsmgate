@@ -6,7 +6,7 @@ Decision (2026-10-19): CiNim talks to hsmgate through the **Vault/OpenBao Transi
 possible later face: [specs/kms-json.md](specs/kms-json.md).
 
 Why Transit: plain JSON over HTTPS, no request signing, a **context** that the service can check, named keys with versions and `rewrap`, and the same face serves OpenBao (seal `transit`), SOPS and `vault-kubernetes-kms` for etcd.
-The service does the ECIES itself (the token does only ECDH, so a card without AES works); it sees data keys in plaintext while it wraps or unwraps, and says so in the threat model.
+The service does the ECIES itself (the token does only ECDH, so a token or a module without AES works: the OpenSC module exposes none); it sees data keys in plaintext while it wraps or unwraps, and says so in the threat model.
 
 ## Mapping
 

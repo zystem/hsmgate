@@ -39,7 +39,7 @@ Not goals: a general KMS (no key lifecycle for clients' own keys, no signing ser
 | `p11-kit server`, `pkcs11-proxy` | PKCS#11 over a socket or the network | nothing | no policy, the PIN and the whole token are exposed to the client |
 | OpenBao `kms-pkcs11` plugin (External Keys) | auto-unseal and Transit keys on a local token | a reference for the PKCS#11 calls | local only, one consumer |
 
-Conclusion: nothing ready that does a policy-checked, authenticated, network wrap/unwrap over a card that has ECDH and RSA but no AES. Build, with KeySealer as the model for the project's shape.
+Conclusion: nothing ready that does a policy-checked, authenticated, network wrap/unwrap over a card that has ECDH and RSA through the OpenSC module (that module exposes no AES; the card itself may have it through the vendor's module, not tried). Build, with KeySealer as the model for the project's shape.
 
 ## 3. Name
 
