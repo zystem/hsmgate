@@ -12,7 +12,7 @@ func TestExampleConfigIsValid(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cfg.Keys) != 3 || len(cfg.Clients) != 3 {
+	if len(cfg.Keys) != 4 || len(cfg.Clients) != 4 {
 		t.Errorf("%d keys, %d clients", len(cfg.Keys), len(cfg.Clients))
 	}
 }

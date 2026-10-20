@@ -339,7 +339,7 @@ components:
         application/json:
           schema: {$ref: '#/components/schemas/Errors'}
     Forbidden:
-      description: No client certificate that the policy knows, no grant for this key or operation, or no such key (the same answer for all three)
+      description: No client certificate that the policy knows, no grant for this key or operation, a context outside the contexts of the client's grant, or no such key (the same answer for all of them)
       headers:
         X-Hsmgate-Retryable: {$ref: '#/components/headers/Retryable'}
       content:

@@ -536,3 +536,27 @@ func TestReloadWaitsForRequestsInFlight(t *testing.T) {
 		t.Error("the wait did not return after the request was done")
 	}
 }
+
+// A client's own context prefixes narrow a key in context mode: the certificate of one namespace opens the contexts of that namespace only.
+func TestClientContextPrefixes(t *testing.T) {
+	r := newRig(t, nil)
+	r.cfg.Clients[1].Keys["cinim"] = config.Grant{Ops: []string{"encrypt", "decrypt"}, Contexts: []string{"cinim/dek/v1|org-1"}}
+	body := func(ctx string) map[string]string {
+		return map[string]string{"plaintext": b64("k"), "context": b64(ctx)}
+	}
+	if st, _, _ := r.call("core", "PUT", "/v1/transit/encrypt/cinim", body("cinim/dek/v1|org-1/db")); st != 200 {
+		t.Errorf("own context: %d", st)
+	}
+	st, out, h := r.call("core", "PUT", "/v1/transit/encrypt/cinim", body("cinim/dek/v1|org-2/db"))
+	if st != 403 || h.Get("X-Hsmgate-Retryable") != "false" {
+		t.Errorf("another organisation's context: %d %v", st, out)
+	}
+	// the answer says nothing about the rules of the key: a context that breaks the key's own rule is also 403 for this client
+	if st, _, _ := r.call("core", "PUT", "/v1/transit/encrypt/cinim", body("other/thing")); st != 403 {
+		t.Errorf("a context outside everything: %d", st)
+	}
+	// the refusal is written down with its context
+	if !strings.Contains(r.audit.String(), `"result":"forbidden_context"`) || !strings.Contains(r.audit.String(), `org-2/db`) {
+		t.Errorf("audit: %s", r.audit.String())
+	}
+}

@@ -109,6 +109,9 @@ type Grant struct {
 	Ops       []string `yaml:"ops"`
 	PerMinute int      `yaml:"per_minute"`
 	PerDay    int      `yaml:"per_day"`
+	// Contexts narrows a key in context mode for this client: the context of a request must begin with one of these (and with one of the key's own aad.allow).
+	// Empty: no narrowing beyond the key's. This is how a client certificate of one namespace is kept to the contexts of that namespace.
+	Contexts []string `yaml:"contexts"`
 }
 
 const DefaultMaxBytes = 8192
@@ -262,6 +265,14 @@ func (c *Config) Validate() error {
 			for _, op := range g.Ops {
 				if op != "encrypt" && op != "decrypt" && op != "rewrap" {
 					return fmt.Errorf("client %s key %s: unknown op %q", cl.Name, key, op)
+				}
+			}
+			if len(g.Contexts) > 0 && c.Keys[key].AAD.Mode != "context" {
+				return fmt.Errorf("client %s key %s: contexts only apply to a key in context mode", cl.Name, key)
+			}
+			for _, x := range g.Contexts {
+				if x == "" {
+					return fmt.Errorf("client %s key %s: an empty context prefix would allow every context", cl.Name, key)
 				}
 			}
 		}

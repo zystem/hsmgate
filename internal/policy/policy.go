@@ -123,3 +123,26 @@ func (p *Policy) Allowed(client, key string) bool {
 	}
 	return false
 }
+
+// ContextOK: is this context within what the grant of the client allows? Empty contexts in the grant mean no narrowing.
+func (p *Policy) ContextOK(client, key string, ctx []byte) bool {
+	for _, c := range p.cfg.Clients {
+		if c.Name != client {
+			continue
+		}
+		g, ok := c.Keys[key]
+		if !ok {
+			return false
+		}
+		if len(g.Contexts) == 0 {
+			return true
+		}
+		for _, x := range g.Contexts {
+			if strings.HasPrefix(string(ctx), x) {
+				return true
+			}
+		}
+		return false
+	}
+	return false
+}

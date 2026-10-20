@@ -10,7 +10,7 @@ hsmgate serves the part of the HashiCorp Vault / OpenBao **Transit** API that th
 
 **Identity.** The certificate is mapped to a *client* of the policy by one of: the SHA-256 of the certificate (`sha256`), a URI SAN (`uri`), or the Common Name (`cn`). Each client has exactly one of these; two clients may not share one. The chain is verified again at **every request** against the *current* CA, so replacing the CA or an expired certificate ends access on connections that are already open. A header is never an identity: `X-Vault-Token` (and anything like it) is ignored.
 
-**Authorisation.** Deny by default. A client has, per key, a grant: the operations it may do (`encrypt`, `decrypt`, `rewrap`), a rate (`per_minute`, `per_day`; 0 is no limit). A client that has no grant for a key, a key that does not exist, and a certificate the policy does not know all get the **same** `403 permission denied`: the answer does not tell which keys exist.
+**Authorisation.** Deny by default. A client has, per key, a grant: the operations it may do (`encrypt`, `decrypt`, `rewrap`), a rate (`per_minute`, `per_day`; 0 is no limit), and for a key in `context` mode optionally `contexts`: prefixes of the contexts it may use (the context of a request must begin with one of them, as well as with one of the key's own `aad.allow`). That is how the certificate of one namespace is kept to the contexts of that namespace; a context outside the grant is `403`, judged before the rules of the key, so the client learns nothing about them. A client that has no grant for a key, a key that does not exist, and a certificate the policy does not know all get the **same** `403 permission denied`: the answer does not tell which keys exist.
 
 ## 2. What a key is
 
@@ -80,7 +80,7 @@ Errors are `{"errors": ["<message>"]}`. The header `X-Hsmgate-Retryable: true|fa
 | 400 | false | `missing context`, `context not allowed for this key`, `context is too long`, `this key takes no context`, `failed to base64-decode context` | the context breaks the rule of the key |
 | 400 | false | `invalid ciphertext: cannot be opened with this key` | the text is damaged, for another key, of a version that does not exist, or sealed with another context. All these look the same to the client on purpose |
 | 400 | false | `ciphertext too large for this key`, `…larger than max_bytes of this key` | size limits |
-| 403 | false | `permission denied` | no certificate the policy knows, no grant for the key or the operation, or no such key |
+| 403 | false | `permission denied` | no certificate the policy knows, no grant for the key or the operation, a context outside the client's `contexts`, or no such key |
 | 404 | false | `unsupported path` | a path or method the service does not have |
 | 413 | false | `request body too large` | the body is over `4 × max_bytes + 4096` bytes |
 | 429 | **true** | `rate limit exceeded` | the client's rate for this key is spent (fixed one-minute and one-day windows) |

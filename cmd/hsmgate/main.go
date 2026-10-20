@@ -32,6 +32,13 @@ func die(err error) {
 }
 
 func main() {
+	if len(os.Args) >= 2 && (os.Args[1] == "encrypt" || os.Args[1] == "decrypt") {
+		run := runEncrypt
+		if os.Args[1] == "decrypt" {
+			run = runDecrypt
+		}
+		os.Exit(run(os.Args[2:], os.Stdin, os.Stdout, os.Stderr))
+	}
 	if len(os.Args) >= 2 && os.Args[1] == "ping" {
 		// a TCP connect to the listener: for a container health check (it must not touch the token or need a certificate)
 		fs := flag.NewFlagSet("ping", flag.ExitOnError)
@@ -49,7 +56,7 @@ func main() {
 		return
 	}
 	if len(os.Args) < 2 || (os.Args[1] != "serve" && os.Args[1] != "check" && os.Args[1] != "unlock") {
-		fmt.Fprintln(os.Stderr, "usage: hsmgate serve|check|unlock|version|ping -config hsmgate.yaml [-token NAME] [-pin-stdin]")
+		fmt.Fprintln(os.Stderr, "usage: hsmgate serve|check|unlock|version|ping|encrypt|decrypt -config hsmgate.yaml [-token NAME] [-pin-stdin]")
 		os.Exit(2)
 	}
 	fs := flag.NewFlagSet(os.Args[1], flag.ExitOnError)

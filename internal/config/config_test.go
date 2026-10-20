@@ -71,3 +71,22 @@ clients:
 		t.Error("a token defined twice was accepted")
 	}
 }
+
+func TestGrantContextsNeedAContextKey(t *testing.T) {
+	base := `
+tokens: [{name: t, type: soft, keys: {m: /x}}]
+keys:
+  fixed: {versions: [{token: t, label: m}], aad: {mode: fixed}}
+  ctx: {versions: [{token: t, label: m}], aad: {mode: context, allow: ["a/"]}}
+clients:
+`
+	if _, err := Parse([]byte(base + "  - {name: a, identity: {cn: x}, keys: {ctx: {ops: [encrypt], contexts: [\"a/b/\"]}}}\n")); err != nil {
+		t.Errorf("a valid grant: %v", err)
+	}
+	if _, err := Parse([]byte(base + "  - {name: a, identity: {cn: x}, keys: {fixed: {ops: [encrypt], contexts: [\"a/\"]}}}\n")); err == nil {
+		t.Error("contexts on a fixed key were accepted")
+	}
+	if _, err := Parse([]byte(base + "  - {name: a, identity: {cn: x}, keys: {ctx: {ops: [encrypt], contexts: [\"\"]}}}\n")); err == nil {
+		t.Error("an empty context prefix was accepted")
+	}
+}

@@ -247,13 +247,17 @@ func (f *Face) serve(w http.ResponseWriter, r *http.Request) {
 		done(400, "bad_request", "invalid request body", false)
 		return
 	}
-	aad, msg := f.aadOf(name, key, body.Context)
+	aad, msg, forbidden := f.aadOf(client, name, key, body.Context)
+	if key.AAD.Mode == "context" && utf8.Valid(aad) {
+		ev.Context = string(aad) // public by rule; a refused context is written down too
+	}
+	if forbidden {
+		done(403, "forbidden_context", "permission denied", false)
+		return
+	}
 	if msg != "" {
 		done(400, "bad_context", msg, false)
 		return
-	}
-	if key.AAD.Mode == "context" && utf8.Valid(aad) {
-		ev.Context = string(aad)
 	}
 	switch op {
 	case "encrypt":
@@ -314,27 +318,31 @@ func wipe(b []byte) {
 	}
 }
 
-func (f *Face) aadOf(name string, k config.Key, ctx *string) ([]byte, string) {
+// aadOf returns the additional data; forbidden is true when the grant of this client does not cover the context (judged before the rules of the key, so that a client learns nothing about them).
+func (f *Face) aadOf(client, name string, k config.Key, ctx *string) (aad []byte, msg string, forbidden bool) {
 	if k.AAD.Mode == "fixed" {
 		if ctx != nil && *ctx != "" {
-			return nil, "this key takes no context"
+			return nil, "this key takes no context", false
 		}
-		return []byte(k.FixedAAD(name)), ""
+		return []byte(k.FixedAAD(name)), "", false
 	}
 	if ctx == nil || *ctx == "" {
-		return nil, "missing context"
+		return nil, "missing context", false
 	}
 	b, err := base64.StdEncoding.DecodeString(*ctx)
 	if err == nil && len(b) > maxContext {
-		return nil, "context is too long"
+		return nil, "context is too long", false
 	}
 	if err != nil || len(b) == 0 {
-		return nil, "failed to base64-decode context"
+		return nil, "failed to base64-decode context", false
+	}
+	if !f.Policy.ContextOK(client, name, b) {
+		return b, "", true
 	}
 	if !policy.ContextAllowed(k, b) {
-		return nil, "context not allowed for this key"
+		return nil, "context not allowed for this key", false
 	}
-	return b, ""
+	return b, "", false
 }
 
 // pointOf is the public key of a version, from the first holder that answers.

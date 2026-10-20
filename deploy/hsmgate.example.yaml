@@ -20,6 +20,10 @@ keys:
   cinim-shard:
     versions: [{token: card, label: m1}]
     aad: {mode: context, allow: ["cinim/dek/v1|"]}
+  # applications' secrets in Kubernetes: the context is k8s/<namespace>/<secret>/<field>
+  apps:
+    versions: [{token: card, label: m1}]
+    aad: {mode: context, allow: ["k8s/"]}
   # OpenBao's seal `transit` sends no context: a fixed one (default "openbao/seal/v1|<key>", the value kekd used)
   bao-seal:
     versions: [{token: card, label: m1}]
@@ -38,6 +42,11 @@ clients:
     identity: {cn: openbao}
     keys:
       bao-seal: {ops: [encrypt, decrypt], per_minute: 30}
+  # a namespace of the cluster that keeps ciphertexts in its Secrets (docs/guides/kubernetes-pod-secrets.md): decrypt only, and only its own contexts
+  - name: ns-shop
+    identity: {cn: ns-shop}
+    keys:
+      apps: {ops: [decrypt], contexts: ["k8s/shop/"], per_minute: 120}
   - name: kube-kms
     identity: {cn: kube-kms}
     keys:
