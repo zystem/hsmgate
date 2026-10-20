@@ -320,3 +320,17 @@ func TestOnePrivateKeyOneName(t *testing.T) {
 		t.Errorf("a Transit-only configuration keeps its freedom: %v", err)
 	}
 }
+
+func TestMaxConnectionsRange(t *testing.T) {
+	base := "tokens: [{name: t, type: soft, keys: {m: /x}}]\nkeys:\n  k: {versions: [{token: t, label: m}], aad: {mode: fixed}}\nclients:\n"
+	for _, ok := range []string{"limits: {max_connections: 0}\n", "limits: {max_connections: 128}\n", "limits: {max_connections: 65535}\n"} {
+		if _, err := Parse([]byte(ok + base)); err != nil {
+			t.Errorf("%q: %v", ok, err)
+		}
+	}
+	for _, bad := range []string{"limits: {max_connections: -1}\n", "limits: {max_connections: 65536}\n"} {
+		if _, err := Parse([]byte(bad + base)); err == nil {
+			t.Errorf("%q was accepted", bad)
+		}
+	}
+}

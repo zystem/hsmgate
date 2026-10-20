@@ -44,11 +44,12 @@ type Server struct {
 	HTTP     *http.Server
 	Insecure bool
 
-	audit *audit.Log
-	face  *transit.Face
-	kms   *kmsjson.Face // nil when the second face is off
-	gate  *gate.Gate
-	stats *metrics.Registry
+	audit    *audit.Log
+	face     *transit.Face
+	kms      *kmsjson.Face // nil when the second face is off
+	gate     *gate.Gate
+	maxConns int
+	stats    *metrics.Registry
 
 	mu  sync.RWMutex
 	gen *generation
@@ -62,7 +63,7 @@ func New(cfg *config.Config, auditOut io.Writer) (*Server, error) {
 	if auditOut == nil {
 		auditOut = os.Stdout
 		if cfg.Audit.File != "" {
-			f, err := os.OpenFile(cfg.Audit.File, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o640)
+			f, err := os.OpenFile(cfg.Audit.File, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o640) // #nosec G302 G304 -- the group may read the log (a shipper); the path is the operator's
 			if err != nil {
 				return nil, err
 			}
@@ -80,6 +81,10 @@ func New(cfg *config.Config, auditOut io.Writer) (*Server, error) {
 	conc, wait := cfg.Limits.MaxConcurrent, time.Duration(cfg.Limits.QueueSeconds)*time.Second
 	if conc == 0 {
 		conc = 8
+	}
+	s.maxConns = cfg.Limits.MaxConnections
+	if s.maxConns == 0 {
+		s.maxConns = 128
 	}
 	if wait == 0 {
 		wait = 2 * time.Second
@@ -101,7 +106,7 @@ func New(cfg *config.Config, auditOut io.Writer) (*Server, error) {
 			s.face.ServeHTTP(w, r)
 		})
 	}
-	s.HTTP = &http.Server{Addr: cfg.Listen, Handler: handler, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, MaxHeaderBytes: 16 << 10}
+	s.HTTP = &http.Server{Addr: cfg.Listen, Handler: handler, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, MaxHeaderBytes: 16 << 10, HTTP2: &http.HTTP2Config{MaxConcurrentStreams: 16}}
 	if cfg.InsecureLoopbackClient != "" {
 		if !loopback(cfg.Listen) {
 			closeTokens(gen.tokens)
@@ -120,7 +125,8 @@ func New(cfg *config.Config, auditOut io.Writer) (*Server, error) {
 		s.kms.Identify = identifier(gen.auth)
 	}
 	// the configuration of a connection is taken at its handshake, so a reload applies to the next connection (and requests are judged by the current CA anyway)
-	s.HTTP.TLSConfig = &tls.Config{GetConfigForClient: func(*tls.ClientHelloInfo) (*tls.Config, error) {
+	// (MinVersion and ClientAuth here are the floor if the function ever returned nothing: TLS 1.3 and a verified certificate, or a certificate that is not shown, never less)
+	s.HTTP.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS13, ClientAuth: tls.VerifyClientCertIfGiven, GetConfigForClient: func(*tls.ClientHelloInfo) (*tls.Config, error) {
 		s.mu.RLock()
 		defer s.mu.RUnlock()
 		return s.gen.tlsCfg, nil
@@ -386,6 +392,7 @@ func loopback(addr string) bool {
 }
 
 func (s *Server) Serve(l net.Listener) error {
+	l = newLimitListener(l, s.maxConns)
 	if s.Insecure {
 		return s.HTTP.Serve(l)
 	}

@@ -6,7 +6,7 @@
       "customType": "regex",
       "description": "tools run with `go run module/cmd/tool@version` in the Woodpecker pipeline",
       "managerFilePatterns": ["/^\\.woodpecker\\.ya?ml$/"],
-      "matchStrings": ["go run (?<depName>golang\\.org/x/vuln)/cmd/govulncheck@(?<currentValue>v[0-9][^\\s]*)"],
+      "matchStrings": ["go run (?<depName>[a-zA-Z0-9./_-]+?)(?:/cmd/[a-z]+)?@(?<currentValue>v[0-9][^\\s]*)"],
       "datasourceTemplate": "go"
     }
   ]

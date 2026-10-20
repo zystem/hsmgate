@@ -54,6 +54,8 @@ type Config struct {
 type Limits struct {
 	MaxConcurrent int `yaml:"max_concurrent"` // operations that may run or wait for a token at once; default 8
 	QueueSeconds  int `yaml:"queue_seconds"`  // how long one may wait for its turn before 503; default 2
+	// MaxConnections: connections open at once on the listener (the next waits in the backlog); default 128. A client holds one or a few; with HTTP/2 each carries at most 16 requests at a time.
+	MaxConnections int `yaml:"max_connections"`
 }
 
 type TLS struct {
@@ -192,7 +194,7 @@ type Grant struct {
 const DefaultMaxBytes = 8192
 
 func Load(path string) (*Config, error) {
-	raw, err := os.ReadFile(path)
+	raw, err := os.ReadFile(path) // #nosec G304 -- the path is the operator's own argument
 	if err != nil {
 		return nil, err
 	}
@@ -234,8 +236,8 @@ func (c *Config) Validate() error {
 	if c.Transit.Mount == "" {
 		c.Transit.Mount = "transit"
 	}
-	if c.Limits.MaxConcurrent < 0 || c.Limits.QueueSeconds < 0 || c.Limits.MaxConcurrent > 1024 || c.Limits.QueueSeconds > 60 {
-		return fmt.Errorf("limits: max_concurrent 0..1024 and queue_seconds 0..60")
+	if c.Limits.MaxConcurrent < 0 || c.Limits.QueueSeconds < 0 || c.Limits.MaxConcurrent > 1024 || c.Limits.QueueSeconds > 60 || c.Limits.MaxConnections < 0 || c.Limits.MaxConnections > 65535 {
+		return fmt.Errorf("limits: max_concurrent 0..1024, queue_seconds 0..60 and max_connections 0..65535")
 	}
 	switch c.Metrics.Detail {
 	case "":

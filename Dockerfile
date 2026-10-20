@@ -6,7 +6,8 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=1 go build -trimpath -buildvcs=false -ldflags "-s -w -X main.version=${VERSION}" -o /out/hsmgate ./cmd/hsmgate
+# a position-independent executable with the relocations made at start and then read-only (ASLR for the whole program, no writable GOT)
+RUN CGO_ENABLED=1 go build -buildmode=pie -trimpath -buildvcs=false -ldflags "-s -w -linkmode=external -extldflags '-Wl,-z,relro,-z,now' -X main.version=${VERSION}" -o /out/hsmgate ./cmd/hsmgate
 
 FROM debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587
 # only the PKCS#11 module and the PC/SC client library (OpenSC loads libpcsclite with dlopen; it is only "recommended" by the package): pcscd runs on the host, its socket is mounted

@@ -9,3 +9,9 @@ paths = [
   '''test/kmsjson-sdk/sdk_test\.go''',
   '''test/kmsjson-boto3/test_boto3\.py''',
 ]
+
+[[allowlists]]
+description = "the raw output of an audit: hashes of source files that look like tokens to a pattern"
+paths = [
+  '''docs/security-audit-[0-9-]+/raw/.*''',
+]

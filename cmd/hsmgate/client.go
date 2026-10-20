@@ -443,7 +443,7 @@ func readValue(in string, stdin io.Reader, stderr io.Writer) ([]byte, error) {
 		}
 		return b, err
 	}
-	b, err := os.ReadFile(in)
+	b, err := os.ReadFile(in) // #nosec G304 -- the file the user of the command named
 	if err == nil && len(b) > max {
 		err = errors.New("the value is larger than 1 MiB")
 	}

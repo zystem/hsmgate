@@ -3,8 +3,9 @@
 //
 // What is checked: the Authorization header (credential scope: date, region, service), the date (X-Amz-Date within MaxSkew of now), the signed headers (the ones in Require
 // must be among them: the signature must cover the target of the call), the payload hash, and the signature itself, in constant time. The secret of an access key comes from
-// the Secrets function. There is no replay cache: the requests travel inside TLS with a client certificate, so a recorded request cannot be sent again by anyone who is not already
-// on the connection, and a retry of the same request within a second would be refused by such a cache for no reason.
+// the Secrets function. There is no replay cache (a decision of the project): the requests travel inside TLS, so a recorded request cannot be read off the network, and a retry of
+// the same request within a second would be refused by such a cache for no reason; whoever can read the requests after the TLS ends (a front that logs them) can send them again
+// within the window of five minutes.
 package sigv4
 
 import (
@@ -77,7 +78,7 @@ func (v *Verifier) Verify(r *http.Request, body []byte) (string, error) {
 	}
 	amzDate := r.Header.Get("X-Amz-Date")
 	t, err := time.Parse(dateLayout, amzDate)
-	if err != nil || !strings.HasPrefix(amzDate, date) {
+	if err != nil || len(date) != 8 || amzDate[:8] != date {
 		return "", fmt.Errorf("%w: X-Amz-Date", ErrMalformed)
 	}
 	now := time.Now()

@@ -12,6 +12,20 @@ steps:
       - event: pull_request
       - event: tag
 
+  static:
+    # static analysis: staticcheck, and gosec without G104 (unchecked errors: closing files and the best-effort audit line of a refusal, on purpose); each exception in the code has its reason
+    image: golang:1.26.9-bookworm
+    commands:
+      - git config --global --add safe.directory "$CI_WORKSPACE"
+      - go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./...
+      - go run github.com/securego/gosec/v2/cmd/gosec@v2.29.0 -quiet -exclude=G104 -exclude-dir=test -exclude-dir=tools -exclude-generated ./...
+    depends_on:
+      - test
+    when:
+      - event: push
+      - event: pull_request
+      - event: tag
+
   softhsm:
     # the PKCS#11 backend against SoftHSM2 (a software token); the card itself is run by hand with tools/card-decrypt-test.sh
     image: golang:1.26.9-bookworm
@@ -59,7 +73,8 @@ steps:
     image: golang:1.26.9-bookworm
     commands:
       - mkdir -p build
-      - CGO_ENABLED=1 go build -trimpath -buildvcs=false -ldflags "-s -w -X main.version=${CI_COMMIT_TAG:-dev}" -o build/hsmgate ./cmd/hsmgate
+      - CGO_ENABLED=1 go build -buildmode=pie -trimpath -buildvcs=false -ldflags "-s -w -linkmode=external -extldflags '-Wl,-z,relro,-z,now' -X main.version=${CI_COMMIT_TAG:-dev}" -o build/hsmgate ./cmd/hsmgate
+      - readelf -h build/hsmgate | grep -q "DYN" && readelf -d build/hsmgate | grep -q "BIND_NOW"
       - build/hsmgate version
     depends_on:
       - test

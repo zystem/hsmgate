@@ -243,16 +243,17 @@ func anyLine(ctx []byte, ok func([]byte) bool) bool {
 // clear in the blob, so that Decrypt can find the key; because they are authenticated here, a blob cannot be relabelled to another key (even one with the same key material and
 // context) or to another version (audit 2026-10-21, CR-02). The blob format is "HGK2"; "HGK1" blobs (which bound nothing) were never in a release and are not read.
 func bindAAD(name string, ver int, aad []byte) []byte {
-	b := append([]byte("hsmgate/kmsjson/blob/v2\x00"), byte(len(name)))
+	// the name has at most 128 characters and a key at most 1000 versions (config.Validate): the conversions below cannot lose anything
+	b := append([]byte("hsmgate/kmsjson/blob/v2\x00"), byte(len(name))) // #nosec G115
 	b = append(b, name...)
-	b = binary.BigEndian.AppendUint16(b, uint16(ver))
+	b = binary.BigEndian.AppendUint16(b, uint16(ver)) // #nosec G115
 	return append(b, aad...)
 }
 
 func makeBlob(name string, ver int, text string) []byte {
-	b := append([]byte(blobMagic), byte(len(name)))
+	b := append([]byte(blobMagic), byte(len(name))) // #nosec G115 -- bounded by config.Validate
 	b = append(b, name...)
-	b = binary.BigEndian.AppendUint16(b, uint16(ver))
+	b = binary.BigEndian.AppendUint16(b, uint16(ver)) // #nosec G115 -- bounded by config.Validate
 	return append(b, text...)
 }
 

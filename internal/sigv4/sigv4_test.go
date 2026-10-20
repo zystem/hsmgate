@@ -163,3 +163,14 @@ func TestUnsignedPayloadIsRefused(t *testing.T) {
 		t.Errorf("the real hash: %v", err)
 	}
 }
+
+// The date of the credential scope is the eight digits of X-Amz-Date, not a prefix of it.
+func TestScopeDateMustBeTheDay(t *testing.T) {
+	now := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
+	v := &Verifier{Region: "local", Service: "kms", Secrets: lookup, Now: func() time.Time { return now }}
+	r, body := signed(t, `{"KeyId":"k"}`, now)
+	r.Header.Set("Authorization", strings.Replace(r.Header.Get("Authorization"), "/20261020/", "/2026102/", 1))
+	if _, err := v.Verify(r, body); err == nil || !strings.Contains(err.Error(), "malformed") {
+		t.Errorf("a short date in the scope: %v", err)
+	}
+}
