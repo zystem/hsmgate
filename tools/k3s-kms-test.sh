@@ -39,20 +39,20 @@ wait_api() {
 hg() { curl -s --cacert "$D/certs/ca.pem" --cert "$D/certs/kms.pem" --key "$D/certs/kms.key" "https://127.0.0.1:$PORT$1"; }
 
 preflight() {
-  say "k3s"; k3s --version | head -1; systemctl is-active k3s
+  say "k3s"; k3s --version | head -1; systemctl is-active k3s || true
   say "existing secrets encryption (a conflict if enabled)"
   if [ -f /var/lib/rancher/k3s/server/cred/encryption-config.json ]; then
     echo "PRESENT: /var/lib/rancher/k3s/server/cred/encryption-config.json"; k3s secrets-encrypt status 2>&1 | head -8 || true
   else
     echo "none"
   fi
-  say "k3s config"; ls -la /etc/rancher/k3s /etc/rancher/k3s/config.yaml.d 2>&1 | head -20
+  say "k3s config"; ls -la /etc/rancher/k3s /etc/rancher/k3s/config.yaml.d 2>&1 | head -20 || true
   grep -rn "encryption-provider-config\|secrets-encryption" /etc/rancher/k3s 2>/dev/null || echo "no encryption flags in /etc/rancher/k3s"
-  say "datastore"; ls -la "$DB" 2>&1 | head
+  say "datastore"; ls -la "$DB" 2>&1 | head || true
   say "tools"; for t in openssl curl systemctl; do if command -v $t >/dev/null; then echo "$t ok"; else echo "$t MISSING"; fi; done
   say "ports and sockets"
   if ss -ltn 2>/dev/null | grep -q ":$PORT "; then echo "port $PORT is taken"; else echo "port $PORT free"; fi
-  ls "$SOCK_DIR" 2>&1 | head -2
+  ls "$SOCK_DIR" 2>&1 | head -2 || true
 }
 
 backup() {
@@ -165,7 +165,7 @@ verify() {
 
 rotate() {
   write_config 2; systemctl reload hsmgate-test; sleep 2
-  say "key versions now"; hg /v1/transit/keys/k8s-etcd | grep -o '"latest_version":[0-9]*'
+  say "key versions now"; hg /v1/transit/keys/k8s-etcd | grep -o '"latest_version":[0-9]*' || true
   echo "waiting 75 s: the apiserver polls the plug-in's Status about once a minute"; sleep 75
   n=kms-rot-$(date +%s); $KC -n kms-test create secret generic "$n" --from-literal=plain="rotated-$$" >/dev/null
   $KC -n kms-test get secret "$n" -o jsonpath='{.data.plain}' | base64 -d; echo
