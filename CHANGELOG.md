@@ -14,4 +14,4 @@
 - Docs: the OpenSC PKCS#11 module exposes no AES; the card itself is not said to lack it.
 
 ### Not done
-- AES on the card (the vendor's module shows AES-CBC and AES-CMAC and no GCM or ECDH; decision postponed), RSA and other algorithms in the KMS-JSON face, key management calls, a replay cache (decided against).
+- AES on the card: **decided against** (2026-10-21; see docs/tokens/smartcard-hsm.md for the reasons and what would reopen it), RSA and other algorithms in the KMS-JSON face, key management calls, a replay cache (decided against).

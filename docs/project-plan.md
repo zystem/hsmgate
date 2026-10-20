@@ -122,3 +122,5 @@ The client (`core/kekclient.nim`, `core/kekprovider.nim`), the choice of provide
 4. The recipients format (several tokens at once): in the first release or after it.
 5. Other tokens than the SmartCard-HSM in the first release (YubiHSM 2, TPM, SoftHSM only for tests).
 6. Who reviews it (step P8), and the point at which the real master key moves to it.
+
+Decision (2026-10-21): no AES on the SmartCard-HSM until new weighty reasons; the reasons and the conditions to reopen it are in [tokens/smartcard-hsm.md](tokens/smartcard-hsm.md).

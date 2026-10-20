@@ -66,3 +66,24 @@ Every operation on the card costs 17 to 43 ms whatever it is: the time is the ro
 - AES on the card (CMAC as a PRF, or CBC with CMAC): **every seal and every open is a card operation** (one or two, 19 to 37 ms), so sealing becomes 200 to 400 times slower and depends on the card, and the card's 20 to 55 operations per second are shared by seals and opens.
 - MAC: the key derived by ECDH is one 37 ms operation per MAC without the cache and none with it (`kmsjson.mac_cache_seconds`); a MAC on the card is 19 ms (CMAC) or 43 ms (HMAC-SHA256 function) every time.
 - The line to the card (`limits`: 8 at once, 2 seconds of waiting by default) is sized for these numbers: a burst of more than about 50 simultaneous opens finds the queue full and gets `busy`/`throttled` with a retry.
+
+## Decision: no AES on the card (2026-10-21)
+
+hsmgate does not use AES on the SmartCard-HSM until there is a new, weighty reason. The key stays an EC key: seals are made in software with `ecies1` from the public key, opens are one ECDH on the card.
+
+Why:
+
+- **No AES-GCM on the card** (CBC and CMAC only), so any AES design is an assembly in our code of two primitives and two keys, with the classic mistakes of such assemblies available.
+- **Speed and availability.** A seal would become a card operation (19 to 37 ms instead of 0.1 ms) and would need the card to be present; the card's 20 to 55 operations per second would be shared by seals and opens.
+- **No gain in the main risk.** A host that is compromised while the card is unlocked can ask the card for anything its policy allows, wherever the AES runs; the defence is the policy, the limits, the audit before the answer, the lock, and sealing by the client (`DeriveSharedSecret`).
+- **No client needs it.** Every program tried (Vault, OpenBao, SOPS, cosign, Terraform, the SDKs, MongoDB, the Encryption SDK) treats the ciphertext as opaque.
+- **Two modules.** ECDH comes from OpenSC and AES from the vendor's module; both on one card means two tokens, or an own driver over PC/SC (weeks of work and a protocol to maintain).
+
+What would reopen it (any of):
+
+1. A requirement that data keys be sealed by an AES key on the token (an auditor, a rule), or secrets that must outlive the elliptic curves (long-lived data against a quantum computer): then the option "CMAC as a PRF" of the discussion, with a single AES-256 key.
+2. A MAC that must not have its key in the memory of the host: then the card's HMAC-SHA256 function (to be checked for being the standard HMAC) or CMAC, through an own driver.
+3. A token or a module that has AES-GCM and ECDH together (another HSM, a newer OpenSC or vendor module).
+4. A client that cannot work with the blob of this service and needs AES-GCM ciphertext of the cloud service (none found).
+
+Meanwhile the MAC key derived by ECDH stays, with the cache off by default (`kmsjson.mac_cache_seconds`).
