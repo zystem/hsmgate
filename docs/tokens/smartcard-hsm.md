@@ -36,3 +36,15 @@ Checked again on 2026-10-21 whether the vendor's stack has ECDH after all ([feat
 ### A direct way: the card's own commands (looked at 2026-10-21, not tried)
 
 The card does more than either PKCS#11 module shows. The vendor's public scripts ([scsh-scripts](https://github.com/CardContact/scsh-scripts), `sc-hsm/lib/smartcardhsm.js`) send the command `80 62 <key> <algorithm>` for "decipher" (RSA, and with the algorithm byte `0x80`, `ALGO_EC_DH` in the module's header, ECDH), and the module source lists the algorithms of an AES key as `0x10`, `0x11`, `0x18`, `0x99`. A forum quote of the vendor's manual (section "Derive Symmetric Key", `80 78`; to be checked against the vendor's own document before use) gives them as AES-CBC encrypt (`10`), AES-CBC decrypt (`11`), AES-CMAC with 16 bytes returned (`18`) and an **HMAC-SHA256** derivation (`99`). So a program that talks to the card over PC/SC itself could use ECDH, ECDSA, AES-CBC, AES-CMAC and HMAC-SHA256 on the one card, in one process, with no PKCS#11 module between: an HMAC with the key on the card would replace the MAC key that hsmgate now derives and holds in memory. Still no AES-GCM. Costs: the protocol code is ours to keep (and it is specific to the SmartCard-HSM and its relatives), the key references are the card's own one-byte references (not CKA_ID; they come from the PKCS#15 files), the PIN state of the card is shared with the other program that has the card open, and it needs `libpcsclite` at build time.
+
+**Tried on 2026-10-21** with [tools/scard-spike](../../tools/scard-spike/README.md) on the card of the production machine (firmware 4.1; test keys made and removed, the production key and container not touched; the program read the PIN file itself):
+
+| Command | Result |
+|---|---|
+| `SELECT` the applet, `VERIFY` the PIN over PC/SC (`00 20 00 81`) | works from a second program while another one has the card; the key references are the files `CCxx` listed by `80 58` |
+| ECDH: `80 62 <ref> 80`, data = the peer point `04 \|\| X \|\| Y` | returns `04 \|\| X \|\| Y` of the result point (65 bytes); **X equals the local ECDH secret** |
+| AES-CMAC: `80 78 <ref> 18` | 16 bytes, repeatable, depends on the message |
+| HMAC-SHA256 function: `80 78 <ref> 99` | 32 bytes, repeatable, depends on the message; **whether it is the standard HMAC with the key as its key was not checked** (the key cannot be read, and none was imported) |
+| AES-CBC: `80 78 <ref> 10` / `11` | round trip works; the card's CBC has a **zero IV** (a host that wants another IV XORs it into the first block, as the vendor's module does) |
+
+An EC key refuses the AES commands (`6A81`) and an AES key refuses ECDH (`6A86`): the key types stay apart on the card. An AES-256 key made with the vendor's module's `CKM_AES_KEY_GEN` carries all four AES algorithms (10, 11, 18, 99). Still no AES-GCM.
