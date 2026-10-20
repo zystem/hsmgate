@@ -632,3 +632,31 @@ func TestPeerAddressWithAZone(t *testing.T) {
 		t.Errorf("a mapped address: %v", a)
 	}
 }
+
+func TestVerifyAfterRotation(t *testing.T) {
+	r := cryptoRig(t)
+	msg := []byte("signed before the rotation")
+	_, sg := r.app("Sign", map[string]any{"KeyId": "sig", "Message": msg, "SigningAlgorithm": "ECDSA_SHA_256"})
+	sig, _ := base64.StdEncoding.DecodeString(sg["Signature"].(string))
+	key := r.cfg.Keys["sig"]
+	key.Versions = append(key.Versions, config.Version{Token: "soft", Label: "m5"})
+	r.cfg.Keys["sig"] = key
+	verify := func(id string) (int, map[string]any) {
+		return r.app("Verify", map[string]any{"KeyId": id, "Message": msg, "Signature": sig, "SigningAlgorithm": "ECDSA_SHA_256"})
+	}
+	if st, out := verify("sig"); st != 200 || out["SignatureValid"] != true {
+		t.Errorf("an old signature after a rotation: %d %v", st, out)
+	}
+	if st, out := verify("sig@1"); st != 200 || out["SignatureValid"] != true {
+		t.Errorf("version 1: %d %v", st, out)
+	}
+	if st, out := verify("sig@2"); st != 400 || typ(out) != "KMSInvalidSignatureException" {
+		t.Errorf("version 2 against a signature of version 1: %d %v", st, out)
+	}
+	// new signatures are made with the latest version and verify with it
+	_, sg2 := r.app("Sign", map[string]any{"KeyId": "sig", "Message": msg, "SigningAlgorithm": "ECDSA_SHA_256"})
+	sig2, _ := base64.StdEncoding.DecodeString(sg2["Signature"].(string))
+	if st, out := r.app("Verify", map[string]any{"KeyId": "sig@2", "Message": msg, "Signature": sig2, "SigningAlgorithm": "ECDSA_SHA_256"}); st != 200 || out["SignatureValid"] != true {
+		t.Errorf("a new signature: %d %v", st, out)
+	}
+}

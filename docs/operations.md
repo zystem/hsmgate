@@ -43,7 +43,9 @@ The spare card needs its own PIN entry (`hsmgate unlock -token spare`) and sits 
 
 ## The KMS-JSON face
 
-Enable it with `kmsjson: {enabled: true}` (a restart; a reload refuses to toggle it). Each client that uses it has a `sigv4` credential whose secret file is mode 0600; replace the file and send SIGHUP to rotate the secret. A refusal for a wrong secret and a refusal for a client that does not match the certificate are in the audit log as denied calls. See [specs/kms-json.md](specs/kms-json.md).
+Enable it with `kmsjson: {enabled: true}` (a restart; a reload refuses to toggle it). Each client that uses it has a `sigv4` credential whose secret file is mode 0600; replace the file and send SIGHUP to rotate the secret. A refusal for a wrong secret and a refusal for a client that does not match the certificate are in the audit log as denied calls. See [specs/kms-json.md](specs/kms-json.md); how clients connect: [guides/kms-json-clients.md](guides/kms-json-clients.md).
+
+Rotating a key of this face is adding a version (as in Transit): `Encrypt`, `GenerateDataKey`, `Sign` and `GenerateMac` use the latest version; `Decrypt` opens any (the blob names the version); `Verify` and `VerifyMac` try the latest and then the earlier versions, so what was made before the rotation still verifies (a client can ask for one version as `name@N`). A key signs, makes MACs or does ECDH, never two of them, and a token key may be used by one such key only. `kmsjson.mac_cache_seconds` keeps derived MAC keys in memory for that time; a reload clears them.
 
 ## Several processes, several tokens
 

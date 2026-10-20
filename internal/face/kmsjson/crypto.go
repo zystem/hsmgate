@@ -542,8 +542,10 @@ func (c *call) sign(req cryptoReq) {
 	c.succeed(map[string]any{"KeyId": c.f.arn(name), "Signature": b64(sig), "SigningAlgorithm": "ECDSA_SHA_256"})
 }
 
-// verify checks a signature with the public key of the key (the token is asked for the key only, not to sign).
+// verify checks a signature with the public key of the key (the token is asked for the key only, not to sign). A signature carries no version: it is checked against the latest
+// version and then the earlier ones, so that a signature made before a rotation still verifies (a version can be asked for as "name@N", then only it is tried).
 func (c *call) verify(req cryptoReq) {
+	_, pinned, _ := c.f.resolve(req.KeyID)
 	name, ver, key, _, ok := c.target(req.KeyID, 0, "verify", nil)
 	if !ok {
 		return
@@ -567,17 +569,31 @@ func (c *call) verify(req cryptoReq) {
 		return
 	}
 	defer release()
-	point, err := keyops.PointOf(c.f.Tokens, key.Versions[ver-1])
-	if err != nil {
-		c.f.tokenFailure(c.refuse, err)
-		return
+	versions := []int{ver}
+	if pinned == 0 {
+		versions = versions[:0]
+		for v := len(key.Versions); v >= 1; v-- {
+			versions = append(versions, v)
+		}
 	}
-	pub, err := x509.ParsePKIXPublicKey(spki(point))
-	if err != nil {
-		c.refuse(500, "KMSInternalException", "internal error", "internal_error", true)
-		return
+	valid := false
+	for _, v := range versions {
+		point, err := keyops.PointOf(c.f.Tokens, key.Versions[v-1])
+		if err != nil {
+			c.f.tokenFailure(c.refuse, err)
+			return
+		}
+		pub, err := x509.ParsePKIXPublicKey(spki(point))
+		if err != nil {
+			c.refuse(500, "KMSInternalException", "internal error", "internal_error", true)
+			return
+		}
+		if ecdsa.VerifyASN1(pub.(*ecdsa.PublicKey), digest, req.Signature) {
+			valid = true
+			break
+		}
 	}
-	if !ecdsa.VerifyASN1(pub.(*ecdsa.PublicKey), digest, req.Signature) {
+	if !valid {
 		c.refuse(400, "KMSInvalidSignatureException", "the signature is not valid for this message and key", "bad_signature_value", false)
 		return
 	}
