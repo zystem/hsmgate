@@ -1,0 +1,38 @@
+=== RUN   TestAuditMacCacheConcurrentCopy
+==================
+WARNING: DATA RACE
+Write at 0x00c000034480 by goroutine 11:
+  github.com/zystem/hsmgate/internal/face/kmsjson.wipe()
+      /tmp/hsmgate-audit-20261021-e766cb79916a/internal/face/kmsjson/crypto.go:312 +0x3e4
+  github.com/zystem/hsmgate/internal/face/kmsjson.(*macCache).put()
+      /tmp/hsmgate-audit-20261021-e766cb79916a/internal/face/kmsjson/crypto.go:660 +0x224
+  github.com/zystem/hsmgate/internal/face/kmsjson.TestAuditMacCacheConcurrentCopy.func2()
+      /tmp/hsmgate-audit-20261021-e766cb79916a/internal/face/kmsjson/audit_crypto_test.go:62 +0x11a
+
+Previous read at 0x00c000034480 by goroutine 10:
+  runtime.slicecopy()
+      /home/zystem/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.26.9.linux-amd64/src/runtime/slice.go:392 +0x0
+  github.com/zystem/hsmgate/internal/face/kmsjson.TestAuditMacCacheConcurrentCopy.func1()
+      /tmp/hsmgate-audit-20261021-e766cb79916a/internal/face/kmsjson/audit_crypto_test.go:61 +0x14d
+
+Goroutine 11 (running) created at:
+  github.com/zystem/hsmgate/internal/face/kmsjson.TestAuditMacCacheConcurrentCopy()
+      /tmp/hsmgate-audit-20261021-e766cb79916a/internal/face/kmsjson/audit_crypto_test.go:62 +0x329
+  testing.tRunner()
+      /home/zystem/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.26.9.linux-amd64/src/testing/testing.go:2036 +0x21c
+  testing.(*T).Run.gowrap1()
+      /home/zystem/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.26.9.linux-amd64/src/testing/testing.go:2101 +0x38
+
+Goroutine 10 (running) created at:
+  github.com/zystem/hsmgate/internal/face/kmsjson.TestAuditMacCacheConcurrentCopy()
+      /tmp/hsmgate-audit-20261021-e766cb79916a/internal/face/kmsjson/audit_crypto_test.go:61 +0x22c
+  testing.tRunner()
+      /home/zystem/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.26.9.linux-amd64/src/testing/testing.go:2036 +0x21c
+  testing.(*T).Run.gowrap1()
+      /home/zystem/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.26.9.linux-amd64/src/testing/testing.go:2101 +0x38
+==================
+    testing.go:1712: race detected during execution of test
+--- FAIL: TestAuditMacCacheConcurrentCopy (0.08s)
+FAIL
+FAIL	github.com/zystem/hsmgate/internal/face/kmsjson	0.088s
+FAIL

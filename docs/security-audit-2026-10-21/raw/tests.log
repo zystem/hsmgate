@@ -1,0 +1,15 @@
+ok  	github.com/zystem/hsmgate/cmd/hsmgate	3.175s	coverage: 74.1% of statements
+	github.com/zystem/hsmgate/internal/audit		coverage: 0.0% of statements
+	github.com/zystem/hsmgate/internal/authn		coverage: 0.0% of statements
+ok  	github.com/zystem/hsmgate/internal/backend	1.037s	coverage: 74.2% of statements
+ok  	github.com/zystem/hsmgate/internal/client	1.085s	coverage: 82.9% of statements
+ok  	github.com/zystem/hsmgate/internal/config	1.097s	coverage: 88.8% of statements
+ok  	github.com/zystem/hsmgate/internal/face/kmsjson	1.441s	coverage: 83.3% of statements
+ok  	github.com/zystem/hsmgate/internal/face/transit	2.179s	coverage: 87.7% of statements
+	github.com/zystem/hsmgate/internal/gate		coverage: 0.0% of statements
+ok  	github.com/zystem/hsmgate/internal/keyops	1.025s	coverage: 90.6% of statements
+ok  	github.com/zystem/hsmgate/internal/metrics	1.056s	coverage: 94.5% of statements
+	github.com/zystem/hsmgate/internal/policy		coverage: 0.0% of statements
+ok  	github.com/zystem/hsmgate/internal/scheme/ecies	1.034s	coverage: 82.1% of statements
+ok  	github.com/zystem/hsmgate/internal/server	1.154s	coverage: 61.5% of statements
+ok  	github.com/zystem/hsmgate/internal/sigv4	1.029s	coverage: 93.0% of statements

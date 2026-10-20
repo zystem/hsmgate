@@ -1,0 +1,26 @@
+=== RUN   TestAuditHKDFMatchesStandard
+    audit_crypto_test.go:23: 128 cases: custom KDF equals standard HKDF-SHA256 for L=32
+--- PASS: TestAuditHKDFMatchesStandard (0.00s)
+=== RUN   TestAuditFingerprintMatchesX509
+--- PASS: TestAuditFingerprintMatchesX509 (0.00s)
+=== RUN   TestAuditFreshnessAndTamper
+    audit_crypto_test.go:46: 256 independent ephemeral keys/nonces; every nonce/ciphertext/tag byte mutation rejected
+--- PASS: TestAuditFreshnessAndTamper (0.91s)
+PASS
+ok  	github.com/zystem/hsmgate/internal/scheme/ecies	0.919s
+=== RUN   TestAuditAliasExposesMACKey
+    audit_crypto_test.go:36: CONFIRMED: duplicate physical key under a second label passes Validate; derive-only reader recovers MAC key and forges offline
+--- PASS: TestAuditAliasExposesMACKey (0.00s)
+=== RUN   TestAuditCiphertextCanBeRelabelledAcrossContextKeys
+    audit_crypto_test.go:48: CONFIRMED: a reader without grant on org decrypts its ciphertext after changing unbound blob key name to orgcopy (same material/context)
+--- PASS: TestAuditCiphertextCanBeRelabelledAcrossContextKeys (0.00s)
+=== RUN   TestAuditMacCacheBorrowedBuffer
+    audit_crypto_test.go:55: CONFIRMED: get returns cache-owned mutable memory, modified by clear after the mutex is released
+--- PASS: TestAuditMacCacheBorrowedBuffer (0.00s)
+PASS
+ok  	github.com/zystem/hsmgate/internal/face/kmsjson	0.013s
+=== RUN   TestAuditUnsignedPayloadAllowsBodySubstitution
+    audit_crypto_test.go:27: CONFIRMED: a valid UNSIGNED-PAYLOAD authorization accepts changed bodies without recalculating its signature
+--- PASS: TestAuditUnsignedPayloadAllowsBodySubstitution (0.00s)
+PASS
+ok  	github.com/zystem/hsmgate/internal/sigv4	0.004s

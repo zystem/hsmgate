@@ -1,0 +1,7 @@
+{
+  "Replace": {
+    "/tmp/hsmgate-audit-20261021-e766cb79916a/internal/scheme/ecies/audit_crypto_test.go": "/home/zystem/github/hsmgate/docs/security-audit-2026-10-21/probes/ecies_test.go.txt",
+    "/tmp/hsmgate-audit-20261021-e766cb79916a/internal/face/kmsjson/audit_crypto_test.go": "/home/zystem/github/hsmgate/docs/security-audit-2026-10-21/probes/kms_test.go.txt",
+    "/tmp/hsmgate-audit-20261021-e766cb79916a/internal/sigv4/audit_crypto_test.go": "/home/zystem/github/hsmgate/docs/security-audit-2026-10-21/probes/sigv4_test.go.txt"
+  }
+}

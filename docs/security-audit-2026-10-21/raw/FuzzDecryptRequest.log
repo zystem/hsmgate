@@ -1,0 +1,12 @@
+fuzz: elapsed: 0s, gathering baseline coverage: 0/154 completed
+fuzz: elapsed: 1s, gathering baseline coverage: 154/154 completed, now fuzzing with 2 workers
+fuzz: elapsed: 3s, execs: 17466 (5821/sec), new interesting: 3 (total: 157)
+fuzz: elapsed: 6s, execs: 43016 (8515/sec), new interesting: 9 (total: 163)
+fuzz: elapsed: 9s, execs: 67637 (8208/sec), new interesting: 21 (total: 175)
+fuzz: elapsed: 12s, execs: 69656 (673/sec), new interesting: 23 (total: 177)
+fuzz: elapsed: 15s, execs: 69656 (0/sec), new interesting: 23 (total: 177)
+fuzz: elapsed: 18s, execs: 69656 (0/sec), new interesting: 23 (total: 177)
+fuzz: elapsed: 21s, execs: 69656 (0/sec), new interesting: 23 (total: 177)
+fuzz: elapsed: 21s, execs: 69656 (0/sec), new interesting: 23 (total: 177)
+PASS
+ok  	github.com/zystem/hsmgate/internal/face/transit	21.053s

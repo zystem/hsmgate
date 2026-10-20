@@ -1,0 +1,47 @@
+package ecies
+
+import (
+ "bytes"
+ "crypto/ecdh"
+ "crypto/hkdf"
+ "crypto/rand"
+ "crypto/sha256"
+ "crypto/x509"
+ "encoding/hex"
+ "strings"
+ "testing"
+)
+
+func TestAuditHKDFMatchesStandard(t *testing.T) {
+ for i:=0;i<128;i++ {
+  secret:=make([]byte,32); _,_=rand.Read(secret)
+  eph,_:=ecdh.P256().GenerateKey(rand.Reader)
+  point:=eph.PublicKey().Bytes(); fp:=Fingerprint(point)
+  want,err:=hkdf.Key(sha256.New,secret,[]byte(kdfLabel),kdfLabel+"|"+fp+"|"+hex.EncodeToString(point),32)
+  if err!=nil||!bytes.Equal(want,deriveKey(secret,fp,point)){t.Fatal("HKDF mismatch",err)}
+ }
+ t.Log("128 cases: custom KDF equals standard HKDF-SHA256 for L=32")
+}
+
+func TestAuditFingerprintMatchesX509(t *testing.T) {
+ k,_:=ecdh.P256().GenerateKey(rand.Reader)
+ der,err:=x509.MarshalPKIXPublicKey(k.PublicKey());if err!=nil{t.Fatal(err)}
+ h:=sha256.Sum256(der)
+ if Fingerprint(k.PublicKey().Bytes())!=hex.EncodeToString(h[:]){t.Fatal("SPKI mismatch")}
+}
+
+func TestAuditFreshnessAndTamper(t *testing.T) {
+ k,_:=ecdh.P256().GenerateKey(rand.Reader); point:=k.PublicKey().Bytes()
+ ephs,nonces:=map[string]bool{},map[string]bool{}
+ for i:=0;i<256;i++ {
+  ct,err:=Wrap(point,[]byte("audit message"),[]byte("tenant=one"));if err!=nil{t.Fatal(err)}
+  p:=strings.Split(ct,".");if ephs[p[2]]||nonces[p[3][:48]]{t.Fatal("duplicate in sample")};ephs[p[2]]=true;nonces[p[3][:48]]=true
+  b,_:=hex.DecodeString(p[3])
+  for j:=range b {
+   b[j]^=1; p[3]=hex.EncodeToString(b)
+   if got,err:=Unwrap(point,SoftKey{k},strings.Join(p,"."),[]byte("tenant=one"));err==nil||got!=nil{t.Fatal("tamper accepted",j)}
+   b[j]^=1
+  }
+ }
+ t.Log("256 independent ephemeral keys/nonces; every nonce/ciphertext/tag byte mutation rejected")
+}

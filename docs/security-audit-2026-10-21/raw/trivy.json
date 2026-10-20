@@ -1,0 +1,856 @@
+{
+  "SchemaVersion": 2,
+  "Trivy": {
+    "Version": "0.69.3"
+  },
+  "ReportID": "01a15b83-ce16-7dd3-a490-5e267a4736bf",
+  "CreatedAt": "2026-10-21T01:52:07.062906928+03:00",
+  "ArtifactName": "/tmp/hsmgate-audit-20261021-e766cb79916a",
+  "ArtifactType": "filesystem",
+  "Results": [
+    {
+      "Target": "go.mod",
+      "Class": "lang-pkgs",
+      "Type": "gomod",
+      "Packages": [
+        {
+          "ID": "github.com/zystem/hsmgate",
+          "Name": "github.com/zystem/hsmgate",
+          "Identifier": {
+            "PURL": "pkg:golang/github.com/zystem/hsmgate",
+            "UID": "ece24c4335ed79df"
+          },
+          "Relationship": "root",
+          "DependsOn": [
+            "github.com/miekg/pkcs11@v1.1.2",
+            "golang.org/x/crypto@v0.58.0",
+            "golang.org/x/term@v0.47.0",
+            "gopkg.in/yaml.v3@v3.0.1"
+          ],
+          "AnalyzedBy": "gomod"
+        },
+        {
+          "ID": "github.com/miekg/pkcs11@v1.1.2",
+          "Name": "github.com/miekg/pkcs11",
+          "Identifier": {
+            "PURL": "pkg:golang/github.com/miekg/pkcs11@v1.1.2",
+            "UID": "a6e3978d8dcf103c"
+          },
+          "Version": "v1.1.2",
+          "Licenses": [
+            "BSD-3-Clause"
+          ],
+          "Relationship": "direct",
+          "AnalyzedBy": "gomod"
+        },
+        {
+          "ID": "golang.org/x/crypto@v0.58.0",
+          "Name": "golang.org/x/crypto",
+          "Identifier": {
+            "PURL": "pkg:golang/golang.org/x/crypto@v0.58.0",
+            "UID": "eebf64e0333ed3a2"
+          },
+          "Version": "v0.58.0",
+          "Licenses": [
+            "BSD-3-Clause"
+          ],
+          "Relationship": "direct",
+          "DependsOn": [
+            "golang.org/x/sys@v0.49.0",
+            "golang.org/x/term@v0.47.0"
+          ],
+          "AnalyzedBy": "gomod"
+        },
+        {
+          "ID": "golang.org/x/term@v0.47.0",
+          "Name": "golang.org/x/term",
+          "Identifier": {
+            "PURL": "pkg:golang/golang.org/x/term@v0.47.0",
+            "UID": "cf091795d04b186d"
+          },
+          "Version": "v0.47.0",
+          "Licenses": [
+            "BSD-3-Clause"
+          ],
+          "Relationship": "direct",
+          "DependsOn": [
+            "golang.org/x/sys@v0.49.0"
+          ],
+          "AnalyzedBy": "gomod"
+        },
+        {
+          "ID": "gopkg.in/yaml.v3@v3.0.1",
+          "Name": "gopkg.in/yaml.v3",
+          "Identifier": {
+            "PURL": "pkg:golang/gopkg.in/yaml.v3@v3.0.1",
+            "UID": "ccaf474fd2f28f8"
+          },
+          "Version": "v3.0.1",
+          "Licenses": [
+            "Apache-2.0",
+            "MIT"
+          ],
+          "Relationship": "direct",
+          "AnalyzedBy": "gomod"
+        },
+        {
+          "ID": "golang.org/x/sys@v0.49.0",
+          "Name": "golang.org/x/sys",
+          "Identifier": {
+            "PURL": "pkg:golang/golang.org/x/sys@v0.49.0",
+            "UID": "f9dca16e9410d435"
+          },
+          "Version": "v0.49.0",
+          "Licenses": [
+            "BSD-3-Clause"
+          ],
+          "Indirect": true,
+          "Relationship": "indirect",
+          "AnalyzedBy": "gomod"
+        }
+      ],
+      "Vulnerabilities": [
+        {
+          "VulnerabilityID": "GO-2026-5932",
+          "PkgID": "golang.org/x/crypto@v0.58.0",
+          "PkgName": "golang.org/x/crypto",
+          "PkgIdentifier": {
+            "PURL": "pkg:golang/golang.org/x/crypto@v0.58.0",
+            "UID": "eebf64e0333ed3a2"
+          },
+          "InstalledVersion": "v0.58.0",
+          "Status": "affected",
+          "DataSource": {
+            "ID": "govulndb",
+            "Name": "The Go Vulnerability Database",
+            "URL": "https://pkg.go.dev/vuln/"
+          },
+          "Fingerprint": "sha256:8f863efa9c78a56271cefb71e55b9b62a3129d7266a1e6db719dc468c74dee4a",
+          "Title": "The golang.org/x/crypto/openpgp package is unmaintained, unsafe by design, and has known security issues",
+          "Description": "The golang.org/x/crypto/openpgp package is unsafe by design, has numerous known security issues, is not maintained, and should not be used.\n\nIf you are required to interoperate with OpenPGP systems and need a maintained package, consider github.com/ProtonMail/go-crypto/openpgp which is a maintained fork that aims to be a drop-in replacement for this package.",
+          "Severity": "UNKNOWN",
+          "References": [
+            "https://go.dev/issue/44226",
+            "https://pkg.go.dev/vuln/GO-2026-5932"
+          ]
+        }
+      ]
+    },
+    {
+      "Target": "test/kmsjson-boto3/requirements.txt",
+      "Class": "lang-pkgs",
+      "Type": "pip",
+      "Packages": [
+        {
+          "Name": "boto3",
+          "Identifier": {
+            "PURL": "pkg:pypi/boto3@1.43.115",
+            "UID": "b1e0cc8bfebd04ec"
+          },
+          "Version": "1.43.115",
+          "Locations": [
+            {
+              "StartLine": 1,
+              "EndLine": 1
+            }
+          ],
+          "AnalyzedBy": "pip"
+        },
+        {
+          "Name": "cryptography",
+          "Identifier": {
+            "PURL": "pkg:pypi/cryptography@46.0.1",
+            "UID": "e26a35330b716c8e"
+          },
+          "Version": "46.0.1",
+          "Locations": [
+            {
+              "StartLine": 2,
+              "EndLine": 2
+            }
+          ],
+          "AnalyzedBy": "pip"
+        }
+      ],
+      "Vulnerabilities": [
+        {
+          "VulnerabilityID": "CVE-2026-26007",
+          "VendorIDs": [
+            "GHSA-r6ph-v2qm-q3c2"
+          ],
+          "PkgName": "cryptography",
+          "PkgIdentifier": {
+            "PURL": "pkg:pypi/cryptography@46.0.1",
+            "UID": "e26a35330b716c8e"
+          },
+          "InstalledVersion": "46.0.1",
+          "FixedVersion": "46.0.5",
+          "Status": "fixed",
+          "SeveritySource": "ghsa",
+          "PrimaryURL": "https://avd.aquasec.com/nvd/cve-2026-26007",
+          "DataSource": {
+            "ID": "ghsa",
+            "Name": "GitHub Security Advisory pip",
+            "URL": "https://github.com/advisories?query=type%3Areviewed+ecosystem%3Apip"
+          },
+          "Fingerprint": "sha256:efe8c5130e2330cf0c06921e1ada5802cc0cb036d51b6c71e6d87040dd5f07e8",
+          "Title": "cryptography: cryptography Subgroup Attack Due to Missing Subgroup Validation for SECT Curves",
+          "Description": "cryptography is a package designed to expose cryptographic primitives and recipes to Python developers. Prior to 46.0.5, the public_key_from_numbers (or EllipticCurvePublicNumbers.public_key()), EllipticCurvePublicNumbers.public_key(), load_der_public_key() and load_pem_public_key() functions do not verify that the point belongs to the expected prime-order subgroup of the curve. This missing validation allows an attacker to provide a public key point P from a small-order subgroup. This can lead to security issues in various situations, such as the most commonly used signature verification (ECDSA) and shared key negotiation (ECDH). When the victim computes the shared secret as S = [victim_private_key]P via ECDH, this leaks information about victim_private_key mod (small_subgroup_order). For curves with cofactor \u003e 1, this reveals the least significant bits of the private key. When these weak public keys are used in ECDSA , it's easy to forge signatures on the small subgroup. Only SECT curves are impacted by this. This vulnerability is fixed in 46.0.5.",
+          "Severity": "HIGH",
+          "CweIDs": [
+            "CWE-345",
+            "CWE-354"
+          ],
+          "VendorSeverity": {
+            "alma": 3,
+            "azure": 3,
+            "ghsa": 3,
+            "nvd": 2,
+            "oracle-oval": 3,
+            "redhat": 3,
+            "rocky": 3,
+            "ubuntu": 2
+          },
+          "CVSS": {
+            "ghsa": {
+              "V40Vector": "CVSS:4.0/AV:N/AC:H/AT:N/PR:N/UI:N/VC:H/VI:N/VA:N/SC:N/SI:N/SA:N",
+              "V40Score": 8.2
+            },
+            "nvd": {
+              "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:H/I:N/A:N",
+              "V3Score": 6.5
+            },
+            "redhat": {
+              "V3Vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:N",
+              "V3Score": 7.4
+            }
+          },
+          "References": [
+            "http://www.openwall.com/lists/oss-security/2026/02/10/4",
+            "https://access.redhat.com/errata/RHSA-2026:10184",
+            "https://access.redhat.com/errata/RHSA-2026:12176",
+            "https://access.redhat.com/errata/RHSA-2026:13512",
+            "https://access.redhat.com/errata/RHSA-2026:13545",
+            "https://access.redhat.com/errata/RHSA-2026:13553",
+            "https://access.redhat.com/errata/RHSA-2026:13672",
+            "https://access.redhat.com/errata/RHSA-2026:19355",
+            "https://access.redhat.com/errata/RHSA-2026:21431",
+            "https://access.redhat.com/errata/RHSA-2026:21517",
+            "https://access.redhat.com/errata/RHSA-2026:22330",
+            "https://access.redhat.com/errata/RHSA-2026:22993",
+            "https://access.redhat.com/errata/RHSA-2026:2694",
+            "https://access.redhat.com/errata/RHSA-2026:5168",
+            "https://access.redhat.com/errata/RHSA-2026:5665",
+            "https://access.redhat.com/errata/RHSA-2026:6308",
+            "https://access.redhat.com/errata/RHSA-2026:6309",
+            "https://access.redhat.com/errata/RHSA-2026:6497",
+            "https://access.redhat.com/errata/RHSA-2026:6567",
+            "https://access.redhat.com/errata/RHSA-2026:6568",
+            "https://access.redhat.com/errata/RHSA-2026:7295",
+            "https://access.redhat.com/security/cve/CVE-2026-26007",
+            "https://advisory.echohq.com/cve/CVE-2026-26007",
+            "https://bugzilla.redhat.com/2438762",
+            "https://bugzilla.redhat.com/2447194",
+            "https://bugzilla.redhat.com/2448553",
+            "https://bugzilla.redhat.com/show_bug.cgi?id=2438762",
+            "https://bugzilla.redhat.com/show_bug.cgi?id=2447194",
+            "https://bugzilla.redhat.com/show_bug.cgi?id=2448553",
+            "https://creativecommons.org/licenses/by/4.0/",
+            "https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2026-26007",
+            "https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2026-30922",
+            "https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2026-32597",
+            "https://errata.almalinux.org/8/ALSA-2026-12176.html",
+            "https://errata.rockylinux.org/RLSA-2026:19355",
+            "https://github.com/pyca/cryptography",
+            "https://github.com/pyca/cryptography/commit/0eebb9dbb6343d9bc1d91e5a2482ed4e054a6d8c",
+            "https://github.com/pyca/cryptography/releases/tag/46.0.5",
+            "https://github.com/pyca/cryptography/security/advisories/GHSA-r6ph-v2qm-q3c2",
+            "https://linux.oracle.com/cve/CVE-2026-26007.html",
+            "https://linux.oracle.com/errata/ELSA-2026-19355.html",
+            "https://nvd.nist.gov/vuln/detail/CVE-2026-26007",
+            "https://security.access.redhat.com/data/csaf/v2/vex/2026/cve-2026-26007.json",
+            "https://ubuntu.com/security/notices/USN-8087-1",
+            "https://ubuntu.com/security/notices/USN-8087-3",
+            "https://www.cve.org/CVERecord?id=CVE-2026-26007"
+          ],
+          "PublishedDate": "2026-02-10T22:17:00.307Z",
+          "LastModifiedDate": "2026-09-10T13:17:55.693Z"
+        },
+        {
+          "VulnerabilityID": "CVE-2026-69247",
+          "VendorIDs": [
+            "GHSA-g6cj-pr64-35w5"
+          ],
+          "PkgName": "cryptography",
+          "PkgIdentifier": {
+            "PURL": "pkg:pypi/cryptography@46.0.1",
+            "UID": "e26a35330b716c8e"
+          },
+          "InstalledVersion": "46.0.1",
+          "FixedVersion": "50.0.0",
+          "Status": "fixed",
+          "SeveritySource": "ghsa",
+          "PrimaryURL": "https://avd.aquasec.com/nvd/cve-2026-69247",
+          "DataSource": {
+            "ID": "ghsa",
+            "Name": "GitHub Security Advisory pip",
+            "URL": "https://github.com/advisories?query=type%3Areviewed+ecosystem%3Apip"
+          },
+          "Fingerprint": "sha256:a67212fac90959918b30bd1c7c6e497352f82459d58d2475fd6c171773728680",
+          "Title": "python-cryptography: python-cryptography: PKCS#7 EnvelopedData decryption exposes a Bleichenbacher oracle through distinguishable errors and timing",
+          "Description": "cryptography is a package designed to expose cryptographic primitives and recipes to Python developers. From 44.0.0 until 50.0.0, pkcs7_decrypt_der, pkcs7_decrypt_pem, and pkcs7_decrypt_smime reported the outcome of decrypting a RecipientInfo's encryptedKey in several distinguishable ways, one of which disclosed the exact length recovered from the RSA operation. The same distinction was also observable by timing. An application that decrypts attacker-supplied EnvelopedData and reflects the outcome gives the attacker a Bleichenbacher oracle against the content-encryption key. Decryption ran as RSA PKCS#1 v1.5 decrypt of encryptedKey, build an AES cipher from the result, then AES-CBC decrypt and PKCS#7 unpad. Invalid RSA padding, a valid padding with a bad key length, a correct length with a wrong key, and the real key each failed or succeeded differently. Case 1 is reachable only where the linked library lacks implicit rejection: OpenSSL 3.0 and 3.1, LibreSSL, and BoringSSL. Exploitation requires a service that auto-decrypts untrusted EnvelopedData matching the victim certificate and answers adaptively at high volume, such as an S/MIME gateway or mail filter. This issue is fixed in 50.0.0.",
+          "Severity": "HIGH",
+          "CweIDs": [
+            "CWE-208",
+            "CWE-209"
+          ],
+          "VendorSeverity": {
+            "ghsa": 3,
+            "redhat": 2,
+            "ubuntu": 2
+          },
+          "CVSS": {
+            "ghsa": {
+              "V40Vector": "CVSS:4.0/AV:N/AC:H/AT:P/PR:N/UI:N/VC:H/VI:N/VA:N/SC:N/SI:N/SA:N",
+              "V40Score": 8.2
+            },
+            "redhat": {
+              "V3Vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:N/A:N",
+              "V3Score": 5.9
+            }
+          },
+          "References": [
+            "https://access.redhat.com/security/cve/CVE-2026-69247",
+            "https://advisory.echohq.com/cve/CVE-2026-69247",
+            "https://github.com/pyca/cryptography",
+            "https://github.com/pyca/cryptography/commit/53fccd93413a8d7f07d6d8999681f27b75cffa3f",
+            "https://github.com/pyca/cryptography/pull/15369",
+            "https://github.com/pyca/cryptography/security/advisories/GHSA-g6cj-pr64-35w5",
+            "https://nvd.nist.gov/vuln/detail/CVE-2026-69247",
+            "https://ubuntu.com/security/notices/USN-8776-1",
+            "https://www.cve.org/CVERecord?id=CVE-2026-69247"
+          ],
+          "PublishedDate": "2026-08-03T22:16:52.38Z",
+          "LastModifiedDate": "2026-09-10T20:36:14.34Z"
+        },
+        {
+          "VulnerabilityID": "CVE-2026-69249",
+          "VendorIDs": [
+            "GHSA-jwv3-5hgf-82ww"
+          ],
+          "PkgName": "cryptography",
+          "PkgIdentifier": {
+            "PURL": "pkg:pypi/cryptography@46.0.1",
+            "UID": "e26a35330b716c8e"
+          },
+          "InstalledVersion": "46.0.1",
+          "FixedVersion": "49.0.0",
+          "Status": "fixed",
+          "SeveritySource": "ghsa",
+          "PrimaryURL": "https://avd.aquasec.com/nvd/cve-2026-69249",
+          "DataSource": {
+            "ID": "ghsa",
+            "Name": "GitHub Security Advisory pip",
+            "URL": "https://github.com/advisories?query=type%3Areviewed+ecosystem%3Apip"
+          },
+          "Fingerprint": "sha256:192132289c2072f623bb357ee1604d6362a1646fcbf790b5d3652c30e98e64ba",
+          "Title": "python-cryptography: python-cryptography: Duplicate self-signed intermediates can cause exponential path-building",
+          "Description": "python-cryptography is a package designed to expose cryptographic primitives and recipes to Python developers. In versions 42.0.0 through 48.0.0, when resolving invalid certificate chains that include duplicate copies of self-signed certificates, the processing recursively invokes the same candidate, leading to an exponential blowup. Although the limitation that the chain depth cannot exceed a specified maximum depth prevents unbounded recursion and guarantees termination, an attacker-controlled certificate chain can lead the processing to easily take more than 5s to reject in testing. This amplification could form the basis for a resource exhaustion denial of service attack. The core issue arises in the recursive nature of build_chain_inner, which does not de-duplicate against previously analyzed candidates. As the correctness of validation is not affected, the integrity of a system cannot be compromised through this vector, only its availability. This issue is fixed in 49.0.0.",
+          "Severity": "HIGH",
+          "CweIDs": [
+            "CWE-400"
+          ],
+          "VendorSeverity": {
+            "alma": 3,
+            "azure": 3,
+            "ghsa": 3,
+            "oracle-oval": 3,
+            "redhat": 3,
+            "rocky": 3,
+            "ubuntu": 2
+          },
+          "CVSS": {
+            "ghsa": {
+              "V40Vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:H/SC:N/SI:N/SA:N",
+              "V40Score": 8.7
+            },
+            "redhat": {
+              "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+              "V3Score": 7.5
+            }
+          },
+          "References": [
+            "https://access.redhat.com/errata/RHSA-2026:64774",
+            "https://access.redhat.com/security/cve/CVE-2026-69249",
+            "https://advisory.echohq.com/cve/CVE-2026-69249",
+            "https://bugzilla.redhat.com/2510815",
+            "https://bugzilla.redhat.com/2510830",
+            "https://bugzilla.redhat.com/show_bug.cgi?id=2510815",
+            "https://bugzilla.redhat.com/show_bug.cgi?id=2510830",
+            "https://creativecommons.org/licenses/by/4.0/",
+            "https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2026-69248",
+            "https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2026-69249",
+            "https://errata.almalinux.org/9/ALSA-2026-64774.html",
+            "https://errata.rockylinux.org/RLSA-2026:64774",
+            "https://github.com/pyca/cryptography",
+            "https://github.com/pyca/cryptography/commit/3763aa79b",
+            "https://github.com/pyca/cryptography/commit/4a12cf49675a184e47f912b00b04f3a629283582",
+            "https://github.com/pyca/cryptography/pull/14960",
+            "https://github.com/pyca/cryptography/security/advisories/GHSA-jwv3-5hgf-82ww",
+            "https://github.com/pypa/advisory-database/tree/main/vulns/cryptography/PYSEC-2026-3553.yaml",
+            "https://linux.oracle.com/cve/CVE-2026-69249.html",
+            "https://linux.oracle.com/errata/ELSA-2026-71658.html",
+            "https://nvd.nist.gov/vuln/detail/CVE-2026-69249",
+            "https://ubuntu.com/security/notices/USN-8776-1",
+            "https://www.cve.org/CVERecord?id=CVE-2026-69249"
+          ],
+          "PublishedDate": "2026-08-03T22:16:52.72Z",
+          "LastModifiedDate": "2026-09-10T20:36:14.34Z"
+        },
+        {
+          "VulnerabilityID": "GHSA-537c-gmf6-5ccf",
+          "PkgName": "cryptography",
+          "PkgIdentifier": {
+            "PURL": "pkg:pypi/cryptography@46.0.1",
+            "UID": "e26a35330b716c8e"
+          },
+          "InstalledVersion": "46.0.1",
+          "FixedVersion": "48.0.1",
+          "Status": "fixed",
+          "SeveritySource": "ghsa",
+          "PrimaryURL": "https://github.com/advisories/GHSA-537c-gmf6-5ccf",
+          "DataSource": {
+            "ID": "ghsa",
+            "Name": "GitHub Security Advisory pip",
+            "URL": "https://github.com/advisories?query=type%3Areviewed+ecosystem%3Apip"
+          },
+          "Fingerprint": "sha256:5b3fda833250e0129fee7963ee11a53216bb61f39f1dbe45177b4ba2215620aa",
+          "Title": "Vulnerable OpenSSL included in cryptography wheels",
+          "Description": "pyca/cryptography's wheels include a statically linked copy of OpenSSL. The versions of OpenSSL included in wheels prior to cryptograph 48.01 are vulnerable to a security issue. More details about the vulnerability itself can be found in https://openssl-library.org/news/secadv/20260609.txt.\n\nIf you are building cryptography source (\"sdist\") then you are responsible for upgrading your copy of OpenSSL. Only users installing from wheels built by the cryptography project (i.e., those distributed on PyPI) need to update their cryptography versions.",
+          "Severity": "HIGH",
+          "VendorSeverity": {
+            "ghsa": 3
+          },
+          "CVSS": {
+            "ghsa": {
+              "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+              "V3Score": 7.5
+            }
+          },
+          "References": [
+            "https://advisory.echohq.com/cve/GHSA-537c-gmf6-5ccf",
+            "https://github.com/advisories/GHSA-537c-gmf6-5ccf",
+            "https://github.com/pyca/cryptography",
+            "https://github.com/pyca/cryptography/security/advisories/GHSA-537c-gmf6-5ccf",
+            "https://openssl-library.org/news/secadv/20260609.txt"
+          ],
+          "PublishedDate": "2026-06-15T20:12:27Z",
+          "LastModifiedDate": "2026-06-15T20:12:27Z"
+        },
+        {
+          "VulnerabilityID": "CVE-2026-39892",
+          "VendorIDs": [
+            "GHSA-p423-j2cm-9vmq"
+          ],
+          "PkgName": "cryptography",
+          "PkgIdentifier": {
+            "PURL": "pkg:pypi/cryptography@46.0.1",
+            "UID": "e26a35330b716c8e"
+          },
+          "InstalledVersion": "46.0.1",
+          "FixedVersion": "46.0.7",
+          "Status": "fixed",
+          "SeveritySource": "ghsa",
+          "PrimaryURL": "https://avd.aquasec.com/nvd/cve-2026-39892",
+          "DataSource": {
+            "ID": "ghsa",
+            "Name": "GitHub Security Advisory pip",
+            "URL": "https://github.com/advisories?query=type%3Areviewed+ecosystem%3Apip"
+          },
+          "Fingerprint": "sha256:20531a4927c61cc2448a7c7ac07cda825eec79d715ffc63008f759377098df5c",
+          "Title": "cryptography: Cryptography: Buffer overflow via non-contiguous buffer in API",
+          "Description": "cryptography is a package designed to expose cryptographic primitives and recipes to Python developers. From 45.0.0 to before 46.0.7, if a non-contiguous buffer was passed to APIs which accepted Python buffers (e.g. Hash.update()), this could lead to buffer overflows. This vulnerability is fixed in 46.0.7.",
+          "Severity": "MEDIUM",
+          "CweIDs": [
+            "CWE-119",
+            "CWE-131"
+          ],
+          "VendorSeverity": {
+            "ghsa": 2,
+            "nvd": 4,
+            "redhat": 3
+          },
+          "CVSS": {
+            "ghsa": {
+              "V40Vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:L/SC:N/SI:N/SA:N",
+              "V40Score": 6.9
+            },
+            "nvd": {
+              "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+              "V3Score": 9.8
+            },
+            "redhat": {
+              "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L",
+              "V3Score": 7.3
+            }
+          },
+          "References": [
+            "http://www.openwall.com/lists/oss-security/2026/04/08/12",
+            "https://access.redhat.com/errata/RHSA-2026:19375",
+            "https://access.redhat.com/errata/RHSA-2026:20338",
+            "https://access.redhat.com/errata/RHSA-2026:21017",
+            "https://access.redhat.com/errata/RHSA-2026:22465",
+            "https://access.redhat.com/errata/RHSA-2026:22629",
+            "https://access.redhat.com/errata/RHSA-2026:22840",
+            "https://access.redhat.com/errata/RHSA-2026:23361",
+            "https://access.redhat.com/errata/RHSA-2026:24483",
+            "https://access.redhat.com/errata/RHSA-2026:24761",
+            "https://access.redhat.com/errata/RHSA-2026:24762",
+            "https://access.redhat.com/errata/RHSA-2026:24853",
+            "https://access.redhat.com/errata/RHSA-2026:24866",
+            "https://access.redhat.com/errata/RHSA-2026:24977",
+            "https://access.redhat.com/errata/RHSA-2026:30088",
+            "https://access.redhat.com/errata/RHSA-2026:30089",
+            "https://access.redhat.com/errata/RHSA-2026:37275",
+            "https://access.redhat.com/errata/RHSA-2026:42644",
+            "https://access.redhat.com/errata/RHSA-2026:43651",
+            "https://access.redhat.com/errata/RHSA-2026:43670",
+            "https://access.redhat.com/errata/RHSA-2026:43851",
+            "https://access.redhat.com/errata/RHSA-2026:43853",
+            "https://access.redhat.com/errata/RHSA-2026:43854",
+            "https://access.redhat.com/errata/RHSA-2026:43855",
+            "https://access.redhat.com/errata/RHSA-2026:46956",
+            "https://access.redhat.com/errata/RHSA-2026:7295",
+            "https://access.redhat.com/security/cve/CVE-2026-39892",
+            "https://advisory.echohq.com/cve/CVE-2026-39892",
+            "https://bugzilla.redhat.com/show_bug.cgi?id=2456735",
+            "https://github.com/pyca/cryptography",
+            "https://github.com/pyca/cryptography/commit/622d672e429a7cff836a23c5903683dbec1901f5",
+            "https://github.com/pyca/cryptography/security/advisories/GHSA-p423-j2cm-9vmq",
+            "https://github.com/pypa/advisory-database/tree/main/vulns/cryptography/PYSEC-2026-36.yaml",
+            "https://nvd.nist.gov/vuln/detail/CVE-2026-39892",
+            "https://security.access.redhat.com/data/csaf/v2/vex/2026/cve-2026-39892.json",
+            "https://www.cve.org/CVERecord?id=CVE-2026-39892"
+          ],
+          "PublishedDate": "2026-04-08T21:17:01.547Z",
+          "LastModifiedDate": "2026-09-10T13:20:00.007Z"
+        },
+        {
+          "VulnerabilityID": "CVE-2026-69248",
+          "VendorIDs": [
+            "GHSA-m2h6-j472-rp4c"
+          ],
+          "PkgName": "cryptography",
+          "PkgIdentifier": {
+            "PURL": "pkg:pypi/cryptography@46.0.1",
+            "UID": "e26a35330b716c8e"
+          },
+          "InstalledVersion": "46.0.1",
+          "FixedVersion": "49.0.0",
+          "Status": "fixed",
+          "SeveritySource": "ghsa",
+          "PrimaryURL": "https://avd.aquasec.com/nvd/cve-2026-69248",
+          "DataSource": {
+            "ID": "ghsa",
+            "Name": "GitHub Security Advisory pip",
+            "URL": "https://github.com/advisories?query=type%3Areviewed+ecosystem%3Apip"
+          },
+          "Fingerprint": "sha256:3ea824710efa0e3f71fda71be4803f786202430a4f1ddb22b6b5046e845842f0",
+          "Title": "python-cryptography: python-cryptography: python-cryptography verifier accepts wildcard DNS names allowing escape from permittedSubtrees",
+          "Description": "cryptography is a package designed to expose cryptographic primitives and recipes to Python developers. In versions 45.0.0 through 48.0.0, if an intermediate constrained CA permits the DNS name foo.example.com, and the leaf certificate has a wildcard in its DNS SAN of *.example.com, python-cryptography's verifier accepts which allows escaping outside of the permitted names. The core issue is in DNSConstraint::matches, where a wildcard pattern was treated as matching a more-specific permitted constraint even though *.example.com can expand to sibling names such as bar.example.com outside foo.example.com. This allows acceptance of an invalid certificate chain. This issue is fixed in 49.0.0.",
+          "Severity": "MEDIUM",
+          "CweIDs": [
+            "CWE-295"
+          ],
+          "VendorSeverity": {
+            "alma": 3,
+            "ghsa": 2,
+            "oracle-oval": 3,
+            "redhat": 2,
+            "rocky": 3,
+            "ubuntu": 2
+          },
+          "CVSS": {
+            "ghsa": {
+              "V40Vector": "CVSS:4.0/AV:N/AC:L/AT:P/PR:N/UI:N/VC:L/VI:H/VA:N/SC:N/SI:N/SA:N/E:P",
+              "V40Score": 6.9
+            },
+            "redhat": {
+              "V3Vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:N",
+              "V3Score": 7.4
+            }
+          },
+          "References": [
+            "https://access.redhat.com/errata/RHSA-2026:64774",
+            "https://access.redhat.com/security/cve/CVE-2026-69248",
+            "https://advisory.echohq.com/cve/CVE-2026-69248",
+            "https://bugzilla.redhat.com/2510815",
+            "https://bugzilla.redhat.com/2510830",
+            "https://bugzilla.redhat.com/show_bug.cgi?id=2510815",
+            "https://bugzilla.redhat.com/show_bug.cgi?id=2510830",
+            "https://creativecommons.org/licenses/by/4.0/",
+            "https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2026-69248",
+            "https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2026-69249",
+            "https://errata.almalinux.org/9/ALSA-2026-64774.html",
+            "https://errata.rockylinux.org/RLSA-2026:64774",
+            "https://github.com/pyca/cryptography",
+            "https://github.com/pyca/cryptography/commit/286c89128",
+            "https://github.com/pyca/cryptography/commit/4d035a4225965edeffd312079a510ef25fcfdcb2",
+            "https://github.com/pyca/cryptography/pull/14888",
+            "https://github.com/pyca/cryptography/security/advisories/GHSA-m2h6-j472-rp4c",
+            "https://github.com/pypa/advisory-database/tree/main/vulns/cryptography/PYSEC-2026-3554.yaml",
+            "https://linux.oracle.com/cve/CVE-2026-69248.html",
+            "https://linux.oracle.com/errata/ELSA-2026-64795-0.html",
+            "https://nvd.nist.gov/vuln/detail/CVE-2026-69248",
+            "https://ubuntu.com/security/notices/USN-8776-1",
+            "https://www.cve.org/CVERecord?id=CVE-2026-69248"
+          ],
+          "PublishedDate": "2026-08-03T22:16:52.55Z",
+          "LastModifiedDate": "2026-09-10T20:36:14.34Z"
+        },
+        {
+          "VulnerabilityID": "CVE-2026-34073",
+          "VendorIDs": [
+            "GHSA-m959-cc7f-wv43"
+          ],
+          "PkgName": "cryptography",
+          "PkgIdentifier": {
+            "PURL": "pkg:pypi/cryptography@46.0.1",
+            "UID": "e26a35330b716c8e"
+          },
+          "InstalledVersion": "46.0.1",
+          "FixedVersion": "46.0.6",
+          "Status": "fixed",
+          "SeveritySource": "ghsa",
+          "PrimaryURL": "https://avd.aquasec.com/nvd/cve-2026-34073",
+          "DataSource": {
+            "ID": "ghsa",
+            "Name": "GitHub Security Advisory pip",
+            "URL": "https://github.com/advisories?query=type%3Areviewed+ecosystem%3Apip"
+          },
+          "Fingerprint": "sha256:aa3b15cff1826ae595c8078f4af504596e7d6fc07dab448665fbfe995c682f3d",
+          "Title": "python-cryptography: Cryptography: Security bypass due to improper DNS name constraint validation",
+          "Description": "cryptography is a package designed to expose cryptographic primitives and recipes to Python developers. Prior to version 46.0.6, DNS name constraints were only validated against SANs within child certificates, and not the \"peer name\" presented during each validation. Consequently, cryptography would allow a peer named bar.example.com to validate against a wildcard leaf certificate for *.example.com, even if the leaf's parent certificate (or upwards) contained an excluded subtree constraint for bar.example.com. This issue has been patched in version 46.0.6.",
+          "Severity": "LOW",
+          "CweIDs": [
+            "CWE-295"
+          ],
+          "VendorSeverity": {
+            "ghsa": 1,
+            "nvd": 2,
+            "redhat": 1
+          },
+          "CVSS": {
+            "ghsa": {
+              "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:L/A:N",
+              "V40Vector": "CVSS:4.0/AV:N/AC:H/AT:P/PR:N/UI:N/VC:N/VI:L/VA:N/SC:N/SI:N/SA:N/E:U",
+              "V3Score": 5.3,
+              "V40Score": 1.7
+            },
+            "nvd": {
+              "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:L/A:N",
+              "V3Score": 5.3
+            },
+            "redhat": {
+              "V3Vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:L/A:N",
+              "V3Score": 3.7
+            }
+          },
+          "References": [
+            "https://access.redhat.com/security/cve/CVE-2026-34073",
+            "https://advisory.echohq.com/cve/CVE-2026-34073",
+            "https://github.com/pyca/cryptography",
+            "https://github.com/pyca/cryptography/security/advisories/GHSA-m959-cc7f-wv43",
+            "https://github.com/pypa/advisory-database/tree/main/vulns/cryptography/PYSEC-2026-35.yaml",
+            "https://nvd.nist.gov/vuln/detail/CVE-2026-34073",
+            "https://www.cve.org/CVERecord?id=CVE-2026-34073",
+            "https://www.kb.cert.org/vuls/id/948176"
+          ],
+          "PublishedDate": "2026-03-31T03:15:59.123Z",
+          "LastModifiedDate": "2026-10-14T17:18:28.637Z"
+        }
+      ]
+    },
+    {
+      "Target": "test/kmsjson-sdk/go.mod",
+      "Class": "lang-pkgs",
+      "Type": "gomod",
+      "Packages": [
+        {
+          "ID": "github.com/zystem/hsmgate/test/kmsjson-sdk",
+          "Name": "github.com/zystem/hsmgate/test/kmsjson-sdk",
+          "Identifier": {
+            "PURL": "pkg:golang/github.com/zystem/hsmgate/test/kmsjson-sdk",
+            "UID": "517a8b567371b459"
+          },
+          "Relationship": "root",
+          "DependsOn": [
+            "github.com/aws/aws-sdk-go-v2/credentials@v1.20.9",
+            "github.com/aws/aws-sdk-go-v2/service/kms@v1.61.5",
+            "github.com/aws/aws-sdk-go-v2@v1.47.3",
+            "github.com/aws/smithy-go@v1.28.5"
+          ],
+          "AnalyzedBy": "gomod"
+        },
+        {
+          "ID": "github.com/aws/aws-sdk-go-v2@v1.47.3",
+          "Name": "github.com/aws/aws-sdk-go-v2",
+          "Identifier": {
+            "PURL": "pkg:golang/github.com/aws/aws-sdk-go-v2@v1.47.3",
+            "UID": "1abf35ea69cb804a"
+          },
+          "Version": "v1.47.3",
+          "Licenses": [
+            "Apache-2.0"
+          ],
+          "Relationship": "direct",
+          "DependsOn": [
+            "github.com/aws/smithy-go@v1.28.5"
+          ],
+          "AnalyzedBy": "gomod"
+        },
+        {
+          "ID": "github.com/aws/aws-sdk-go-v2/credentials@v1.20.9",
+          "Name": "github.com/aws/aws-sdk-go-v2/credentials",
+          "Identifier": {
+            "PURL": "pkg:golang/github.com/aws/aws-sdk-go-v2/credentials@v1.20.9",
+            "UID": "dd186b416b3da78f"
+          },
+          "Version": "v1.20.9",
+          "Licenses": [
+            "Apache-2.0"
+          ],
+          "Relationship": "direct",
+          "DependsOn": [
+            "github.com/aws/aws-sdk-go-v2@v1.47.3",
+            "github.com/aws/smithy-go@v1.28.5"
+          ],
+          "AnalyzedBy": "gomod"
+        },
+        {
+          "ID": "github.com/aws/aws-sdk-go-v2/service/kms@v1.61.5",
+          "Name": "github.com/aws/aws-sdk-go-v2/service/kms",
+          "Identifier": {
+            "PURL": "pkg:golang/github.com/aws/aws-sdk-go-v2/service/kms@v1.61.5",
+            "UID": "631fd74dc8569cc"
+          },
+          "Version": "v1.61.5",
+          "Licenses": [
+            "Apache-2.0"
+          ],
+          "Relationship": "direct",
+          "DependsOn": [
+            "github.com/aws/aws-sdk-go-v2@v1.47.3",
+            "github.com/aws/aws-sdk-go-v2/internal/configsources@v1.5.6",
+            "github.com/aws/aws-sdk-go-v2/internal/endpoints/v2@v2.8.6",
+            "github.com/aws/smithy-go@v1.28.5"
+          ],
+          "AnalyzedBy": "gomod"
+        },
+        {
+          "ID": "github.com/aws/smithy-go@v1.28.5",
+          "Name": "github.com/aws/smithy-go",
+          "Identifier": {
+            "PURL": "pkg:golang/github.com/aws/smithy-go@v1.28.5",
+            "UID": "feee88c8337e3c09"
+          },
+          "Version": "v1.28.5",
+          "Licenses": [
+            "Apache-2.0"
+          ],
+          "Relationship": "direct",
+          "AnalyzedBy": "gomod"
+        },
+        {
+          "ID": "github.com/aws/aws-sdk-go-v2/internal/configsources@v1.5.6",
+          "Name": "github.com/aws/aws-sdk-go-v2/internal/configsources",
+          "Identifier": {
+            "PURL": "pkg:golang/github.com/aws/aws-sdk-go-v2/internal/configsources@v1.5.6",
+            "UID": "2d6115a827c4df47"
+          },
+          "Version": "v1.5.6",
+          "Licenses": [
+            "Apache-2.0"
+          ],
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "github.com/aws/aws-sdk-go-v2@v1.47.3"
+          ],
+          "AnalyzedBy": "gomod"
+        },
+        {
+          "ID": "github.com/aws/aws-sdk-go-v2/internal/endpoints/v2@v2.8.6",
+          "Name": "github.com/aws/aws-sdk-go-v2/internal/endpoints/v2",
+          "Identifier": {
+            "PURL": "pkg:golang/github.com/aws/aws-sdk-go-v2/internal/endpoints/v2@v2.8.6",
+            "UID": "2fb8e74931f1c18f"
+          },
+          "Version": "v2.8.6",
+          "Licenses": [
+            "Apache-2.0"
+          ],
+          "Indirect": true,
+          "Relationship": "indirect",
+          "DependsOn": [
+            "github.com/aws/aws-sdk-go-v2@v1.47.3",
+            "github.com/aws/smithy-go@v1.28.5"
+          ],
+          "AnalyzedBy": "gomod"
+        }
+      ]
+    },
+    {
+      "Target": "tools/scard-spike/go.mod",
+      "Class": "lang-pkgs",
+      "Type": "gomod",
+      "Packages": [
+        {
+          "ID": "spike",
+          "Name": "spike",
+          "Identifier": {
+            "PURL": "pkg:golang/spike",
+            "UID": "d190d1eb9e7fcab8"
+          },
+          "Relationship": "root",
+          "DependsOn": [
+            "github.com/ebfe/scard@v0.0.0-20241214075232-7af069cabc25",
+            "github.com/miekg/pkcs11@v1.1.1"
+          ],
+          "AnalyzedBy": "gomod"
+        },
+        {
+          "ID": "github.com/ebfe/scard@v0.0.0-20241214075232-7af069cabc25",
+          "Name": "github.com/ebfe/scard",
+          "Identifier": {
+            "PURL": "pkg:golang/github.com/ebfe/scard@v0.0.0-20241214075232-7af069cabc25",
+            "UID": "38394763adcf5ce6"
+          },
+          "Version": "v0.0.0-20241214075232-7af069cabc25",
+          "Relationship": "direct",
+          "AnalyzedBy": "gomod"
+        },
+        {
+          "ID": "github.com/miekg/pkcs11@v1.1.1",
+          "Name": "github.com/miekg/pkcs11",
+          "Identifier": {
+            "PURL": "pkg:golang/github.com/miekg/pkcs11@v1.1.1",
+            "UID": "1ca73b2f17282f7e"
+          },
+          "Version": "v1.1.1",
+          "Relationship": "direct",
+          "AnalyzedBy": "gomod"
+        }
+      ]
+    },
+    {
+      "Target": "Dockerfile",
+      "Class": "config",
+      "Type": "dockerfile",
+      "MisconfSummary": {
+        "Successes": 27,
+        "Failures": 0
+      }
+    }
+  ]
+}

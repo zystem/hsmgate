@@ -1,0 +1,12 @@
+fuzz: elapsed: 0s, gathering baseline coverage: 0/14 completed
+fuzz: elapsed: 0s, gathering baseline coverage: 14/14 completed, now fuzzing with 2 workers
+fuzz: elapsed: 3s, execs: 2262 (754/sec), new interesting: 30 (total: 44)
+fuzz: elapsed: 6s, execs: 2262 (0/sec), new interesting: 30 (total: 44)
+fuzz: elapsed: 9s, execs: 2262 (0/sec), new interesting: 30 (total: 44)
+fuzz: elapsed: 12s, execs: 241077 (79658/sec), new interesting: 118 (total: 132)
+fuzz: elapsed: 15s, execs: 241077 (0/sec), new interesting: 118 (total: 132)
+fuzz: elapsed: 18s, execs: 241077 (0/sec), new interesting: 118 (total: 132)
+fuzz: elapsed: 21s, execs: 241077 (0/sec), new interesting: 118 (total: 132)
+fuzz: elapsed: 21s, execs: 241077 (0/sec), new interesting: 118 (total: 132)
+PASS
+ok  	github.com/zystem/hsmgate/internal/config	21.020s

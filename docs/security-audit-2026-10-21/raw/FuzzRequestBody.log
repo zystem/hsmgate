@@ -1,0 +1,12 @@
+fuzz: elapsed: 0s, gathering baseline coverage: 0/6 completed
+fuzz: elapsed: 0s, gathering baseline coverage: 6/6 completed, now fuzzing with 2 workers
+fuzz: elapsed: 3s, execs: 8827 (2942/sec), new interesting: 36 (total: 42)
+fuzz: elapsed: 6s, execs: 15199 (2123/sec), new interesting: 46 (total: 52)
+fuzz: elapsed: 9s, execs: 28203 (4335/sec), new interesting: 56 (total: 62)
+fuzz: elapsed: 12s, execs: 34522 (2106/sec), new interesting: 58 (total: 64)
+fuzz: elapsed: 15s, execs: 35433 (304/sec), new interesting: 62 (total: 68)
+fuzz: elapsed: 18s, execs: 35433 (0/sec), new interesting: 62 (total: 68)
+fuzz: elapsed: 21s, execs: 35433 (0/sec), new interesting: 62 (total: 68)
+fuzz: elapsed: 21s, execs: 35433 (0/sec), new interesting: 62 (total: 68)
+PASS
+ok  	github.com/zystem/hsmgate/internal/face/kmsjson	21.024s

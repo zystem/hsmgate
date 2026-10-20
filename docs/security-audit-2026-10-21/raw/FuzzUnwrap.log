@@ -1,0 +1,11 @@
+fuzz: elapsed: 0s, gathering baseline coverage: 0/34 completed
+fuzz: elapsed: 0s, gathering baseline coverage: 34/34 completed, now fuzzing with 2 workers
+fuzz: elapsed: 3s, execs: 97943 (32645/sec), new interesting: 1 (total: 35)
+fuzz: elapsed: 6s, execs: 218243 (40092/sec), new interesting: 2 (total: 36)
+fuzz: elapsed: 9s, execs: 383441 (55065/sec), new interesting: 2 (total: 36)
+fuzz: elapsed: 12s, execs: 495599 (37397/sec), new interesting: 2 (total: 36)
+fuzz: elapsed: 15s, execs: 605238 (36534/sec), new interesting: 2 (total: 36)
+fuzz: elapsed: 18s, execs: 721871 (38880/sec), new interesting: 2 (total: 36)
+fuzz: elapsed: 20s, execs: 804026 (39333/sec), new interesting: 2 (total: 36)
+PASS
+ok  	github.com/zystem/hsmgate/internal/scheme/ecies	20.106s

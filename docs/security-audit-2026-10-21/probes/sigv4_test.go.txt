@@ -1,0 +1,28 @@
+package sigv4
+
+import (
+ "encoding/hex"
+ "fmt"
+ "net/http/httptest"
+ "strings"
+ "testing"
+ "time"
+)
+
+func TestAuditUnsignedPayloadAllowsBodySubstitution(t *testing.T) {
+ now:=time.Now().UTC().Truncate(time.Second);date:=now.Format("20060102");amz:=now.Format(dateLayout)
+ secret:=[]byte("audit-only-credential-not-a-real-key")
+ r:=httptest.NewRequest("POST","https://example.invalid/",strings.NewReader(`{"Message":"original"}`))
+ r.Header.Set("X-Amz-Target","TrentService.Sign");r.Header.Set("X-Amz-Date",amz);r.Header.Set("X-Amz-Content-Sha256","UNSIGNED-PAYLOAD")
+ names:=[]string{"host","x-amz-date","x-amz-target"}
+ canon,err:=canonicalRequest(r,names,"UNSIGNED-PAYLOAD");if err!=nil{t.Fatal(err)}
+ scope:=date+"/local/kms/aws4_request"
+ toSign:=algorithm+"\n"+amz+"\n"+scope+"\n"+hex.EncodeToString(sum([]byte(canon)))
+ sig:=hex.EncodeToString(hmacSHA256(signingKey(secret,date,"local","kms"),[]byte(toSign)))
+ r.Header.Set("Authorization",fmt.Sprintf("%s Credential=AKIDAUDITONLY0000/%s, SignedHeaders=%s, Signature=%s",algorithm,scope,strings.Join(names,";"),sig))
+ v:=Verifier{Region:"local",Service:"kms",Now:func()time.Time{return now},Secrets:func(string)([]byte,bool){return secret,true}}
+ for _,body:=range []string{`{"Message":"original"}`,`{"Message":"substituted without resigning"}`} {
+  if _,err:=v.Verify(r,[]byte(body));err!=nil{t.Fatal(err)}
+ }
+ t.Log("CONFIRMED: a valid UNSIGNED-PAYLOAD authorization accepts changed bodies without recalculating its signature")
+}

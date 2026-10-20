@@ -1,0 +1,60 @@
+{
+  "queries": [
+    {
+      "package": {
+        "ecosystem": "Go",
+        "name": "stdlib"
+      },
+      "version": "1.26.9"
+    },
+    {
+      "package": {
+        "ecosystem": "Go",
+        "name": "golang.org/x/crypto"
+      },
+      "version": "v0.58.0"
+    },
+    {
+      "package": {
+        "ecosystem": "Go",
+        "name": "github.com/miekg/pkcs11"
+      },
+      "version": "v1.1.2"
+    },
+    {
+      "package": {
+        "ecosystem": "Go",
+        "name": "golang.org/x/sys"
+      },
+      "version": "v0.49.0"
+    },
+    {
+      "package": {
+        "ecosystem": "Go",
+        "name": "golang.org/x/term"
+      },
+      "version": "v0.47.0"
+    },
+    {
+      "package": {
+        "ecosystem": "Go",
+        "name": "gopkg.in/yaml.v3"
+      },
+      "version": "v3.0.1"
+    },
+    {
+      "package": {
+        "ecosystem": "PyPI",
+        "name": "cryptography"
+      },
+      "version": "46.0.1"
+    },
+    {
+      "package": {
+        "ecosystem": "PyPI",
+        "name": "boto3"
+      },
+      "version": "1.43.115"
+    }
+  ]
+}

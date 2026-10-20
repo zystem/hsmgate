@@ -1,0 +1,11 @@
+fuzz: elapsed: 0s, gathering baseline coverage: 0/4 completed
+fuzz: elapsed: 0s, gathering baseline coverage: 4/4 completed, now fuzzing with 2 workers
+fuzz: elapsed: 3s, execs: 88158 (29384/sec), new interesting: 28 (total: 32)
+fuzz: elapsed: 6s, execs: 178279 (30031/sec), new interesting: 35 (total: 39)
+fuzz: elapsed: 9s, execs: 273512 (31744/sec), new interesting: 43 (total: 47)
+fuzz: elapsed: 12s, execs: 367864 (31453/sec), new interesting: 54 (total: 58)
+fuzz: elapsed: 15s, execs: 446459 (26201/sec), new interesting: 59 (total: 63)
+fuzz: elapsed: 18s, execs: 535801 (29781/sec), new interesting: 64 (total: 68)
+fuzz: elapsed: 20s, execs: 605329 (29767/sec), new interesting: 67 (total: 71)
+PASS
+ok  	github.com/zystem/hsmgate/internal/sigv4	20.347s

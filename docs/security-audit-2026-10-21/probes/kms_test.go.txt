@@ -1,0 +1,78 @@
+package kmsjson
+
+import (
+ "bytes"
+ "crypto/hkdf"
+ "crypto/hmac"
+ "crypto/sha256"
+ "encoding/base64"
+ "sync"
+ "testing"
+ "time"
+
+ "github.com/zystem/hsmgate/internal/backend"
+ "github.com/zystem/hsmgate/internal/config"
+ "github.com/zystem/hsmgate/internal/keyops"
+ "github.com/zystem/hsmgate/internal/scheme/ecies"
+)
+
+// These vulnerability probes intentionally assert the insecure behavior.
+func TestAuditAliasExposesMACKey(t *testing.T) {
+ r:=cryptoRig(t)
+ r.cfg.Tokens[0].Keys["leak"]=r.cfg.Tokens[0].Keys["m4"]
+ r.cfg.Keys["leakkey"]=config.Key{KMSJSON:true,Versions:[]config.Version{{Token:"soft",Label:"leak"}},AAD:config.AAD{Mode:"fixed"}}
+ r.cfg.Clients[2].Keys["leakkey"]=config.Grant{Ops:[]string{"derive"}}
+ if err:=r.cfg.Validate();err!=nil{t.Fatal("alias config refused",err)}
+ // PKCS11 metadata permits the same CKA_ID under distinct logical labels as well.
+ original:=r.cfg.Tokens[0]
+ r.cfg.Tokens[0]=config.Token{Name:"soft",Type:"pkcs11",Module:"audit-placeholder",Keys:map[string]string{"m1":"01","m2":"02","m3":"03","m4":"04","m5":"05","leak":"04"}}
+ if err:=r.cfg.Validate();err!=nil{t.Fatal("PKCS11 alias config refused",err)}
+ r.cfg.Tokens[0]=original
+ tok,err:=backend.NewSoft(r.cfg.Tokens[0].Keys);if err!=nil{t.Fatal(err)};r.face.Tokens["soft"]=tok
+ st,out,_:=r.call("reader","AKIDVIEWERVIEWER00","DeriveSharedSecret",map[string]any{"KeyId":"leakkey","KeyAgreementAlgorithm":"ECDH","PublicKey":b64(spki(keyops.MacPoint()))},nil)
+ if st!=200{t.Fatalf("derive %d %v",st,out)}
+ z,err:=base64.StdEncoding.DecodeString(out["SharedSecret"].(string));if err!=nil{t.Fatal(err)}
+ point,_:=tok.Point("m4")
+ stolen,err:=hkdf.Key(sha256.New,z,[]byte("hsmgate/mac/v1"),"mac|"+ecies.Fingerprint(point),32);if err!=nil{t.Fatal(err)}
+ message:=[]byte("unauthorized offline forged message")
+ m:=hmac.New(sha256.New,stolen);m.Write(message)
+ st,out=r.app("VerifyMac",map[string]any{"KeyId":"mac","MacAlgorithm":"HMAC_SHA_256","Message":b64(message),"Mac":b64(m.Sum(nil))})
+ if st!=200||out["MacValid"]!=true{t.Fatalf("forgery rejected %d %v",st,out)}
+ t.Log("CONFIRMED: duplicate physical key under a second label passes Validate; derive-only reader recovers MAC key and forges offline")
+}
+
+func TestAuditKMSDecryptIgnoresMaxBytes(t *testing.T) {
+ r:=cryptoRig(t);key:=r.cfg.Keys["seal"];key.MaxBytes=8;r.cfg.Keys["seal"]=key
+ pt,err:=r.face.Tokens["soft"].Point("m1");if err!=nil{t.Fatal(err)}
+ text,err:=ecies.Wrap(pt,bytes.Repeat([]byte("x"),100),[]byte(key.FixedAAD("seal")));if err!=nil{t.Fatal(err)}
+ st,out:=r.app("Decrypt",map[string]any{"CiphertextBlob":b64(makeBlob("seal",1,text))})
+ if st!=200||out["Plaintext"]!=b64(bytes.Repeat([]byte("x"),100)){t.Fatalf("limit enforced %d %v",st,out)}
+ t.Log("CONFIRMED: KMS decrypt returns 100 bytes with key.max_bytes=8")
+}
+
+func TestAuditCiphertextCanBeRelabelledAcrossContextKeys(t *testing.T) {
+ r:=cryptoRig(t);r.cfg.Keys["orgcopy"]=r.cfg.Keys["org"]
+ r.cfg.Clients[2].Keys["orgcopy"]=config.Grant{Ops:[]string{"decrypt"}}
+ if err:=r.cfg.Validate();err!=nil{t.Fatal(err)}
+ ctx:=map[string]string{"purpose":"dek","tenant":"private"}
+ st,out:=r.app("Encrypt",map[string]any{"KeyId":"org","EncryptionContext":ctx,"Plaintext":b64([]byte("original-key secret"))});if st!=200{t.Fatal(st,out)}
+ blob,_:=base64.StdEncoding.DecodeString(out["CiphertextBlob"].(string));_,ver,text,err:=parseBlob(blob);if err!=nil{t.Fatal(err)}
+ st,out,_=r.call("reader","AKIDVIEWERVIEWER00","Decrypt",map[string]any{"EncryptionContext":ctx,"CiphertextBlob":b64(makeBlob("orgcopy",ver,text))},nil)
+ if st!=200||out["Plaintext"]!=b64([]byte("original-key secret")){t.Fatalf("relabel rejected %d %v",st,out)}
+ t.Log("CONFIRMED: a reader without grant on org decrypts its ciphertext after changing unbound blob key name to orgcopy (same material/context)")
+}
+
+func TestAuditMacCacheBorrowedBuffer(t *testing.T) {
+ k:=NewMacKeys();key:=bytes.Repeat([]byte{0x42},32);k.put("id",key,time.Now().Add(time.Hour))
+ got,ok:=k.get("id",time.Now());if !ok{t.Fatal("cache miss")};k.clear()
+ if !bytes.Equal(got,make([]byte,32)){t.Fatal("expected alias to be zeroed")}
+ t.Log("CONFIRMED: get returns cache-owned mutable memory, modified by clear after the mutex is released")
+}
+
+func TestAuditMacCacheConcurrentCopy(t *testing.T) {
+ k:=NewMacKeys();key:=bytes.Repeat([]byte{0x42},32);k.put("id",key,time.Now().Add(time.Hour))
+ var wg sync.WaitGroup;wg.Add(2)
+ go func(){defer wg.Done();for i:=0;i<10000;i++ {if b,ok:=k.get("id",time.Now());ok{_ = append([]byte{},b...)}}}()
+ go func(){defer wg.Done();for i:=0;i<10000;i++ {k.put("id",key,time.Now().Add(time.Hour))}}()
+ wg.Wait()
+}

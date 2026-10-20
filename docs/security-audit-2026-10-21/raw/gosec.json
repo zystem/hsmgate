@@ -1,0 +1,478 @@
+{
+	"Golang errors": {},
+	"Issues": [
+		{
+			"severity": "HIGH",
+			"confidence": "MEDIUM",
+			"cwe": {
+				"id": "190",
+				"url": "https://cwe.mitre.org/data/definitions/190.html"
+			},
+			"rule_id": "G115",
+			"details": "integer overflow conversion int -\u003e uint16",
+			"file": "/tmp/hsmgate-audit-20261021-e766cb79916a/internal/face/kmsjson/crypto.go",
+			"code": "244: \tb = append(b, name...)\n245: \tb = binary.BigEndian.AppendUint16(b, uint16(ver))\n246: \treturn append(b, text...)\n",
+			"line": "245",
+			"column": "45",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "HIGH",
+			"confidence": "MEDIUM",
+			"cwe": {
+				"id": "190",
+				"url": "https://cwe.mitre.org/data/definitions/190.html"
+			},
+			"rule_id": "G115",
+			"details": "integer overflow conversion int -\u003e byte",
+			"file": "/tmp/hsmgate-audit-20261021-e766cb79916a/internal/face/kmsjson/crypto.go",
+			"code": "242: func makeBlob(name string, ver int, text string) []byte {\n243: \tb := append([]byte(blobMagic), byte(len(name)))\n244: \tb = append(b, name...)\n",
+			"line": "243",
+			"column": "37",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/tmp/hsmgate-audit-20261021-e766cb79916a/internal/config/config.go",
+			"code": "189: func Load(path string) (*Config, error) {\n190: \traw, err := os.ReadFile(path)\n191: \tif err != nil {\n",
+			"line": "190",
+			"column": "14",
+			"nosec": false,
+			"suppressions": null,
+			"autofix": "Consider using os.Root to scope file access under a fixed root (Go \u003e=1.24). Prefer root.Open/root.Stat over os.Open/os.Stat to prevent directory traversal."
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "/tmp/hsmgate-audit-20261021-e766cb79916a/cmd/hsmgate/client.go",
+			"code": "445: \t}\n446: \tb, err := os.ReadFile(in)\n447: \tif err == nil \u0026\u0026 len(b) \u003e max {\n",
+			"line": "446",
+			"column": "12",
+			"nosec": false,
+			"suppressions": null,
+			"autofix": "Consider using os.Root to scope file access under a fixed root (Go \u003e=1.24). Prefer root.Open/root.Stat over os.Open/os.Stat to prevent directory traversal."
+		},
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "276",
+				"url": "https://cwe.mitre.org/data/definitions/276.html"
+			},
+			"rule_id": "G302",
+			"details": "Expect file permissions to be 0600 or less",
+			"file": "/tmp/hsmgate-audit-20261021-e766cb79916a/internal/server/server.go",
+			"code": "64: \t\tif cfg.Audit.File != \"\" {\n65: \t\t\tf, err := os.OpenFile(cfg.Audit.File, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o640)\n66: \t\t\tif err != nil {\n",
+			"line": "65",
+			"column": "14",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/tmp/hsmgate-audit-20261021-e766cb79916a/internal/server/server.go",
+			"code": "378: func (s *Server) Close() {\n379: \ts.HTTP.Close()\n380: \tcloseTokens(s.Tokens())\n",
+			"line": "379",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/tmp/hsmgate-audit-20261021-e766cb79916a/internal/server/admin.go",
+			"code": "100: \tif err := os.Chmod(path, 0o600); err != nil {\n101: \t\tl.Close()\n102: \t\treturn err\n",
+			"line": "101",
+			"column": "3",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/tmp/hsmgate-audit-20261021-e766cb79916a/internal/server/admin.go",
+			"code": "90: \t\t}\n91: \t\tos.Remove(path)\n92: \t}\n",
+			"line": "91",
+			"column": "3",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/tmp/hsmgate-audit-20261021-e766cb79916a/internal/server/admin.go",
+			"code": "78: \t\t}\n79: \t\tjson.NewEncoder(w).Encode(map[string]string{\"state\": u.State()})\n80: \t})\n",
+			"line": "79",
+			"column": "3",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/tmp/hsmgate-audit-20261021-e766cb79916a/internal/server/admin.go",
+			"code": "68: \t\t\tev.Result = \"refused\"\n69: \t\t\tlog.Write(ev)\n70: \t\t\thttp.Error(w, err.Error(), http.StatusForbidden)\n",
+			"line": "69",
+			"column": "4",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/tmp/hsmgate-audit-20261021-e766cb79916a/internal/server/admin.go",
+			"code": "51: \t\t\tev.Result = \"not_lockable\"\n52: \t\t\tlog.Write(ev)\n53: \t\t\thttp.Error(w, \"this token takes no PIN\", http.StatusBadRequest)\n",
+			"line": "52",
+			"column": "4",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/tmp/hsmgate-audit-20261021-e766cb79916a/internal/server/admin.go",
+			"code": "39: \t\t}\n40: \t\tjson.NewEncoder(w).Encode(st)\n41: \t})\n",
+			"line": "40",
+			"column": "3",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/tmp/hsmgate-audit-20261021-e766cb79916a/internal/face/transit/transit.go",
+			"code": "415: \tw.WriteHeader(status)\n416: \tjson.NewEncoder(w).Encode(v)\n417: }\n",
+			"line": "416",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/tmp/hsmgate-audit-20261021-e766cb79916a/internal/face/transit/transit.go",
+			"code": "200: \t\tev.Result = \"busy\"\n201: \t\tf.Audit.Write(ev)\n202: \t\treturn\n",
+			"line": "201",
+			"column": "3",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/tmp/hsmgate-audit-20261021-e766cb79916a/internal/face/transit/transit.go",
+			"code": "148: \t\tev.Result = result\n149: \t\tf.Audit.Write(ev)\n150: \t\tfail(w, status, msg, retry)\n",
+			"line": "149",
+			"column": "3",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/tmp/hsmgate-audit-20261021-e766cb79916a/internal/face/transit/transit.go",
+			"code": "124: \t\tif _, ok := f.Identify(r); !ok {\n125: \t\t\tf.Audit.Write(audit.Event{RequestID: requestID(r), Face: face, Op: \"token-lookup\", Result: \"unauthenticated\"})\n126: \t\t\tfail(w, 403, \"permission denied\", false)\n",
+			"line": "125",
+			"column": "4",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/tmp/hsmgate-audit-20261021-e766cb79916a/internal/face/kmsjson/kmsjson.go",
+			"code": "571: \tb, _ := json.Marshal(v)\n572: \tio.Copy(w, bytes.NewReader(b))\n573: }\n",
+			"line": "572",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/tmp/hsmgate-audit-20261021-e766cb79916a/internal/face/kmsjson/kmsjson.go",
+			"code": "176: \t\tev.Result = result\n177: \t\tf.Audit.Write(ev)\n178: \t\tfail(w, status, typ, msg, retry)\n",
+			"line": "177",
+			"column": "3",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/tmp/hsmgate-audit-20261021-e766cb79916a/internal/backend/pkcs11.go",
+			"code": "229: \tobjs, _, err := p.m.FindObjects(p.sh, 1)\n230: \tp.m.FindObjectsFinal(p.sh)\n231: \tif err != nil {\n",
+			"line": "230",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/tmp/hsmgate-audit-20261021-e766cb79916a/internal/backend/pkcs11.go",
+			"code": "168: \tif p.open {\n169: \t\tp.m.CloseSession(p.sh)\n170: \t}\n",
+			"line": "169",
+			"column": "3",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/tmp/hsmgate-audit-20261021-e766cb79916a/internal/backend/pkcs11.go",
+			"code": "150: \tif p.open {\n151: \t\tp.m.Logout(p.sh)\n152: \t\tp.dropSession()\n",
+			"line": "151",
+			"column": "3",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/tmp/hsmgate-audit-20261021-e766cb79916a/cmd/hsmgate/main.go",
+			"code": "65: \tpinStdin := fs.Bool(\"pin-stdin\", false, \"unlock: read the PIN from standard input instead of the terminal\")\n66: \tfs.Parse(os.Args[2:])\n67: \tcfg, err := config.Load(*path)\n",
+			"line": "66",
+			"column": "2",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/tmp/hsmgate-audit-20261021-e766cb79916a/cmd/hsmgate/main.go",
+			"code": "50: \t\t}\n51: \t\tc.Close()\n52: \t\treturn\n",
+			"line": "51",
+			"column": "3",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/tmp/hsmgate-audit-20261021-e766cb79916a/cmd/hsmgate/main.go",
+			"code": "45: \t\taddr := fs.String(\"addr\", \"127.0.0.1:8443\", \"address to connect to\")\n46: \t\tfs.Parse(os.Args[2:])\n47: \t\tc, err := net.DialTimeout(\"tcp\", *addr, 3*time.Second)\n",
+			"line": "46",
+			"column": "3",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/tmp/hsmgate-audit-20261021-e766cb79916a/cmd/hsmgate/client.go",
+			"code": "614: \tif err := tmp.Chmod(mode); err != nil {\n615: \t\ttmp.Close()\n616: \t\treturn err\n",
+			"line": "615",
+			"column": "3",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/tmp/hsmgate-audit-20261021-e766cb79916a/cmd/hsmgate/client.go",
+			"code": "610: \tif _, err := tmp.Write(data); err != nil {\n611: \t\ttmp.Close()\n612: \t\treturn err\n",
+			"line": "611",
+			"column": "3",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/tmp/hsmgate-audit-20261021-e766cb79916a/cmd/hsmgate/client.go",
+			"code": "588: \t\tfor _, w := range written {\n589: \t\t\tos.Remove(w)\n590: \t\t}\n",
+			"line": "589",
+			"column": "4",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/tmp/hsmgate-audit-20261021-e766cb79916a/cmd/hsmgate/client.go",
+			"code": "515: \t\tif io_.out == \"-\" {\n516: \t\t\tstdout.Write(p)\n517: \t\t\treturn 0\n",
+			"line": "516",
+			"column": "4",
+			"nosec": false,
+			"suppressions": null
+		},
+		{
+			"severity": "LOW",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "703",
+				"url": "https://cwe.mitre.org/data/definitions/703.html"
+			},
+			"rule_id": "G104",
+			"details": "Errors unhandled",
+			"file": "/tmp/hsmgate-audit-20261021-e766cb79916a/cmd/hsmgate/client.go",
+			"code": "384: \t\tfor _, w := range written {\n385: \t\t\tos.Remove(w)\n386: \t\t}\n",
+			"line": "385",
+			"column": "4",
+			"nosec": false,
+			"suppressions": null
+		}
+	],
+	"Stats": {
+		"files": 23,
+		"lines": 5443,
+		"nosec": 0,
+		"found": 29
+	},
+	"GosecVersion": "dev"
+}

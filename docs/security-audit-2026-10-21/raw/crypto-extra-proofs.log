@@ -1,0 +1,8 @@
+=== RUN   TestAuditAliasExposesMACKey
+    audit_crypto_test.go:41: CONFIRMED: duplicate physical key under a second label passes Validate; derive-only reader recovers MAC key and forges offline
+--- PASS: TestAuditAliasExposesMACKey (0.00s)
+=== RUN   TestAuditKMSDecryptIgnoresMaxBytes
+    audit_crypto_test.go:50: CONFIRMED: KMS decrypt returns 100 bytes with key.max_bytes=8
+--- PASS: TestAuditKMSDecryptIgnoresMaxBytes (0.00s)
+PASS
+ok  	github.com/zystem/hsmgate/internal/face/kmsjson	0.008s
