@@ -8,7 +8,7 @@
 #   tools/k3s-kms-test.sh enable             EncryptionConfiguration (kms v2 first, identity second), k3s drop-in, RESTART of k3s
 #   tools/k3s-kms-test.sh verify             a Secret is stored as a KMS envelope; health of the KMS provider
 #   tools/k3s-kms-test.sh rotate             a second key version in hsmgate (reload), a new Secret is written after the apiserver saw the new key_id
-#   tools/k3s-kms-test.sh outage             stops hsmgate for 30 s: the provider must fail its health check and Secret writes must fail, then recover
+#   tools/k3s-kms-test.sh outage             stops hsmgate for 30 s: the provider must fail its health check; a Secret write may still work (the apiserver reuses a cached DEK); then it must recover
 #   tools/k3s-kms-test.sh disable            identity first, restart, REWRITE every Secret, then remove the provider and the units
 #
 # Why `disable` rewrites the Secrets: anything written while the provider was first is stored under it and is unreadable without the plug-in.
@@ -177,8 +177,8 @@ rotate() {
 outage() {
   say "stopping hsmgate for 30 s"; systemctl stop hsmgate-test; sleep 20
   say "provider health while it is down"; $KC get --raw='/healthz?verbose' 2>&1 | grep -i "kms" || true
-  say "a Secret write while it is down (must fail)"
-  if $KC -n kms-test create secret generic kms-outage --from-literal=a=b 2>&1; then echo "UNEXPECTED: the write worked"; $KC -n kms-test delete secret kms-outage; else echo "failed as expected"; fi
+  say "a Secret write while it is down (observed on k3s v1.36.5: it works, the apiserver reuses a cached DEK; reads after an apiserver restart do need the plug-in)"
+  if $KC -n kms-test create secret generic kms-outage --from-literal=a=b 2>&1; then echo "the write worked (cached DEK)"; $KC -n kms-test delete secret kms-outage; else echo "the write failed"; fi
   systemctl start hsmgate-test; sleep 3; systemctl restart vkk-test; sleep 15
   say "after the restart"; $KC get --raw='/healthz?verbose' 2>&1 | grep -i "kms" || true
   $KC -n kms-test create secret generic kms-after-outage --from-literal=a=b && echo "writes work again"
