@@ -16,10 +16,11 @@
 set -euo pipefail
 [ "$(id -u)" = 0 ] || { echo "run as root on the k3s node" >&2; exit 1; }
 
-D=/opt/hsmgate-test
-SOCK_DIR=/run/hsmgate-kms
+D=${D:-/opt/hsmgate-test}
+SOCK_DIR=${SOCK_DIR:-/run/hsmgate-kms}
 SOCK="$SOCK_DIR/kms.sock"
-PORT=18443
+PORT=${PORT:-18443}
+UNIT_DIR=${UNIT_DIR:-/etc/systemd/system}
 ENCCFG=/var/lib/rancher/k3s/server/kms-encryption-config.yaml
 DROPIN=/etc/rancher/k3s/config.yaml.d/90-hsmgate-kms.yaml
 KC="k3s kubectl"
@@ -97,7 +98,7 @@ install_units() {
     echo "[Unit]"; echo "Description=hsmgate (test, software key)"; echo "After=network.target"
     echo "[Service]"; echo "ExecStart=$D/hsmgate serve -config $D/hsmgate.yaml"; echo 'ExecReload=/bin/kill -HUP $MAINPID'; echo "Restart=on-failure"
     echo "[Install]"; echo "WantedBy=multi-user.target"
-  } > /etc/systemd/system/hsmgate-test.service
+  } > $UNIT_DIR/hsmgate-test.service
   {
     echo "[Unit]"; echo "Description=vault-kubernetes-kms against hsmgate (test)"; echo "After=hsmgate-test.service"; echo "Requires=hsmgate-test.service"
     echo "[Service]"
@@ -106,10 +107,10 @@ install_units() {
     echo "ExecStart=$D/vault-kubernetes-kms -auth-method token -token unused -vault-address https://127.0.0.1:$PORT -transit-mount transit -transit-key k8s-etcd -socket unix://$SOCK -force-socket-overwrite -health-port 18444"
     echo "Restart=on-failure"
     echo "[Install]"; echo "WantedBy=multi-user.target"
-  } > /etc/systemd/system/vkk-test.service
+  } > $UNIT_DIR/vkk-test.service
 }
 
-install() {
+do_install() {
   : "${HSMGATE_BIN:?path of the hsmgate binary}" "${PLUGIN_BIN:?path of the vault-kubernetes-kms binary}"
   mkdir -p $D/certs; chmod 700 $D
   install -m 0755 "$HSMGATE_BIN" $D/hsmgate; install -m 0755 "$PLUGIN_BIN" $D/vault-kubernetes-kms
@@ -140,7 +141,7 @@ enc_config() { # $1 = kms-first | identity-first
   chmod 600 $ENCCFG
 }
 
-enable() {
+do_enable() {
   [ -S "$SOCK" ] || { echo "no plug-in socket $SOCK: run install first" >&2; exit 1; }
   if [ -f /var/lib/rancher/k3s/server/cred/encryption-config.json ]; then echo "k3s secrets-encryption is on: this would conflict. Stop." >&2; exit 1; fi
   enc_config kms-first
@@ -183,7 +184,7 @@ outage() {
   $KC -n kms-test create secret generic kms-after-outage --from-literal=a=b && echo "writes work again"
 }
 
-disable() {
+do_disable() {
   [ -f "$DROPIN" ] || echo "(drop-in not there)"
   enc_config identity-first; systemctl restart k3s; wait_api
   say "rewriting every Secret so that none stays under the provider"
@@ -191,7 +192,7 @@ disable() {
   rm -f "$DROPIN" "$ENCCFG"; systemctl restart k3s; wait_api; $KC get nodes
   say "stopping the units"
   systemctl disable --now vkk-test hsmgate-test
-  rm -f /etc/systemd/system/vkk-test.service /etc/systemd/system/hsmgate-test.service; systemctl daemon-reload
+  rm -f $UNIT_DIR/vkk-test.service $UNIT_DIR/hsmgate-test.service; systemctl daemon-reload
   $KC delete namespace kms-test --ignore-not-found >/dev/null
   echo "done; $D is left for you to remove"
 }
@@ -199,11 +200,11 @@ disable() {
 case "${1:-}" in
   preflight) preflight ;;
   backup) backup ;;
-  install) install ;;
-  enable) enable ;;
+  install) do_install ;;
+  enable) do_enable ;;
   verify) verify ;;
   rotate) rotate ;;
   outage) outage ;;
-  disable) disable ;;
+  disable) do_disable ;;
   *) sed -n '2,16p' "$0"; exit 2 ;;
 esac
