@@ -57,6 +57,29 @@ func Derive(tokens map[string]backend.Token, v config.Version, peer []byte) ([]b
 	return nil, last
 }
 
+// Sign signs a digest of 32 bytes with the private key of a version: ASN.1 DER. The holders in order, as in Derive.
+func Sign(tokens map[string]backend.Token, v config.Version, digest []byte) ([]byte, error) {
+	var last error
+	for _, h := range v.Holders() {
+		tok := tokens[h.Token]
+		pt, err := tok.Point(h.Label)
+		if err == nil {
+			err = Pinned(v, pt)
+		}
+		if err == nil {
+			var sig []byte
+			if sig, err = tok.Sign(h.Label, digest); err == nil {
+				return sig, nil
+			}
+		}
+		if !isUnavailable(err) {
+			return nil, err
+		}
+		last = err
+	}
+	return nil, last
+}
+
 // Open opens an ecies1 text sealed to a version: the holders in order, the next only when this one could not answer (locked, removed), never when it said the text is bad.
 func Open(tokens map[string]backend.Token, v config.Version, text string, aad []byte) ([]byte, error) {
 	var last error

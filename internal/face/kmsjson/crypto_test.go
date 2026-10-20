@@ -2,6 +2,9 @@ package kmsjson
 
 import (
 	"bytes"
+	"crypto/ecdsa"
+	"crypto/sha256"
+	"crypto/x509"
 	"encoding/base64"
 	"github.com/zystem/hsmgate/internal/sigv4"
 	"net/http"
@@ -25,16 +28,18 @@ func cryptoRig(t *testing.T) *rig {
 	write := func(n, v string) string { p := filepath.Join(dir, n); os.WriteFile(p, []byte(v), 0o600); return p }
 	k1 := write("k1", strings.Repeat("01", 32))
 	k2 := write("k2", strings.Repeat("02", 32))
+	k3 := write("k3", strings.Repeat("03", 32))
 	cfg, err := config.Parse([]byte(`
 kmsjson: {enabled: true, region: local}
-tokens: [{name: soft, type: soft, keys: {m1: ` + k1 + `, m2: ` + k2 + `}}]
+tokens: [{name: soft, type: soft, keys: {m1: ` + k1 + `, m2: ` + k2 + `, m3: ` + k3 + `}}]
 keys:
   seal:  {kmsjson: true, kmsjson_usage: encrypt_decrypt, versions: [{token: soft, label: m1}], aad: {mode: fixed}}
   seal2: {kmsjson: true, kmsjson_usage: encrypt_decrypt, versions: [{token: soft, label: m2}], aad: {mode: fixed}}
   org:   {kmsjson: true, kmsjson_usage: encrypt_decrypt, versions: [{token: soft, label: m1}, {token: soft, label: m2}], aad: {mode: context, allow: ["purpose=dek"]}}
+  sig:   {kmsjson: true, kmsjson_usage: sign_verify, versions: [{token: soft, label: m3}], aad: {mode: fixed}}
   ecdh:  {kmsjson: true, versions: [{token: soft, label: m1}], aad: {mode: fixed}}
 clients:
-  - {name: app, identity: {cn: app}, sigv4: {access_key_id: ` + akid + `, secret_file: /unused}, keys: {seal: {ops: [encrypt, decrypt]}, seal2: {ops: [encrypt]}, org: {ops: [encrypt, decrypt]}, ecdh: {ops: [derive, encrypt]}}}
+  - {name: app, identity: {cn: app}, sigv4: {access_key_id: ` + akid + `, secret_file: /unused}, keys: {seal: {ops: [encrypt, decrypt]}, seal2: {ops: [encrypt]}, org: {ops: [encrypt, decrypt]}, ecdh: {ops: [derive, encrypt]}, sig: {ops: [sign, verify]}}}
   - {name: bot, sigv4: {access_key_id: AKIDBOTBOTBOTBOT00, secret_file: /unused, no_cert: true, allow_from: [127.0.0.0/8]}, keys: {seal: {ops: [encrypt, decrypt]}}}
   - {name: reader, identity: {cn: reader}, sigv4: {access_key_id: AKIDVIEWERVIEWER00, secret_file: /unused}, keys: {seal: {ops: [decrypt]}}}
 `))
@@ -356,5 +361,74 @@ func TestRefusedSignaturesOfACertlessPeerAreCounted(t *testing.T) {
 		sigv4.Sign(req, b, "AKIDBOTBOTBOTBOT00", secret, "local", "kms", r.now.Add(2*time.Minute))
 	}); st != 200 {
 		t.Errorf("after the window: %d", st)
+	}
+}
+
+func TestSignAndVerify(t *testing.T) {
+	r := cryptoRig(t)
+	msg := []byte("a message to sign")
+	st, sg := r.app("Sign", map[string]any{"KeyId": "alias/sig", "Message": msg, "SigningAlgorithm": "ECDSA_SHA_256"})
+	if st != 200 || sg["SigningAlgorithm"] != "ECDSA_SHA_256" || !strings.HasSuffix(sg["KeyId"].(string), ":key/sig") {
+		t.Fatalf("Sign: %d %v", st, sg)
+	}
+	// the signature is ASN.1 DER that an ordinary verifier accepts with the public key of GetPublicKey
+	_, pk := r.app("GetPublicKey", map[string]any{"KeyId": "sig"})
+	if pk["KeyUsage"] != "SIGN_VERIFY" || pk["KeySpec"] != "ECC_NIST_P256" || pk["KeyAgreementAlgorithms"] != nil {
+		t.Errorf("GetPublicKey: %v", pk)
+	}
+	der, _ := base64.StdEncoding.DecodeString(pk["PublicKey"].(string))
+	pub, err := x509.ParsePKIXPublicKey(der)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sig, _ := base64.StdEncoding.DecodeString(sg["Signature"].(string))
+	d := sha256.Sum256(msg)
+	if !ecdsa.VerifyASN1(pub.(*ecdsa.PublicKey), d[:], sig) {
+		t.Fatal("the signature does not verify with the public key")
+	}
+	// Verify: valid, and invalid is the error clients expect; DIGEST gives the same
+	if st, out := r.app("Verify", map[string]any{"KeyId": "sig", "Message": msg, "Signature": sig, "SigningAlgorithm": "ECDSA_SHA_256"}); st != 200 || out["SignatureValid"] != true {
+		t.Errorf("Verify: %d %v", st, out)
+	}
+	if st, out := r.app("Verify", map[string]any{"KeyId": "sig", "Message": d[:], "MessageType": "DIGEST", "Signature": sig, "SigningAlgorithm": "ECDSA_SHA_256"}); st != 200 || out["SignatureValid"] != true {
+		t.Errorf("Verify digest: %d %v", st, out)
+	}
+	if st, out := r.app("Verify", map[string]any{"KeyId": "sig", "Message": []byte("another"), "Signature": sig, "SigningAlgorithm": "ECDSA_SHA_256"}); st != 400 || typ(out) != "KMSInvalidSignatureException" {
+		t.Errorf("Verify of another message: %d %v", st, out)
+	}
+	if st, out := r.app("Sign", map[string]any{"KeyId": "sig", "Message": d[:], "MessageType": "DIGEST", "SigningAlgorithm": "ECDSA_SHA_256"}); st != 200 {
+		t.Errorf("Sign a digest: %d %v", st, out)
+	}
+	for name, body := range map[string]map[string]any{
+		"algorithm":    {"KeyId": "sig", "Message": msg, "SigningAlgorithm": "RSASSA_PKCS1_V1_5_SHA_256"},
+		"short digest": {"KeyId": "sig", "Message": []byte("x"), "MessageType": "DIGEST", "SigningAlgorithm": "ECDSA_SHA_256"},
+		"empty":        {"KeyId": "sig", "SigningAlgorithm": "ECDSA_SHA_256"},
+		"too long":     {"KeyId": "sig", "Message": make([]byte, 4097), "SigningAlgorithm": "ECDSA_SHA_256"},
+		"unknown type": {"KeyId": "sig", "Message": msg, "MessageType": "X", "SigningAlgorithm": "ECDSA_SHA_256"},
+	} {
+		if st, out := r.app("Sign", body); st != 400 || typ(out) != "ValidationException" {
+			t.Errorf("%s: %d %v", name, st, out)
+		}
+	}
+	// usage is kept both ways, and the audit holds a piece of the digest, not the message
+	if st, out := r.app("Sign", map[string]any{"KeyId": "seal", "Message": msg, "SigningAlgorithm": "ECDSA_SHA_256"}); st != 400 || typ(out) != "InvalidKeyUsageException" {
+		t.Errorf("sign with a sealing key: %d %v", st, out)
+	}
+	if st, out := r.app("Encrypt", map[string]any{"KeyId": "sig", "Plaintext": "eA=="}); st != 400 || typ(out) != "InvalidKeyUsageException" {
+		t.Errorf("encrypt with a signing key: %d %v", st, out)
+	}
+	if st, out := r.app("DeriveSharedSecret", map[string]any{"KeyId": "sig", "KeyAgreementAlgorithm": "ECDH", "PublicKey": "AA=="}); st != 400 || typ(out) != "InvalidKeyUsageException" {
+		t.Errorf("derive with a signing key: %d %v", st, out)
+	}
+	if a := r.audit.String(); !strings.Contains(a, `"op":"sign"`) || !strings.Contains(a, "digest=") || strings.Contains(a, "a message to sign") {
+		t.Errorf("audit: %s", a)
+	}
+}
+
+func TestSignNeedsTheRight(t *testing.T) {
+	r := cryptoRig(t)
+	// "reader" has no grant on the signing key: it looks like a key that does not exist
+	if st, out, _ := r.call("reader", "AKIDVIEWERVIEWER00", "Sign", map[string]any{"KeyId": "sig", "Message": []byte("m"), "SigningAlgorithm": "ECDSA_SHA_256"}, nil); st != 400 || typ(out) != "AccessDeniedException" {
+		t.Errorf("%d %v", st, out)
 	}
 }

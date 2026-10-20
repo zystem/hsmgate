@@ -71,13 +71,15 @@ type Key struct {
 	// can open anything sealed to the key: such a key must be in "fixed" mode (a key in context mode would lose the isolation of its contexts) and is best dedicated to this use.
 	KMSJSON bool `yaml:"kmsjson"`
 	// KMSJSONUsage: "key_agreement" (the default: DeriveSharedSecret, the client seals and opens) or "encrypt_decrypt" (Encrypt, Decrypt, ReEncrypt, GenerateDataKey: the service seals
-	// and opens, as in the Transit face, and the request's EncryptionContext is the additional data). One key has one usage: the right to derive would open anything sealed to the key.
+	// and opens, as in the Transit face, and the request's EncryptionContext is the additional data) or "sign_verify" (Sign and Verify: ECDSA P-256 with SHA-256, the signature made on the
+	// token; the key label must be used by no other key). One key has one usage: the right to derive would open anything sealed to the key.
 	KMSJSONUsage string `yaml:"kmsjson_usage"`
 }
 
 const (
 	UsageKeyAgreement   = "key_agreement"
 	UsageEncryptDecrypt = "encrypt_decrypt"
+	UsageSignVerify     = "sign_verify"
 )
 
 // Usage of a key on the KMS-JSON face.
@@ -322,7 +324,7 @@ func (c *Config) Validate() error {
 				return fmt.Errorf("client %s key %s: per_minute and per_day must be 0..%d (0 is no limit)", cl.Name, key, maxRate)
 			}
 			for _, op := range g.Ops {
-				if op != "encrypt" && op != "decrypt" && op != "rewrap" && op != "derive" {
+				if op != "encrypt" && op != "decrypt" && op != "rewrap" && op != "derive" && op != "sign" && op != "verify" {
 					return fmt.Errorf("client %s key %s: unknown op %q", cl.Name, key, op)
 				}
 			}
@@ -359,8 +361,26 @@ func (c *Config) validateKMSJSON() error {
 				return fmt.Errorf("key %s: kmsjson key agreement needs aad mode fixed (DeriveSharedSecret has no context, so a key in context mode would lose the isolation of its contexts); use kmsjson_usage: encrypt_decrypt for a key with contexts", name)
 			}
 		case UsageEncryptDecrypt:
+		case UsageSignVerify:
+			// a private key signs or does ECDH, not both: no other key may use a label that a signing key uses
+			for other, ok := range c.Keys {
+				if other == name {
+					continue
+				}
+				for _, v := range k.Versions {
+					for _, h := range v.Holders() {
+						for _, ov := range ok.Versions {
+							for _, oh := range ov.Holders() {
+								if oh == h {
+									return fmt.Errorf("key %s (sign_verify) and key %s use the same key %s/%s: a key signs or does ECDH, not both", name, other, h.Token, h.Label)
+								}
+							}
+						}
+					}
+				}
+			}
 		default:
-			return fmt.Errorf("key %s: kmsjson_usage must be key_agreement or encrypt_decrypt", name)
+			return fmt.Errorf("key %s: kmsjson_usage must be key_agreement, encrypt_decrypt or sign_verify", name)
 		}
 	}
 	akids := map[string]string{}
@@ -368,6 +388,13 @@ func (c *Config) validateKMSJSON() error {
 		derives := false
 		for key, g := range cl.Keys {
 			for _, op := range g.Ops {
+				k := c.Keys[key]
+				if (op == "sign" || op == "verify") && !(k.KMSJSON && k.Usage() == UsageSignVerify) {
+					return fmt.Errorf("client %s key %s: the right %s needs kmsjson: true and the usage sign_verify on the key", cl.Name, key, op)
+				}
+				if k.KMSJSON && k.Usage() == UsageSignVerify && op != "sign" && op != "verify" {
+					return fmt.Errorf("client %s key %s: a key with the usage sign_verify has the rights sign and verify only, not %s", cl.Name, key, op)
+				}
 				if op == "derive" {
 					derives = true
 					if !c.Keys[key].KMSJSON || c.Keys[key].Usage() != UsageKeyAgreement {

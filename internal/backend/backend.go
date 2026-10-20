@@ -3,6 +3,9 @@ package backend
 
 import (
 	"crypto/ecdh"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -20,15 +23,20 @@ type Token interface {
 	Point(label string) ([]byte, error)
 	// Derive is ECDH with a peer point on the token.
 	Derive(label string, peer []byte) ([]byte, error)
+	// Sign is ECDSA (P-256) over a digest of 32 bytes: the signature as ASN.1 DER. A key is used for signing or for ECDH, never both (config.Validate).
+	Sign(label string, digest []byte) ([]byte, error)
 	// State is "ready", "locked" or "absent"; it never touches the card.
 	State() string
 }
 
-type Soft struct{ keys map[string]*ecdh.PrivateKey }
+type Soft struct {
+	keys map[string]*ecdh.PrivateKey
+	sig  map[string]*ecdsa.PrivateKey
+}
 
 // NewSoft reads keys of 64 hex digits from files.
 func NewSoft(files map[string]string) (*Soft, error) {
-	s := &Soft{keys: map[string]*ecdh.PrivateKey{}}
+	s := &Soft{keys: map[string]*ecdh.PrivateKey{}, sig: map[string]*ecdsa.PrivateKey{}}
 	for label, path := range files {
 		raw, err := ReadSecretFile(path, 4096)
 		if err != nil {
@@ -43,6 +51,11 @@ func NewSoft(files map[string]string) (*Soft, error) {
 			return nil, fmt.Errorf("%s: %w", path, err)
 		}
 		s.keys[label] = k
+		sk, err := ecdsa.ParseRawPrivateKey(elliptic.P256(), b)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", path, err)
+		}
+		s.sig[label] = sk
 	}
 	return s, nil
 }
@@ -65,6 +78,17 @@ func (s *Soft) Derive(label string, peer []byte) ([]byte, error) {
 		return nil, err
 	}
 	return k.ECDH(pub)
+}
+
+func (s *Soft) Sign(label string, digest []byte) ([]byte, error) {
+	k, ok := s.sig[label]
+	if !ok {
+		return nil, fmt.Errorf("no key %q", label)
+	}
+	if len(digest) != 32 {
+		return nil, errors.New("the digest must be 32 bytes")
+	}
+	return ecdsa.SignASN1(rand.Reader, k, digest)
 }
 
 func (s *Soft) State() string { return "ready" }

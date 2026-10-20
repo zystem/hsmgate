@@ -10,6 +10,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -104,23 +105,25 @@ func run(m *testing.M) int {
 	os.WriteFile(f("sigv4-secret"), []byte(secret+"\n"), 0o600)
 	os.WriteFile(f("k1.hex"), bytes.Repeat([]byte("07"), 32), 0o600)
 	os.WriteFile(f("k2.hex"), bytes.Repeat([]byte("09"), 32), 0o600)
+	os.WriteFile(f("k3.hex"), bytes.Repeat([]byte("0b"), 32), 0o600)
 	l, _ := net.Listen("tcp", "127.0.0.1:0")
 	addr := l.Addr().String()
 	l.Close()
 	os.WriteFile(f("hsmgate.yaml"), []byte(fmt.Sprintf(`listen: %s
 tls: {cert: %s, key: %s, client_ca: %s}
 kmsjson: {enabled: true, region: local}
-tokens: [{name: soft, type: soft, keys: {m1: %s, m2: %s}}]
+tokens: [{name: soft, type: soft, keys: {m1: %s, m2: %s, m3: %s}}]
 keys:
   etcd: {kmsjson: true, versions: [{token: soft, label: m1}, {token: soft, label: m2}], aad: {mode: fixed}}
+  sig: {kmsjson: true, kmsjson_usage: sign_verify, versions: [{token: soft, label: m3}], aad: {mode: fixed}}
   seal: {kmsjson: true, kmsjson_usage: encrypt_decrypt, versions: [{token: soft, label: m1}], aad: {mode: fixed}}
   hidden: {versions: [{token: soft, label: m1}], aad: {mode: fixed}}
 clients:
   - name: sdk
     identity: {cn: sdk-client}
     sigv4: {access_key_id: %s, secret_file: %s}
-    keys: {etcd: {ops: [derive]}, seal: {ops: [encrypt, decrypt]}}
-`, addr, f("srv.pem"), f("srv.key"), f("ca.pem"), f("k1.hex"), f("k2.hex"), akid, f("sigv4-secret"))), 0o600)
+    keys: {etcd: {ops: [derive]}, seal: {ops: [encrypt, decrypt]}, sig: {ops: [sign, verify]}}
+`, addr, f("srv.pem"), f("srv.key"), f("ca.pem"), f("k1.hex"), f("k2.hex"), f("k3.hex"), akid, f("sigv4-secret"))), 0o600)
 	cmd := exec.Command(bin, "serve", "-config", f("hsmgate.yaml"))
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
@@ -216,11 +219,11 @@ func TestDescribeListAndTheTypesOfTheSDK(t *testing.T) {
 		t.Errorf("%+v", md)
 	}
 	ks, err := c.ListKeys(context.Background(), &kms.ListKeysInput{})
-	if err != nil || len(ks.Keys) != 2 || ks.Truncated { // "hidden" has no kmsjson and is not listed
+	if err != nil || len(ks.Keys) != 3 || ks.Truncated { // "hidden" has no kmsjson and is not listed
 		t.Errorf("%+v %v", ks, err)
 	}
 	as, err := c.ListAliases(context.Background(), &kms.ListAliasesInput{})
-	if err != nil || len(as.Aliases) != 2 {
+	if err != nil || len(as.Aliases) != 3 {
 		t.Errorf("%+v %v", as, err)
 	}
 }
@@ -315,5 +318,39 @@ func TestEncryptDecryptAndDataKeys(t *testing.T) {
 	_, err = c.Encrypt(ctx, &kms.EncryptInput{KeyId: aws.String("etcd"), Plaintext: []byte("x")})
 	if got := code(err); got != "InvalidKeyUsageException" {
 		t.Errorf("Encrypt on an ECDH key: %s", got)
+	}
+}
+
+func TestSignAndVerify(t *testing.T) {
+	c := client(secret)
+	ctx := context.Background()
+	msg := []byte("release v1.0.0")
+	pk, err := c.GetPublicKey(ctx, &kms.GetPublicKeyInput{KeyId: aws.String("sig")})
+	if err != nil || pk.KeyUsage != types.KeyUsageTypeSignVerify || len(pk.SigningAlgorithms) != 1 || pk.SigningAlgorithms[0] != types.SigningAlgorithmSpecEcdsaSha256 {
+		t.Fatalf("GetPublicKey: %+v %v", pk, err)
+	}
+	pub, err := x509.ParsePKIXPublicKey(pk.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sg, err := c.Sign(ctx, &kms.SignInput{KeyId: aws.String("alias/sig"), Message: msg, SigningAlgorithm: types.SigningAlgorithmSpecEcdsaSha256})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := sha256.Sum256(msg)
+	if !ecdsa.VerifyASN1(pub.(*ecdsa.PublicKey), d[:], sg.Signature) {
+		t.Fatal("the signature does not verify with the public key")
+	}
+	v, err := c.Verify(ctx, &kms.VerifyInput{KeyId: aws.String("sig"), Message: msg, Signature: sg.Signature, SigningAlgorithm: types.SigningAlgorithmSpecEcdsaSha256})
+	if err != nil || !v.SignatureValid {
+		t.Errorf("Verify: %+v %v", v, err)
+	}
+	// a digest of a large message, signed as a DIGEST
+	if _, err := c.Sign(ctx, &kms.SignInput{KeyId: aws.String("sig"), Message: d[:], MessageType: types.MessageTypeDigest, SigningAlgorithm: types.SigningAlgorithmSpecEcdsaSha256}); err != nil {
+		t.Errorf("Sign a digest: %v", err)
+	}
+	_, err = c.Verify(ctx, &kms.VerifyInput{KeyId: aws.String("sig"), Message: []byte("other"), Signature: sg.Signature, SigningAlgorithm: types.SigningAlgorithmSpecEcdsaSha256})
+	if got := code(err); got != "KMSInvalidSignatureException" {
+		t.Errorf("a signature of another message: %s", got)
 	}
 }

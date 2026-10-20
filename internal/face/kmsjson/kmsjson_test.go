@@ -259,7 +259,7 @@ func TestRefusalsOfDerive(t *testing.T) {
 		t.Errorf("dry run: %d %v", st, out)
 	}
 	// unsupported operations
-	if st, out, _ := r.shop("Sign", map[string]any{}); st != 400 || out["__type"] != "UnsupportedOperationException" {
+	if st, out, _ := r.shop("ScheduleKeyDeletion", map[string]any{}); st != 400 || out["__type"] != "UnsupportedOperationException" {
 		t.Errorf("%d %v", st, out)
 	}
 }

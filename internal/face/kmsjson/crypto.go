@@ -7,9 +7,13 @@ package kmsjson
 
 import (
 	"bytes"
+	"crypto/ecdsa"
 	"crypto/rand"
+	"crypto/sha256"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -59,12 +63,16 @@ type cryptoReq struct {
 	SourceEncryptionAlgorithm      string            `json:"SourceEncryptionAlgorithm"`
 	DestinationEncryptionAlgorithm string            `json:"DestinationEncryptionAlgorithm"`
 	CustomKeyStoreID               string            `json:"CustomKeyStoreId"`
+	Message                        []byte            `json:"Message"`
+	MessageType                    string            `json:"MessageType"`
+	SigningAlgorithm               string            `json:"SigningAlgorithm"`
+	Signature                      []byte            `json:"Signature"`
 	Recipient                      json.RawMessage   `json:"Recipient"`
 }
 
 func isCryptoOp(op string) bool {
 	switch op {
-	case "Encrypt", "Decrypt", "ReEncrypt", "GenerateDataKey", "GenerateDataKeyWithoutPlaintext", "GenerateRandom":
+	case "Encrypt", "Decrypt", "ReEncrypt", "GenerateDataKey", "GenerateDataKeyWithoutPlaintext", "GenerateRandom", "Sign", "Verify":
 		return true
 	}
 	return false
@@ -87,6 +95,10 @@ func (c *call) crypto(op string, body []byte) {
 	switch op {
 	case "GenerateRandom":
 		c.random(req)
+	case "Sign":
+		c.sign(req)
+	case "Verify":
+		c.verify(req)
 	case "Encrypt":
 		c.encrypt(req)
 	case "Decrypt":
@@ -114,7 +126,11 @@ func (c *call) target(id string, ver int, op string, ctx map[string]string) (nam
 	}
 	key = f.Cfg.Keys[name]
 	c.ev.Key = name
-	if key.Usage() != config.UsageEncryptDecrypt {
+	want := config.UsageEncryptDecrypt
+	if op == "sign" || op == "verify" {
+		want = config.UsageSignVerify
+	}
+	if key.Usage() != want {
 		c.refuse(400, "InvalidKeyUsageException", usageErrText, "bad_usage", false)
 		return
 	}
@@ -133,6 +149,9 @@ func (c *call) target(id string, ver int, op string, ctx map[string]string) (nam
 	if ver < 1 || ver > len(key.Versions) {
 		c.refuse(400, "InvalidCiphertextException", "the ciphertext is not valid for this key", "bad_ciphertext", false)
 		return
+	}
+	if want == config.UsageSignVerify { // no additional data: a signature has none
+		return name, ver, key, nil, true
 	}
 	aad, ok = c.aadOf(name, key, ctx)
 	return name, ver, key, aad, ok
@@ -443,4 +462,101 @@ func (c *call) random(req cryptoReq) {
 	}
 	defer wipe(b)
 	c.succeed(map[string]any{"Plaintext": b64(b)})
+}
+
+const maxMessage = 4096 // the limit of the cloud service for a message to sign; longer ones are signed by digest
+
+// digestOf makes the 32 bytes that ECDSA signs from a request: the SHA-256 of a RAW message, or a DIGEST as given. Only ECDSA_SHA_256 is served.
+func (c *call) digestOf(req cryptoReq) ([]byte, bool) {
+	if req.SigningAlgorithm != "ECDSA_SHA_256" {
+		c.refuse(400, "ValidationException", "SigningAlgorithm must be ECDSA_SHA_256", "bad_request", false)
+		return nil, false
+	}
+	switch req.MessageType {
+	case "", "RAW":
+		if len(req.Message) == 0 || len(req.Message) > maxMessage {
+			c.refuse(400, "ValidationException", "Message must be 1 to "+itoa(maxMessage)+" bytes (use MessageType DIGEST for more)", "bad_request", false)
+			return nil, false
+		}
+		d := sha256.Sum256(req.Message)
+		return d[:], true
+	case "DIGEST":
+		if len(req.Message) != 32 {
+			c.refuse(400, "ValidationException", "a DIGEST for ECDSA_SHA_256 is 32 bytes", "bad_request", false)
+			return nil, false
+		}
+		return req.Message, true
+	}
+	c.refuse(400, "ValidationException", "MessageType must be RAW or DIGEST", "bad_request", false)
+	return nil, false
+}
+
+func (c *call) sign(req cryptoReq) {
+	name, ver, key, _, ok := c.target(req.KeyID, 0, "sign", nil)
+	if !ok {
+		return
+	}
+	digest, ok := c.digestOf(req)
+	if !ok {
+		return
+	}
+	c.ev.Context = "digest=" + hex.EncodeToString(digest[:6]) // public by nature; ties a line of the log to a message without keeping it
+	if req.DryRun {
+		c.refuse(400, "DryRunOperationException", "the request would have succeeded, but the DryRun option is set", "dry_run", false)
+		return
+	}
+	release, ok := c.f.Gate.Take(c.r.Context())
+	if !ok {
+		c.refuse(400, "ThrottlingException", "the service is busy", "busy", true)
+		return
+	}
+	defer release()
+	sig, err := keyops.Sign(c.f.Tokens, key.Versions[ver-1], digest)
+	if err != nil {
+		c.f.tokenFailure(c.refuse, err)
+		return
+	}
+	c.succeed(map[string]any{"KeyId": c.f.arn(name), "Signature": b64(sig), "SigningAlgorithm": "ECDSA_SHA_256"})
+}
+
+// verify checks a signature with the public key of the key (the token is asked for the key only, not to sign).
+func (c *call) verify(req cryptoReq) {
+	name, ver, key, _, ok := c.target(req.KeyID, 0, "verify", nil)
+	if !ok {
+		return
+	}
+	digest, ok := c.digestOf(req)
+	if !ok {
+		return
+	}
+	c.ev.Context = "digest=" + hex.EncodeToString(digest[:6])
+	if len(req.Signature) == 0 || len(req.Signature) > 128 {
+		c.refuse(400, "ValidationException", "Signature must be an ASN.1 DER ECDSA signature", "bad_request", false)
+		return
+	}
+	if req.DryRun {
+		c.refuse(400, "DryRunOperationException", "the request would have succeeded, but the DryRun option is set", "dry_run", false)
+		return
+	}
+	release, ok := c.f.Gate.Take(c.r.Context())
+	if !ok {
+		c.refuse(400, "ThrottlingException", "the service is busy", "busy", true)
+		return
+	}
+	defer release()
+	point, err := keyops.PointOf(c.f.Tokens, key.Versions[ver-1])
+	if err != nil {
+		c.f.tokenFailure(c.refuse, err)
+		return
+	}
+	pub, err := x509.ParsePKIXPublicKey(spki(point))
+	if err != nil {
+		c.refuse(500, "KMSInternalException", "internal error", "internal_error", true)
+		return
+	}
+	if !ecdsa.VerifyASN1(pub.(*ecdsa.PublicKey), digest, req.Signature) {
+		c.refuse(400, "KMSInvalidSignatureException", "the signature is not valid for this message and key", "bad_signature_value", false)
+		return
+	}
+	c.succeed(map[string]any{"KeyId": c.f.arn(name), "SignatureValid": true, "SigningAlgorithm": "ECDSA_SHA_256"})
 }

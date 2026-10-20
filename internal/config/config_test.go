@@ -184,3 +184,30 @@ func TestNoCertRules(t *testing.T) {
 		}
 	}
 }
+
+func TestSignVerifyRules(t *testing.T) {
+	v := func(label string) string { return "versions: [{token: t, label: " + label + "}]" }
+	base := "kmsjson: {enabled: true}\ntokens: [{name: t, type: soft, keys: {m: /x, n: /y}}]\nkeys:\n"
+	sig := "  sig: {kmsjson: true, kmsjson_usage: sign_verify, " + v("m") + ", aad: {mode: fixed}}\n"
+	cl := func(ops string) string {
+		return "clients:\n  - {name: a, identity: {cn: x}, sigv4: {access_key_id: AKIAEXAMPLEEXAMPLE1, secret_file: /s}, keys: {sig: {ops: [" + ops + "]}}}\n"
+	}
+	if _, err := Parse([]byte(base + sig + cl("sign, verify"))); err != nil {
+		t.Fatalf("a valid signing key: %v", err)
+	}
+	for name, c := range map[string]string{
+		"encrypt on a signing key":            base + sig + cl("encrypt"),
+		"derive on a signing key":             base + sig + cl("derive"),
+		"the same private key used for ECDH":  base + sig + "  e: {kmsjson: true, " + v("m") + ", aad: {mode: fixed}}\n" + cl("sign"),
+		"the same private key in the Transit": base + sig + "  t: {" + v("m") + ", aad: {mode: fixed}}\n" + cl("sign"),
+	} {
+		if _, err := Parse([]byte(c)); err == nil {
+			t.Errorf("%s was accepted", name)
+		}
+	}
+	// sign on a key that is not a signing key
+	plain := base + "  e: {kmsjson: true, " + v("m") + ", aad: {mode: fixed}}\nclients:\n  - {name: a, identity: {cn: x}, sigv4: {access_key_id: AKIAEXAMPLEEXAMPLE1, secret_file: /s}, keys: {e: {ops: [sign]}}}\n"
+	if _, err := Parse([]byte(plain)); err == nil {
+		t.Error("sign on an ECDH key was accepted")
+	}
+}

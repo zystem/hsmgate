@@ -1,9 +1,11 @@
 package backend
 
 import (
+	"encoding/asn1"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math/big"
 	"strings"
 	"sync"
 
@@ -24,6 +26,8 @@ type module interface {
 	GetAttributeValue(sh pkcs11.SessionHandle, o pkcs11.ObjectHandle, a []*pkcs11.Attribute) ([]*pkcs11.Attribute, error)
 	DeriveKey(sh pkcs11.SessionHandle, m []*pkcs11.Mechanism, base pkcs11.ObjectHandle, a []*pkcs11.Attribute) (pkcs11.ObjectHandle, error)
 	DestroyObject(sh pkcs11.SessionHandle, o pkcs11.ObjectHandle) error
+	SignInit(sh pkcs11.SessionHandle, m []*pkcs11.Mechanism, o pkcs11.ObjectHandle) error
+	Sign(sh pkcs11.SessionHandle, message []byte) ([]byte, error)
 }
 
 // PKCS11Config: Keys maps a label (as the configuration names it) to the CKA_ID of the key pair, in hex.
@@ -284,6 +288,39 @@ func (p *PKCS11) Point(label string) ([]byte, error) {
 	}
 	p.points[label] = append([]byte{}, pt...)
 	return p.points[label], nil
+}
+
+// Sign is CKM_ECDSA over a digest of 32 bytes on the token; the raw r||s of the token is returned as ASN.1 DER.
+func (p *PKCS11) Sign(label string, digest []byte) ([]byte, error) {
+	if len(digest) != 32 {
+		return nil, errors.New("the digest must be 32 bytes")
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.refused {
+		return nil, fmt.Errorf("%w: %v (not tried again; an operator must unlock)", ErrLocked, ErrPINRefused)
+	}
+	if err := p.ensureSession(); err != nil {
+		return nil, err
+	}
+	if !p.loggedIn {
+		return nil, ErrLocked
+	}
+	o, err := p.find(label, pkcs11.CKO_PRIVATE_KEY)
+	if err != nil {
+		return nil, err
+	}
+	if err := p.m.SignInit(p.sh, []*pkcs11.Mechanism{pkcs11.NewMechanism(pkcs11.CKM_ECDSA, nil)}, o); err != nil {
+		return nil, p.sessionErr(err)
+	}
+	raw, err := p.m.Sign(p.sh, digest)
+	if err != nil {
+		return nil, p.sessionErr(err)
+	}
+	if len(raw) != 64 {
+		return nil, fmt.Errorf("the token gave a signature of %d bytes, not 64", len(raw))
+	}
+	return asn1.Marshal(struct{ R, S *big.Int }{new(big.Int).SetBytes(raw[:32]), new(big.Int).SetBytes(raw[32:])})
 }
 
 // Derive is ECDH1-DERIVE on the token with no KDF: the 32 bytes of the shared secret. A point the token refuses is final (not ErrUnavailable).

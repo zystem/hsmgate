@@ -3,7 +3,10 @@ package backend
 import (
 	"bytes"
 	"crypto/ecdh"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/sha256"
 	"errors"
 	"testing"
 
@@ -106,6 +109,29 @@ func (f *fakeModule) DeriveKey(_ pkcs11.SessionHandle, m []*pkcs11.Mechanism, _ 
 func (f *fakeModule) DestroyObject(pkcs11.SessionHandle, pkcs11.ObjectHandle) error {
 	f.destroyed++
 	return nil
+}
+
+func (f *fakeModule) SignInit(pkcs11.SessionHandle, []*pkcs11.Mechanism, pkcs11.ObjectHandle) error {
+	if !f.loggedIn {
+		return pkcs11.Error(pkcs11.CKR_USER_NOT_LOGGED_IN)
+	}
+	return nil
+}
+
+// Sign gives the raw r||s of ECDSA with the key of the fake, as a token does.
+func (f *fakeModule) Sign(_ pkcs11.SessionHandle, digest []byte) ([]byte, error) {
+	k, err := ecdsa.ParseRawPrivateKey(elliptic.P256(), f.priv.Bytes())
+	if err != nil {
+		return nil, err
+	}
+	r, s, err := ecdsa.Sign(rand.Reader, k, digest)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]byte, 64)
+	r.FillBytes(out[:32])
+	s.FillBytes(out[32:])
+	return out, nil
 }
 
 func cfg() PKCS11Config { return PKCS11Config{TokenLabel: "cinim", Keys: map[string]string{"m": "01"}} }
@@ -301,5 +327,29 @@ func TestRetiredTokenOpensNoSession(t *testing.T) {
 	peer, _ := peerOf(t, f)
 	if _, err := p.Derive("m", peer); !errors.Is(err, ErrUnavailable) || f.opens != opens {
 		t.Errorf("%v opens %d->%d", err, opens, f.opens)
+	}
+}
+
+// Sign: the token's raw signature becomes ASN.1 DER that verifies with the public key; a locked token is "locked", a digest of the wrong size is refused.
+func TestSignGivesDERThatVerifies(t *testing.T) {
+	f := newFake()
+	p := newPKCS11(cfg(), f)
+	digest := sha256.Sum256([]byte("message"))
+	if _, err := p.Sign("m", digest[:]); !errors.Is(err, ErrLocked) {
+		t.Fatalf("before the unlock: %v", err)
+	}
+	if err := p.Unlock([]byte("123456")); err != nil {
+		t.Fatal(err)
+	}
+	sig, err := p.Sign("m", digest[:])
+	if err != nil {
+		t.Fatal(err)
+	}
+	x, y := elliptic.Unmarshal(elliptic.P256(), f.priv.PublicKey().Bytes())
+	if !ecdsa.VerifyASN1(&ecdsa.PublicKey{Curve: elliptic.P256(), X: x, Y: y}, digest[:], sig) {
+		t.Error("the signature does not verify")
+	}
+	if _, err := p.Sign("m", digest[:5]); err == nil {
+		t.Error("a short digest was signed")
 	}
 }

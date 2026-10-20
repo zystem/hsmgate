@@ -28,13 +28,17 @@ Kubernetes KMS v2 and Transit only encrypt and decrypt; on an ECDH-only token (a
 
 `DeriveSharedSecret` checks the algorithm is `ECDH`, that the peer key is a P-256 DER SPKI and **on the curve before the token is asked**; `Recipient` is refused; `DryRun` answers `DryRunOperationException` after the policy check. Everything else: `UnsupportedOperationException`.
 
+### 2b. Signing (`kmsjson_usage: sign_verify`)
+
+`Sign` and `Verify` with `ECDSA_SHA_256` (P-256): the signature is made **on the token** (`CKM_ECDSA` over the SHA-256 digest) and returned as ASN.1 DER, as the SDKs expect. `MessageType` `RAW` (1 to 4096 bytes, hashed by the service) or `DIGEST` (32 bytes). `Verify` uses the public key and no private operation; an invalid signature is `KMSInvalidSignatureException`. The rights are `sign` and `verify`; `GetPublicKey` and `DescribeKey` show `SIGN_VERIFY` and `SigningAlgorithms`. A private key signs **or** does ECDH, never both: configuration is refused if a signing key shares a token key with another key. The audit holds the first 6 bytes of the digest, not the message. **Not tried on a card** (tested with the software token and a simulated PKCS#11 module).
+
 ### 2a. Sealing by the service (`kmsjson_usage: encrypt_decrypt`)
 
 - `Encrypt` (plaintext 1 to 4096 bytes), `Decrypt` (the `KeyId` is optional: the ciphertext blob names the key and its version, as clients expect), `ReEncrypt` (needs `decrypt` on the source and `encrypt` on the destination), `GenerateDataKey` and `GenerateDataKeyWithoutPlaintext` (`KeySpec` `AES_128`/`AES_256` or `NumberOfBytes` 1 to 1024; the right is `encrypt`). The only algorithm is `SYMMETRIC_DEFAULT`; here it is `ecies1` ([ecies1.md](ecies1.md)), not AES-GCM, and the blob is ours and opaque. A blob sealed by this face is not readable by the cloud service or the reverse.
 - `EncryptionContext` is the additional data. A key in `aad.mode: fixed` takes **none** (a request with one is refused). A key in `aad.mode: context` needs one: the pairs are made canonical (sorted `name=value` lines, at most 1024 bytes, no `\n` in a name or value, no `=` in a name), and the context is allowed when **one of its lines** begins with a prefix of the key's `aad.allow` (and of the client's `contexts`), such as `purpose=dek`. A context that does not match the one used for sealing gives `InvalidCiphertextException`.
 - A key for key agreement is refused by these calls and a sealing key by `DeriveSharedSecret`: `InvalidKeyUsageException`. `GetPublicKey` of a sealing key is `UnsupportedOperationException`, as for a symmetric key in the cloud service.
 - `GenerateRandom` uses the operating system's generator, not the token's.
-- Not done: signing (`Sign`, `Verify`), MAC calls, `CreateKey` and the other management calls (keys are made in the configuration and on the token), grants, tags.
+- Not done: MAC calls, other signing algorithms (RSA, other curves), `CreateKey` and the other management calls (keys are made in the configuration and on the token), grants, tags.
 
 **Key ids**: `name`, `alias/name`, our ARN form, and the extension `name@N` for version N (the plain forms mean the latest version).
 
@@ -62,7 +66,7 @@ clients:
     keys: {etcd: {ops: [derive]}, app: {ops: [encrypt, decrypt]}}
 ```
 
-Rules checked at load: a `kmsjson` key of usage `key_agreement` must be `aad.mode: fixed`; `kmsjson_usage` needs `kmsjson: true`; `derive` needs a `kmsjson` key and a `sigv4` credential; access key ids are 16–128 alphanumerics and unique; a credential with the face off, or the face on with no `kmsjson` key, is an error.
+Rules checked at load: a `kmsjson` key of usage `key_agreement` must be `aad.mode: fixed`; `kmsjson_usage` needs `kmsjson: true` and is `key_agreement`, `encrypt_decrypt` or `sign_verify`; a signing key has the rights `sign` and `verify` only and shares no token key with another key; `derive` needs a `kmsjson` key and a `sigv4` credential; access key ids are 16–128 alphanumerics and unique; a credential with the face off, or the face on with no `kmsjson` key, is an error.
 
 ## 5. What it costs
 

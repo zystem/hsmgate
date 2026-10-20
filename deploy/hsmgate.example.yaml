@@ -60,6 +60,7 @@ clients:
   #   keys:
   #     ecdh-key: {ops: [derive], per_minute: 120}     # a key with kmsjson_usage: key_agreement (the default)
   #     app-key: {ops: [encrypt, decrypt]}              # a key with kmsjson_usage: encrypt_decrypt: the service seals
+  #     release-key: {ops: [sign, verify]}              # a key with kmsjson_usage: sign_verify: ECDSA on the token (its own key, not shared)
   # a program that cannot show a certificate (docs/specs/kms-json.md, section 5): the signature alone, from listed addresses, a sealing key only, a secret of 32 bytes or more
   # - name: spring-app
   #   sigv4: {access_key_id: AKIDSPRINGSPRINGSPR0, secret_file: /etc/hsmgate/spring.sigv4, no_cert: true, allow_from: [10.20.0.0/16]}

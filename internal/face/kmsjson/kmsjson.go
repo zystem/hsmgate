@@ -306,6 +306,10 @@ func (f *Face) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	if key.Usage() == config.UsageSignVerify && op == "DeriveSharedSecret" {
+		refuse(400, "InvalidKeyUsageException", usageErrText, "bad_usage", false)
+		return
+	}
 	if op != "DeriveSharedSecret" { // public information: no token operation of its own, a small budget
 		if f.Policy.CheckMeta(client, name) != policy.Allow {
 			refuse(400, "ThrottlingException", "rate limit exceeded", "throttled", true)
@@ -324,8 +328,13 @@ func (f *Face) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		der := spki(point)
 		if op == "GetPublicKey" {
-			succeed(map[string]any{"KeyId": f.arn(name), "PublicKey": base64.StdEncoding.EncodeToString(der), "KeySpec": keySpec, "CustomerMasterKeySpec": keySpec,
-				"KeyUsage": "KEY_AGREEMENT", "KeyAgreementAlgorithms": []string{"ECDH"}})
+			out := map[string]any{"KeyId": f.arn(name), "PublicKey": base64.StdEncoding.EncodeToString(der), "KeySpec": keySpec, "CustomerMasterKeySpec": keySpec,
+				"KeyUsage": "KEY_AGREEMENT", "KeyAgreementAlgorithms": []string{"ECDH"}}
+			if key.Usage() == config.UsageSignVerify {
+				delete(out, "KeyAgreementAlgorithms")
+				out["KeyUsage"], out["SigningAlgorithms"] = "SIGN_VERIFY", []string{"ECDSA_SHA_256"}
+			}
+			succeed(out)
 			return
 		}
 		succeed(map[string]any{"KeyMetadata": f.metadata(name, ver, key)})
@@ -431,6 +440,11 @@ func (f *Face) arn(name string) string {
 func (f *Face) metadata(name string, ver int, k config.Key) map[string]any {
 	created := float64(f.Created.Unix())
 	state := "Enabled"
+	if k.Usage() == config.UsageSignVerify {
+		return map[string]any{"KeyId": name, "Arn": f.arn(name), "CreationDate": created, "Enabled": true, "Description": "key " + name + " of the key service",
+			"KeyUsage": "SIGN_VERIFY", "KeyState": state, "KeySpec": keySpec, "CustomerMasterKeySpec": keySpec, "SigningAlgorithms": []string{"ECDSA_SHA_256"},
+			"KeyManager": "CUSTOMER", "MultiRegion": false, "HsmgateVersion": ver, "HsmgateLatestVersion": len(k.Versions)}
+	}
 	if k.Usage() == config.UsageEncryptDecrypt {
 		return map[string]any{"KeyId": name, "Arn": f.arn(name), "CreationDate": created, "Enabled": true, "Description": "key " + name + " of the key service",
 			"KeyUsage": "ENCRYPT_DECRYPT", "KeyState": state, "KeySpec": "SYMMETRIC_DEFAULT", "CustomerMasterKeySpec": "SYMMETRIC_DEFAULT", "EncryptionAlgorithms": []string{algorithm},
