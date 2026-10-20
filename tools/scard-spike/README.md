@@ -5,6 +5,7 @@ A spike, not part of the service and of its module (it has its own `go.mod`; CI 
 ```
 spike PINFILE make    # test keys: an EC pair with OpenSC's module, an AES-256 key with the vendor's module (ids 5167c2, 5167c1)
 spike PINFILE test    # SELECT, VERIFY over PC/SC, then ECDH / CMAC / HMAC / CBC on the new key references
+spike PINFILE bench   # latency of each operation, 40 calls one after another, three ways to reach the card, and software ECDH for comparison
 spike PINFILE clean   # deletes the test keys and lists the key references on the card
 ```
 

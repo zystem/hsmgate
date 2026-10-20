@@ -11,16 +11,17 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/ebfe/scard"
 	"github.com/miekg/pkcs11"
 )
 
 const (
-	aid        = "E82B0601040181C31F0201"
-	idEC       = "5167c2"
-	idAES      = "5167c1"
-	opensc     = "/usr/lib/x86_64-linux-gnu/opensc-pkcs11.so"
+	aid         = "E82B0601040181C31F0201"
+	idEC        = "5167c2"
+	idAES       = "5167c1"
+	opensc      = "/usr/lib/x86_64-linux-gnu/opensc-pkcs11.so"
 	cardcontact = "/tmp/libsc-hsm-pkcs11.so"
 )
 
@@ -174,6 +175,28 @@ func (p *p11) destroyAll(idHex string) int {
 	return n
 }
 
+func timeN(n int, f func()) []float64 {
+	f() // one to warm up
+	out := make([]float64, n)
+	for i := range out {
+		t := time.Now()
+		f()
+		out[i] = float64(time.Since(t).Microseconds()) / 1000
+	}
+	return out
+}
+
+func report(name string, ms []float64) {
+	sorted := append([]float64{}, ms...)
+	sort.Float64s(sorted)
+	sum := 0.0
+	for _, v := range ms {
+		sum += v
+	}
+	mean := sum / float64(len(ms))
+	fmt.Printf("%-48s | %8.2f | %8.2f | %8.2f | %9.1f\n", name, mean, sorted[0], sorted[len(sorted)*95/100], 1000/mean)
+}
+
 func main() {
 	if len(os.Args) < 3 {
 		fmt.Println("usage: spike PINFILE make|test|clean")
@@ -280,6 +303,70 @@ func main() {
 				fmt.Printf("  AES-CBC (10): SW %04x\n", sw)
 			}
 		}
+	case "bench":
+		refsB, _ := os.ReadFile("newrefs.txt")
+		var refs []int
+		for _, f := range strings.Fields(string(refsB)) {
+			var n int
+			fmt.Sscan(f, &n)
+			refs = append(refs, n)
+		}
+		ecRef, aesRef := byte(refs[0]), byte(refs[1])
+		peer, _ := ecdh.P256().GenerateKey(rand.Reader)
+		peerPt := peer.PublicKey().Bytes()
+		msg32 := bytes.Repeat([]byte("0123456789abcdef"), 2)
+		msg64 := bytes.Repeat([]byte("0123456789abcdef"), 4)
+		const N = 40
+		fmt.Println("each line: operation | mean ms | min | p95 | per second (one caller, one after another)")
+		// raw PC/SC
+		c := connect()
+		c.selectApplet()
+		c.verify(pin)
+		report("PC/SC raw   ECDH (80 62)", timeN(N, func() { c.tx(apdu(0x80, 0x62, ecRef, 0x80, peerPt, true)) }))
+		report("PC/SC raw   AES-CMAC 32 B (78/18)", timeN(N, func() { c.tx(apdu(0x80, 0x78, aesRef, 0x18, msg32, true)) }))
+		report("PC/SC raw   HMAC-SHA256 32 B (78/99)", timeN(N, func() { c.tx(apdu(0x80, 0x78, aesRef, 0x99, msg32, true)) }))
+		report("PC/SC raw   AES-CBC enc 64 B (78/10)", timeN(N, func() { c.tx(apdu(0x80, 0x78, aesRef, 0x10, msg64, true)) }))
+		report("PC/SC raw   AES-CBC dec 64 B (78/11)", timeN(N, func() { c.tx(apdu(0x80, 0x78, aesRef, 0x11, msg64, true)) }))
+		c.close()
+		// PKCS#11 with OpenSC: what hsmgate does for an ECDH
+		o := openP11(opensc, pin)
+		id, _ := hex.DecodeString(idEC)
+		must(o.ctx.FindObjectsInit(o.sh, []*pkcs11.Attribute{pkcs11.NewAttribute(pkcs11.CKA_CLASS, pkcs11.CKO_PRIVATE_KEY), pkcs11.NewAttribute(pkcs11.CKA_ID, id)}), "find")
+		objs, _, err := o.ctx.FindObjects(o.sh, 1)
+		o.ctx.FindObjectsFinal(o.sh)
+		must(err, "find")
+		prv := objs[0]
+		derive := func() {
+			k, err := o.ctx.DeriveKey(o.sh, []*pkcs11.Mechanism{pkcs11.NewMechanism(pkcs11.CKM_ECDH1_DERIVE, pkcs11.NewECDH1DeriveParams(pkcs11.CKD_NULL, nil, peerPt))}, prv,
+				[]*pkcs11.Attribute{pkcs11.NewAttribute(pkcs11.CKA_CLASS, pkcs11.CKO_SECRET_KEY), pkcs11.NewAttribute(pkcs11.CKA_KEY_TYPE, pkcs11.CKK_GENERIC_SECRET), pkcs11.NewAttribute(pkcs11.CKA_TOKEN, false), pkcs11.NewAttribute(pkcs11.CKA_SENSITIVE, false), pkcs11.NewAttribute(pkcs11.CKA_EXTRACTABLE, true)})
+			must(err, "derive")
+			o.ctx.GetAttributeValue(o.sh, k, []*pkcs11.Attribute{pkcs11.NewAttribute(pkcs11.CKA_VALUE, nil)})
+			o.ctx.DestroyObject(o.sh, k)
+		}
+		report("PKCS#11 OpenSC ECDH1_DERIVE (hsmgate today)", timeN(N, derive))
+		o.close()
+		// PKCS#11 with the vendor's module
+		v := openP11(cardcontact, pin)
+		aid_, _ := hex.DecodeString(idAES)
+		must(v.ctx.FindObjectsInit(v.sh, []*pkcs11.Attribute{pkcs11.NewAttribute(pkcs11.CKA_CLASS, pkcs11.CKO_SECRET_KEY), pkcs11.NewAttribute(pkcs11.CKA_ID, aid_)}), "find")
+		objs, _, err = v.ctx.FindObjects(v.sh, 1)
+		v.ctx.FindObjectsFinal(v.sh)
+		must(err, "find AES")
+		sk := objs[0]
+		report("PKCS#11 vendor  AES-CMAC 32 B", timeN(N, func() {
+			must(v.ctx.SignInit(v.sh, []*pkcs11.Mechanism{pkcs11.NewMechanism(pkcs11.CKM_AES_CMAC, nil)}, sk), "signinit")
+			_, err := v.ctx.Sign(v.sh, msg32)
+			must(err, "sign")
+		}))
+		iv := make([]byte, 16)
+		report("PKCS#11 vendor  AES-CBC enc 64 B", timeN(N, func() {
+			must(v.ctx.EncryptInit(v.sh, []*pkcs11.Mechanism{pkcs11.NewMechanism(pkcs11.CKM_AES_CBC, iv)}, sk), "encinit")
+			_, err := v.ctx.Encrypt(v.sh, msg64)
+			must(err, "enc")
+		}))
+		v.close()
+		// software, for comparison
+		report("software    ECDH P-256 (Go)", timeN(2000, func() { k, _ := ecdh.P256().GenerateKey(rand.Reader); k.ECDH(peer.PublicKey()) }))
 	case "clean":
 		o := openP11(opensc, pin)
 		n := o.destroyAll(idEC)

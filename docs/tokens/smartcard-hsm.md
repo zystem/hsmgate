@@ -48,3 +48,21 @@ The card does more than either PKCS#11 module shows. The vendor's public scripts
 | AES-CBC: `80 78 <ref> 10` / `11` | round trip works; the card's CBC has a **zero IV** (a host that wants another IV XORs it into the first block, as the vendor's module does) |
 
 An EC key refuses the AES commands (`6A81`) and an AES key refuses ECDH (`6A86`): the key types stay apart on the card. An AES-256 key made with the vendor's module's `CKM_AES_KEY_GEN` carries all four AES algorithms (10, 11, 18, 99). Still no AES-GCM.
+
+### Speed (measured 2026-10-21, the same card, the reader OMNIKEY 3x21, one caller, 40 calls in a row)
+
+| Operation | mean ms | per second |
+|---|---|---|
+| ECDH through the OpenSC module (what hsmgate does for every decrypt) | 37.0 | 27 |
+| ECDH over PC/SC with the card's own command | 35.9 | 28 |
+| AES-CMAC, 32 bytes (vendor's module / PC/SC) | 18.6 / 18.6 | 54 |
+| AES-CBC encrypt, 64 bytes (vendor's module / PC/SC) | 17.4 / 17.4 | 57 |
+| HMAC-SHA256 function `99`, 32 bytes (PC/SC) | 43.0 | 23 |
+| ECDH P-256 in software (Go), for comparison | 0.09 | 11 700 |
+
+Every operation on the card costs 17 to 43 ms whatever it is: the time is the round trip through the reader and the card, and the card does one thing at a time. The PKCS#11 layer adds about a millisecond; the vendor's module and OpenSC are equal. What this means for the designs:
+
+- `ecies1` (ECDH): a **seal needs no card at all** (the public key; 0.1 ms in software), an **open is one ECDH, 37 ms**: at most about 27 opens per second per card. Sealing scales; opening is the limit.
+- AES on the card (CMAC as a PRF, or CBC with CMAC): **every seal and every open is a card operation** (one or two, 19 to 37 ms), so sealing becomes 200 to 400 times slower and depends on the card, and the card's 20 to 55 operations per second are shared by seals and opens.
+- MAC: the key derived by ECDH is one 37 ms operation per MAC without the cache and none with it (`kmsjson.mac_cache_seconds`); a MAC on the card is 19 ms (CMAC) or 43 ms (HMAC-SHA256 function) every time.
+- The line to the card (`limits`: 8 at once, 2 seconds of waiting by default) is sized for these numbers: a burst of more than about 50 simultaneous opens finds the queue full and gets `busy`/`throttled` with a retry.
