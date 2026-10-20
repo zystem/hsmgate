@@ -660,3 +660,31 @@ func TestVerifyAfterRotation(t *testing.T) {
 		t.Errorf("a new signature: %d %v", st, out)
 	}
 }
+
+// A client that names a key with a full identifier gets it back (the Encryption SDK compares the identifier it stored with the one it is configured with); a name gets ours.
+func TestAnIdentifierGivenByTheClientIsGivenBack(t *testing.T) {
+	r := cryptoRig(t)
+	pt := base64.StdEncoding.EncodeToString([]byte("x"))
+	given := "arn:aws:kms:eu-central-1:123456789012:key/seal"
+	_, enc := r.app("Encrypt", map[string]any{"KeyId": given, "Plaintext": pt})
+	if enc["KeyId"] != given {
+		t.Errorf("KeyId %v, want %s", enc["KeyId"], given)
+	}
+	if _, dec := r.app("Decrypt", map[string]any{"KeyId": given, "CiphertextBlob": enc["CiphertextBlob"]}); dec["KeyId"] != given {
+		t.Errorf("Decrypt KeyId %v", dec["KeyId"])
+	}
+	if _, dk := r.app("GenerateDataKey", map[string]any{"KeyId": given, "KeySpec": "AES_256"}); dk["KeyId"] != given {
+		t.Errorf("GenerateDataKey KeyId %v", dk["KeyId"])
+	}
+	_, byName := r.app("Encrypt", map[string]any{"KeyId": "alias/seal", "Plaintext": pt})
+	if byName["KeyId"] != "arn:hsmgate:kms:local:000000000000:key/seal" {
+		t.Errorf("by name: %v", byName["KeyId"])
+	}
+	// not an echo of anything: an identifier of another key, a long or odd one, gets ours
+	for _, odd := range []string{"arn:aws:kms:r:1:key/other", "arn:aws:kms:eu\":x:1:key/seal", "arn:aws:kms:" + strings.Repeat("a", 300) + ":1:key/seal", "arn:aws:kms:a:b:c:d:key/seal"} {
+		_, out := r.app("Encrypt", map[string]any{"KeyId": odd, "Plaintext": pt})
+		if k, _ := out["KeyId"].(string); k != "" && k == odd {
+			t.Errorf("%q was echoed", odd)
+		}
+	}
+}

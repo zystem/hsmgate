@@ -90,6 +90,10 @@ creation_rules:
 
 `sops encrypt -i file.yaml` and `sops decrypt file.yaml` worked, as did a wrong secret (refused with a signature error). **SOPS accepts only identifiers that begin with `arn:aws…`** (`arn:hsmgate:…` is refused by SOPS itself: "no valid ARN found"). hsmgate does not care about the partition and the account part of an identifier: it reads the key from the `:key/<name>` or `:alias/<name>` at the end, so write the key as `arn:aws:kms:<region>:000000000000:key/<name>` for SOPS; that text is then stored in the encrypted files. The data key of SOPS is sealed with `Encrypt` and opened with `Decrypt`.
 
+## AWS Encryption SDK for Python (tried)
+
+`aws-encryption-sdk` with a `StrictAwsKmsMasterKeyProvider` over `arn:aws:kms:<region>:000000000000:key/<name>`, `AWS_ENDPOINT_URL_KMS`, `AWS_CA_BUNDLE` and a `no_cert` client: encrypt and decrypt round-tripped with `GenerateDataKey` and `Decrypt`. It stores the key identifier in each message and compares it when it reads, so hsmgate **answers with the identifier the client named the key with** when that is a full identifier of this key (`arn:<partition>:kms:<region>:<account>:key/<name>`), and with its own `arn:hsmgate:…` when the key was named by name or alias. The default algorithm suite signs and puts `aws-crypto-public-key` into the encryption context, so such a key must be in `aad.mode: context` with `allow: ["aws-crypto-public-key=", ...]`; a key in `fixed` mode takes only a suite without signing (`AES_256_GCM_HKDF_SHA512_COMMIT_KEY`) and no context of the caller.
+
 ## Terraform, others
 
 Not tried. Programs that call only `Encrypt`, `Decrypt`, `GenerateDataKey`, `Sign`, `Verify`, `GenerateMac`, `VerifyMac` and `GenerateRandom` are expected to work; programs that manage keys (`CreateKey`, rotation, tags, key policies; the Terraform provider reads some of them) will not, because keys here are made in the configuration and on the token.

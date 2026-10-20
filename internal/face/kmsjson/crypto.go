@@ -340,7 +340,7 @@ func (c *call) encrypt(req cryptoReq) {
 	if !ok {
 		return
 	}
-	c.succeed(map[string]any{"CiphertextBlob": b64(blob), "KeyId": c.f.arn(name), "EncryptionAlgorithm": algorithm})
+	c.succeed(map[string]any{"CiphertextBlob": b64(blob), "KeyId": c.f.arnFor(req.KeyID, name), "EncryptionAlgorithm": algorithm})
 }
 
 // source reads the blob of a request and the key it names; id, when the client gave one, must be that key.
@@ -384,7 +384,7 @@ func (c *call) decrypt(req cryptoReq) {
 		return
 	}
 	defer wipe(plain)
-	c.succeed(map[string]any{"KeyId": c.f.arn(name), "Plaintext": b64(plain), "EncryptionAlgorithm": algorithm})
+	c.succeed(map[string]any{"KeyId": c.f.arnFor(req.KeyID, name), "Plaintext": b64(plain), "EncryptionAlgorithm": algorithm})
 }
 
 func (c *call) reencrypt(req cryptoReq) {
@@ -419,7 +419,7 @@ func (c *call) reencrypt(req cryptoReq) {
 	if !ok {
 		return
 	}
-	c.succeed(map[string]any{"CiphertextBlob": b64(blob), "SourceKeyId": c.f.arn(sname), "KeyId": c.f.arn(dname),
+	c.succeed(map[string]any{"CiphertextBlob": b64(blob), "SourceKeyId": c.f.arnFor(req.SourceKeyID, sname), "KeyId": c.f.arnFor(req.DestinationKeyID, dname),
 		"SourceEncryptionAlgorithm": algorithm, "DestinationEncryptionAlgorithm": algorithm})
 }
 
@@ -461,7 +461,7 @@ func (c *call) dataKey(op string, req cryptoReq) {
 	if !ok {
 		return
 	}
-	out := map[string]any{"CiphertextBlob": b64(blob), "KeyId": c.f.arn(name)}
+	out := map[string]any{"CiphertextBlob": b64(blob), "KeyId": c.f.arnFor(req.KeyID, name)}
 	if op == "GenerateDataKey" {
 		out["Plaintext"] = b64(dek)
 	}
@@ -539,7 +539,7 @@ func (c *call) sign(req cryptoReq) {
 		c.f.tokenFailure(c.refuse, err)
 		return
 	}
-	c.succeed(map[string]any{"KeyId": c.f.arn(name), "Signature": b64(sig), "SigningAlgorithm": "ECDSA_SHA_256"})
+	c.succeed(map[string]any{"KeyId": c.f.arnFor(req.KeyID, name), "Signature": b64(sig), "SigningAlgorithm": "ECDSA_SHA_256"})
 }
 
 // verify checks a signature with the public key of the key (the token is asked for the key only, not to sign). A signature carries no version: it is checked against the latest
@@ -597,7 +597,7 @@ func (c *call) verify(req cryptoReq) {
 		c.refuse(400, "KMSInvalidSignatureException", "the signature is not valid for this message and key", "bad_signature_value", false)
 		return
 	}
-	c.succeed(map[string]any{"KeyId": c.f.arn(name), "SignatureValid": true, "SigningAlgorithm": "ECDSA_SHA_256"})
+	c.succeed(map[string]any{"KeyId": c.f.arnFor(req.KeyID, name), "SignatureValid": true, "SigningAlgorithm": "ECDSA_SHA_256"})
 }
 
 // ---- MAC
@@ -737,7 +737,7 @@ func (c *call) mac(op string, req cryptoReq) {
 			return
 		}
 		defer wipe(k)
-		c.succeed(map[string]any{"Mac": b64(hmacSum(k, req.Message)), "MacAlgorithm": "HMAC_SHA_256", "KeyId": c.f.arn(name)})
+		c.succeed(map[string]any{"Mac": b64(hmacSum(k, req.Message)), "MacAlgorithm": "HMAC_SHA_256", "KeyId": c.f.arnFor(req.KeyID, name)})
 		return
 	}
 	versions := []int{ver}
@@ -763,5 +763,5 @@ func (c *call) mac(op string, req cryptoReq) {
 		c.refuse(400, "KMSInvalidMacException", "the MAC is not valid for this message and key", "bad_mac", false)
 		return
 	}
-	c.succeed(map[string]any{"KeyId": c.f.arn(name), "MacValid": true, "MacAlgorithm": "HMAC_SHA_256"})
+	c.succeed(map[string]any{"KeyId": c.f.arnFor(req.KeyID, name), "MacValid": true, "MacAlgorithm": "HMAC_SHA_256"})
 }

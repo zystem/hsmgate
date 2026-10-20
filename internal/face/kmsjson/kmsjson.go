@@ -342,7 +342,7 @@ func (f *Face) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		der := spki(point)
 		if op == "GetPublicKey" {
-			out := map[string]any{"KeyId": f.arn(name), "PublicKey": base64.StdEncoding.EncodeToString(der), "KeySpec": keySpec, "CustomerMasterKeySpec": keySpec,
+			out := map[string]any{"KeyId": f.arnFor(req.KeyID, name), "PublicKey": base64.StdEncoding.EncodeToString(der), "KeySpec": keySpec, "CustomerMasterKeySpec": keySpec,
 				"KeyUsage": "KEY_AGREEMENT", "KeyAgreementAlgorithms": []string{"ECDH"}}
 			if key.Usage() == config.UsageSignVerify {
 				delete(out, "KeyAgreementAlgorithms")
@@ -405,7 +405,7 @@ func (f *Face) serve(w http.ResponseWriter, r *http.Request) {
 			z[i] = 0
 		}
 	}()
-	succeed(map[string]any{"KeyId": f.arn(name), "KeyAgreementAlgorithm": "ECDH", "SharedSecret": base64.StdEncoding.EncodeToString(z)})
+	succeed(map[string]any{"KeyId": f.arnFor(req.KeyID, name), "KeyAgreementAlgorithm": "ECDH", "SharedSecret": base64.StdEncoding.EncodeToString(z)})
 }
 
 func (f *Face) tokenFailure(refuse func(int, string, string, string, bool), err error) {
@@ -445,6 +445,31 @@ func (f *Face) resolve(id string) (name string, version int, found bool) {
 		return "", 0, false
 	}
 	return s, version, true
+}
+
+// arnFor is the identifier of a key for an answer. A client that names the key with a full identifier (arn:PARTITION:kms:REGION:ACCOUNT:key/NAME) gets that very identifier back when it
+// names this key: programs that keep the identifier in what they make (the Encryption SDK keeps it in the message and compares it when it reads) need the answer to equal what they
+// asked with. Otherwise the identifier is ours.
+func (f *Face) arnFor(given, name string) string {
+	if len(given) <= 200 && strings.HasPrefix(given, "arn:") && strings.HasSuffix(given, ":key/"+name) {
+		p := strings.Split(strings.TrimSuffix(given, ":key/"+name), ":") // arn, partition, kms, region, account
+		if len(p) == 5 && p[2] == "kms" && safeARNPart(p[1], 32) && safeARNPart(p[3], 32) && safeARNPart(p[4], 12) {
+			return given
+		}
+	}
+	return f.arn(name)
+}
+
+func safeARNPart(s string, max int) bool {
+	if len(s) > max {
+		return false
+	}
+	for _, c := range s {
+		if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-') {
+			return false
+		}
+	}
+	return true
 }
 
 func (f *Face) arn(name string) string {

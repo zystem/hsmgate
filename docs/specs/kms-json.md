@@ -44,6 +44,8 @@ Kubernetes KMS v2 and Transit only encrypt and decrypt; on a token that is used 
 - `GenerateRandom` uses the operating system's generator, not the token's.
 - Not done: RSA and other curves, other MAC or signing algorithms, `CreateKey` and the other management calls (keys are made in the configuration and on the token), grants, tags.
 
+**Identifiers in answers**: when the request names the key with a full identifier (`arn:PARTITION:kms:REGION:ACCOUNT:key/NAME`, the parts of safe characters, NAME the key), the answer carries that identifier; else `arn:hsmgate:kms:<region>:000000000000:key/<name>`. Programs that keep the identifier in what they make need this.
+
 **Key ids**: `name`, `alias/name`, our ARN form, and the extension `name@N` for version N (the plain forms mean the latest version).
 
 **Errors**: unknown key and ungranted key give the *same* `AccessDeniedException` (no probing); bad input `ValidationException`; rate or a full line to the token `ThrottlingException`; locked or unreachable token `KeyUnavailableException` (HTTP 500, retryable); audit not writable `KMSInternalException`. Signature problems: `MissingAuthenticationTokenException`, `UnrecognizedClientException`, `IncompleteSignatureException`, `InvalidSignatureException`.
