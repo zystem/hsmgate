@@ -28,10 +28,29 @@ func TestSecretFileIsReadFromTheDescriptor(t *testing.T) {
 	if b, err := ReadSecretFile(good, 16); err != nil || string(b) != "abcd" {
 		t.Fatalf("%q %v", b, err)
 	}
-	link := filepath.Join(dir, "link")
-	os.Symlink(good, link)
-	if _, err := ReadSecretFile(link, 16); err == nil {
-		t.Error("a symbolic link was followed")
+	// a link is followed, as in a Kubernetes Secret volume (key -> ..data/key -> a directory named after the time) ...
+	vol := filepath.Join(dir, "vol")
+	os.MkdirAll(filepath.Join(vol, "..2026_10_20"), 0o755)
+	os.WriteFile(filepath.Join(vol, "..2026_10_20", "k"), []byte("abcd"), 0o400)
+	os.Symlink("..2026_10_20", filepath.Join(vol, "..data"))
+	os.Symlink(filepath.Join("..data", "k"), filepath.Join(vol, "k"))
+	if b, err := ReadSecretFile(filepath.Join(vol, "k"), 16); err != nil || string(b) != "abcd" {
+		t.Errorf("a Secret volume: %q %v", b, err)
+	}
+	// ... but what it leads to is judged like any key file: mode, type, and a link that leads nowhere
+	open := filepath.Join(dir, "open")
+	os.WriteFile(open, []byte("abcd"), 0o644)
+	os.Symlink(open, filepath.Join(dir, "link-to-open"))
+	if _, err := ReadSecretFile(filepath.Join(dir, "link-to-open"), 16); err == nil {
+		t.Error("a link to a world-readable file was read")
+	}
+	os.Symlink(filepath.Join(dir, "nowhere"), filepath.Join(dir, "dangling"))
+	if _, err := ReadSecretFile(filepath.Join(dir, "dangling"), 16); err == nil {
+		t.Error("a dangling link was read")
+	}
+	os.Symlink(dir, filepath.Join(dir, "link-to-dir"))
+	if _, err := ReadSecretFile(filepath.Join(dir, "link-to-dir"), 16); err == nil {
+		t.Error("a link to a directory was read")
 	}
 	if _, err := ReadSecretFile(dir, 16); err == nil {
 		t.Error("a directory was read")

@@ -108,9 +108,24 @@ The client certificate is itself a secret in the cluster, so the security of the
 
 `hsmgate encrypt` and `hsmgate decrypt` take the same connection flags (also as environment variables): `-addr`, `-transit-key`, `-mount` (default `transit`), `-ca`, `-cert`, `-keyfile`, `-wait`. Plain HTTP is accepted for a loopback address only (development). Exit codes: 0 done, 1 failed (the reason is on standard error), 2 wrong usage.
 
-| Command | Does |
-|---|---|
-| `hsmgate encrypt -k8s NS/SECRET/FIELD` | reads a value, prints a `Secret` manifest with the ciphertext |
-| `hsmgate encrypt -context C` | prints the bare ciphertext for context `C` |
-| `hsmgate decrypt -in-dir D -out-dir O -context-prefix P [-mode 0440]` | the init container's job (above) |
-| `hsmgate decrypt -in FILE -context C [-out FILE]` | opens one ciphertext to standard output or a file (single mode) |
+The same two flags name the sources in both commands, and they can be given together:
+
+| Flag | In `encrypt` | In `decrypt` |
+|---|---|---|
+| `-in-dir DIR` | every regular file of DIR (not those starting with a dot) is a value; the file name is the field name | every regular file of DIR is a ciphertext (a mounted Secret); the file name is the field name |
+| `-file SRC[=TARGET]` (repeat) | SRC holds one value; TARGET is its **field name** (default: the base name of SRC) | SRC holds one ciphertext; TARGET is the **path** it is written to (default: `-out-dir`/base name of SRC) |
+| `-in FILE` / standard input | one value (alone, not with the two above) | one ciphertext to standard output (alone) |
+
+`-k8s NAMESPACE/SECRET` (with `-in-dir`/`-file`) or `-k8s NAMESPACE/SECRET/FIELD` (one value) sets the context `k8s/NAMESPACE/SECRET/<field>` and prints a `Secret` manifest; `-context` gives a bare context and prints a bare ciphertext. In `decrypt` the context is `-context-prefix` followed by the field name (the base name of the ciphertext file). Two sources for one field (`encrypt`) or one destination (`decrypt`) is an error, and nothing is done. A file is limited to 1 MiB, and by the `max_bytes` of the key (8192 by default).
+
+Examples:
+
+```bash
+# a whole directory and one more file, as one Secret
+hsmgate encrypt -k8s shop/app-files -in-dir ./plain -file ./certs/keystore.p12=keystore > app-files.yaml
+# in the pod: all of them to /vault/secrets, and one of them also to a path the application wants
+hsmgate decrypt -context-prefix 'k8s/$(POD_NAMESPACE)/app-files/' -in-dir /enc -out-dir /vault/secrets \
+                -file /enc/keystore=/etc/ssl/app/keystore.p12
+```
+
+Binary files work (the value is bytes, not text). The files are written all together or not at all, atomically, with mode 0440 by default (`-mode`).

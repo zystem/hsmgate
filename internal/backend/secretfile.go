@@ -4,13 +4,19 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"syscall"
 )
 
-// ReadSecretFile reads a file that holds a key or a PIN. It opens the path once, refuses a symbolic link, and judges the open descriptor, not the path:
-// a regular file, owned by the user the service runs as (or root), not readable by group or others, and no larger than max bytes.
+// ReadSecretFile reads a file that holds a key or a PIN. A symbolic link is followed (a Kubernetes Secret volume is made of them: key -> ..data/key), and the file it leads to
+// is opened once, without following a further link, and judged by its open descriptor, not by the path: a regular file, owned by the user the service runs as (or root),
+// not readable by group or others, and no larger than max bytes.
 func ReadSecretFile(path string, max int64) ([]byte, error) {
-	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_CLOEXEC|syscall.O_NONBLOCK, 0)
+	real, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return nil, err
+	}
+	f, err := os.OpenFile(real, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_CLOEXEC|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, err
 	}
