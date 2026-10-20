@@ -69,6 +69,22 @@ type Key struct {
 	// KMSJSON lets clients with the "derive" right use the key through the KMS-JSON face: ECDH with a key that stays on the token. That face has no context, so whoever may derive
 	// can open anything sealed to the key: such a key must be in "fixed" mode (a key in context mode would lose the isolation of its contexts) and is best dedicated to this use.
 	KMSJSON bool `yaml:"kmsjson"`
+	// KMSJSONUsage: "key_agreement" (the default: DeriveSharedSecret, the client seals and opens) or "encrypt_decrypt" (Encrypt, Decrypt, ReEncrypt, GenerateDataKey: the service seals
+	// and opens, as in the Transit face, and the request's EncryptionContext is the additional data). One key has one usage: the right to derive would open anything sealed to the key.
+	KMSJSONUsage string `yaml:"kmsjson_usage"`
+}
+
+const (
+	UsageKeyAgreement   = "key_agreement"
+	UsageEncryptDecrypt = "encrypt_decrypt"
+)
+
+// Usage of a key on the KMS-JSON face.
+func (k Key) Usage() string {
+	if k.KMSJSONUsage == "" {
+		return UsageKeyAgreement
+	}
+	return k.KMSJSONUsage
 }
 
 // Version is one version of a key. Replicas are other tokens that hold the same key (a spare card made from a DKEK backup): they are tried, in order,
@@ -266,10 +282,12 @@ func (c *Config) Validate() error {
 		if set != 1 {
 			return fmt.Errorf("client %s: exactly one of identity.uri, identity.sha256, identity.cn is required (several would be an OR)", cl.Name)
 		}
-		if other, dup := idents[ident]; dup {
-			return fmt.Errorf("clients %s and %s have the same identity", other, cl.Name)
+		if ident != "" {
+			if other, dup := idents[ident]; dup {
+				return fmt.Errorf("clients %s and %s have the same identity", other, cl.Name)
+			}
+			idents[ident] = cl.Name
 		}
-		idents[ident] = cl.Name
 		for key, g := range cl.Keys {
 			if _, ok := c.Keys[key]; !ok {
 				return fmt.Errorf("client %s: unknown key %q", cl.Name, key)
@@ -306,8 +324,17 @@ func (c *Config) validateKMSJSON() error {
 		}
 	}
 	for name, k := range c.Keys {
-		if k.KMSJSON && k.AAD.Mode != "fixed" {
-			return fmt.Errorf("key %s: kmsjson needs aad mode fixed (that face has no context, so a key in context mode would lose the isolation of its contexts)", name)
+		if k.KMSJSONUsage != "" && !k.KMSJSON {
+			return fmt.Errorf("key %s: kmsjson_usage needs kmsjson: true", name)
+		}
+		switch k.KMSJSONUsage {
+		case "", UsageKeyAgreement:
+			if k.KMSJSON && k.AAD.Mode != "fixed" {
+				return fmt.Errorf("key %s: kmsjson key agreement needs aad mode fixed (DeriveSharedSecret has no context, so a key in context mode would lose the isolation of its contexts); use kmsjson_usage: encrypt_decrypt for a key with contexts", name)
+			}
+		case UsageEncryptDecrypt:
+		default:
+			return fmt.Errorf("key %s: kmsjson_usage must be key_agreement or encrypt_decrypt", name)
 		}
 	}
 	akids := map[string]string{}
@@ -317,8 +344,8 @@ func (c *Config) validateKMSJSON() error {
 			for _, op := range g.Ops {
 				if op == "derive" {
 					derives = true
-					if !c.Keys[key].KMSJSON {
-						return fmt.Errorf("client %s key %s: the right derive needs kmsjson: true on the key", cl.Name, key)
+					if !c.Keys[key].KMSJSON || c.Keys[key].Usage() != UsageKeyAgreement {
+						return fmt.Errorf("client %s key %s: the right derive needs kmsjson: true and the usage key_agreement on the key", cl.Name, key)
 					}
 				}
 			}

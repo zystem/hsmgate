@@ -58,4 +58,5 @@ clients:
   #   identity: {cn: sealer}
   #   sigv4: {access_key_id: AKIDEXAMPLEEXAMPLE1, secret_file: /etc/hsmgate/sealer.sigv4}   # mode 0600, at least 20 bytes
   #   keys:
-  #     ecdh-key: {ops: [derive], per_minute: 120}
+  #     ecdh-key: {ops: [derive], per_minute: 120}     # a key with kmsjson_usage: key_agreement (the default)
+  #     app-key: {ops: [encrypt, decrypt]}              # a key with kmsjson_usage: encrypt_decrypt: the service seals

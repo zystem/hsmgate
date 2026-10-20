@@ -113,12 +113,13 @@ kmsjson: {enabled: true, region: local}
 tokens: [{name: soft, type: soft, keys: {m1: %s, m2: %s}}]
 keys:
   etcd: {kmsjson: true, versions: [{token: soft, label: m1}, {token: soft, label: m2}], aad: {mode: fixed}}
+  seal: {kmsjson: true, kmsjson_usage: encrypt_decrypt, versions: [{token: soft, label: m1}], aad: {mode: fixed}}
   hidden: {versions: [{token: soft, label: m1}], aad: {mode: fixed}}
 clients:
   - name: sdk
     identity: {cn: sdk-client}
     sigv4: {access_key_id: %s, secret_file: %s}
-    keys: {etcd: {ops: [derive]}}
+    keys: {etcd: {ops: [derive]}, seal: {ops: [encrypt, decrypt]}}
 `, addr, f("srv.pem"), f("srv.key"), f("ca.pem"), f("k1.hex"), f("k2.hex"), akid, f("sigv4-secret"))), 0o600)
 	cmd := exec.Command(bin, "serve", "-config", f("hsmgate.yaml"))
 	cmd.Stderr = os.Stderr
@@ -215,11 +216,11 @@ func TestDescribeListAndTheTypesOfTheSDK(t *testing.T) {
 		t.Errorf("%+v", md)
 	}
 	ks, err := c.ListKeys(context.Background(), &kms.ListKeysInput{})
-	if err != nil || len(ks.Keys) != 1 || aws.ToString(ks.Keys[0].KeyId) != "etcd" || ks.Truncated { // "hidden" has no kmsjson and is not listed
+	if err != nil || len(ks.Keys) != 2 || ks.Truncated { // "hidden" has no kmsjson and is not listed
 		t.Errorf("%+v %v", ks, err)
 	}
 	as, err := c.ListAliases(context.Background(), &kms.ListAliasesInput{})
-	if err != nil || len(as.Aliases) != 1 || aws.ToString(as.Aliases[0].AliasName) != "alias/etcd" {
+	if err != nil || len(as.Aliases) != 2 {
 		t.Errorf("%+v %v", as, err)
 	}
 }
@@ -263,5 +264,56 @@ func TestErrorsAreTheOnesSDKsKnow(t *testing.T) {
 	_, err := c.ScheduleKeyDeletion(context.Background(), &kms.ScheduleKeyDeletionInput{KeyId: aws.String("etcd")})
 	if got := code(err); got != "UnsupportedOperationException" {
 		t.Errorf("an unsupported operation: %s (%v)", got, err)
+	}
+}
+
+// Sealing by the service: the calls that services written for the cloud service make (Encrypt, Decrypt without a KeyId, GenerateDataKey, ReEncrypt, GenerateRandom).
+func TestEncryptDecryptAndDataKeys(t *testing.T) {
+	c := client(secret)
+	ctx := context.Background()
+	d, err := c.DescribeKey(ctx, &kms.DescribeKeyInput{KeyId: aws.String("seal")})
+	if err != nil || d.KeyMetadata.KeyUsage != types.KeyUsageTypeEncryptDecrypt || d.KeyMetadata.KeySpec != types.KeySpecSymmetricDefault {
+		t.Fatalf("DescribeKey: %+v %v", d, err)
+	}
+	enc, err := c.Encrypt(ctx, &kms.EncryptInput{KeyId: aws.String("alias/seal"), Plaintext: []byte("hello")})
+	if err != nil || enc.EncryptionAlgorithm != types.EncryptionAlgorithmSpecSymmetricDefault {
+		t.Fatalf("Encrypt: %+v %v", enc, err)
+	}
+	dec, err := c.Decrypt(ctx, &kms.DecryptInput{CiphertextBlob: enc.CiphertextBlob})
+	if err != nil || string(dec.Plaintext) != "hello" || aws.ToString(dec.KeyId) != aws.ToString(enc.KeyId) {
+		t.Fatalf("Decrypt: %+v %v", dec, err)
+	}
+	dk, err := c.GenerateDataKey(ctx, &kms.GenerateDataKeyInput{KeyId: aws.String("seal"), KeySpec: types.DataKeySpecAes256})
+	if err != nil || len(dk.Plaintext) != 32 {
+		t.Fatalf("GenerateDataKey: %+v %v", dk, err)
+	}
+	back, err := c.Decrypt(ctx, &kms.DecryptInput{CiphertextBlob: dk.CiphertextBlob, KeyId: aws.String("seal")})
+	if err != nil || !bytes.Equal(back.Plaintext, dk.Plaintext) {
+		t.Fatalf("the data key: %v", err)
+	}
+	if _, err := c.GenerateDataKeyWithoutPlaintext(ctx, &kms.GenerateDataKeyWithoutPlaintextInput{KeyId: aws.String("seal"), NumberOfBytes: aws.Int32(24)}); err != nil {
+		t.Errorf("GenerateDataKeyWithoutPlaintext: %v", err)
+	}
+	re, err := c.ReEncrypt(ctx, &kms.ReEncryptInput{CiphertextBlob: enc.CiphertextBlob, DestinationKeyId: aws.String("seal")})
+	if err != nil {
+		t.Fatalf("ReEncrypt: %v", err)
+	}
+	if again, err := c.Decrypt(ctx, &kms.DecryptInput{CiphertextBlob: re.CiphertextBlob}); err != nil || string(again.Plaintext) != "hello" {
+		t.Errorf("after ReEncrypt: %v", err)
+	}
+	r, err := c.GenerateRandom(ctx, &kms.GenerateRandomInput{NumberOfBytes: aws.Int32(40)})
+	if err != nil || len(r.Plaintext) != 40 {
+		t.Errorf("GenerateRandom: %v", err)
+	}
+	bad := append([]byte{}, enc.CiphertextBlob...)
+	bad[len(bad)-2] ^= 1
+	_, err = c.Decrypt(ctx, &kms.DecryptInput{CiphertextBlob: bad})
+	if got := code(err); got != "InvalidCiphertextException" {
+		t.Errorf("a damaged blob: %s", got)
+	}
+	// a key for key agreement is not for sealing
+	_, err = c.Encrypt(ctx, &kms.EncryptInput{KeyId: aws.String("etcd"), Plaintext: []byte("x")})
+	if got := code(err); got != "InvalidKeyUsageException" {
+		t.Errorf("Encrypt on an ECDH key: %s", got)
 	}
 }

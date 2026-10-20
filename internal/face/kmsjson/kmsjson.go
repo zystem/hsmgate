@@ -181,6 +181,11 @@ func (f *Face) serve(w http.ResponseWriter, r *http.Request) {
 		reply(w, 200, payload)
 	}
 
+	switch {
+	case isCryptoOp(op):
+		(&call{f: f, w: w, r: r, client: client, ev: &ev, refuse: refuse, succeed: succeed}).crypto(op, body)
+		return
+	}
 	switch op {
 	case "GetPublicKey", "DescribeKey", "DeriveSharedSecret":
 	case "ListKeys", "ListAliases":
@@ -220,6 +225,21 @@ func (f *Face) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	version := key.Versions[ver-1]
 
+	if key.Usage() == config.UsageEncryptDecrypt {
+		switch op {
+		case "DescribeKey":
+			if f.Policy.CheckMeta(client, name) != policy.Allow {
+				refuse(400, "ThrottlingException", "rate limit exceeded", "throttled", true)
+				return
+			}
+			succeed(map[string]any{"KeyMetadata": f.metadata(name, ver, key)})
+		case "GetPublicKey":
+			refuse(400, "UnsupportedOperationException", "the key is a symmetric key: it has no public key", "unsupported", false)
+		default:
+			refuse(400, "InvalidKeyUsageException", usageErrText, "bad_usage", false)
+		}
+		return
+	}
 	if op != "DeriveSharedSecret" { // public information: no token operation of its own, a small budget
 		if f.Policy.CheckMeta(client, name) != policy.Allow {
 			refuse(400, "ThrottlingException", "rate limit exceeded", "throttled", true)
@@ -345,6 +365,11 @@ func (f *Face) arn(name string) string {
 func (f *Face) metadata(name string, ver int, k config.Key) map[string]any {
 	created := float64(f.Created.Unix())
 	state := "Enabled"
+	if k.Usage() == config.UsageEncryptDecrypt {
+		return map[string]any{"KeyId": name, "Arn": f.arn(name), "CreationDate": created, "Enabled": true, "Description": "key " + name + " of the key service",
+			"KeyUsage": "ENCRYPT_DECRYPT", "KeyState": state, "KeySpec": "SYMMETRIC_DEFAULT", "CustomerMasterKeySpec": "SYMMETRIC_DEFAULT", "EncryptionAlgorithms": []string{algorithm},
+			"KeyManager": "CUSTOMER", "MultiRegion": false, "HsmgateVersion": ver, "HsmgateLatestVersion": len(k.Versions)}
+	}
 	return map[string]any{"KeyId": name, "Arn": f.arn(name), "CreationDate": created, "Enabled": true, "Description": "key " + name + " of the key service",
 		"KeyUsage": "KEY_AGREEMENT", "KeyState": state, "KeySpec": keySpec, "CustomerMasterKeySpec": keySpec, "KeyAgreementAlgorithms": []string{"ECDH"},
 		"KeyManager": "CUSTOMER", "MultiRegion": false, "HsmgateVersion": ver, "HsmgateLatestVersion": len(k.Versions)}
@@ -395,6 +420,8 @@ func peerPoint(der []byte) ([]byte, error) {
 func spki(point []byte) []byte {
 	return append([]byte{0x30, 0x59, 0x30, 0x13, 0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01, 0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07, 0x03, 0x42, 0x00}, point...)
 }
+
+func itoa(n int) string { return strconv.Itoa(n) }
 
 func requestID(r *http.Request) string {
 	if id := r.Header.Get("X-Request-Id"); id != "" && len(id) <= 64 && safeID(id) {

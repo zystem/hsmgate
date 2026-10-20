@@ -364,34 +364,8 @@ func (f *Face) open(k config.Key, ct string, aad []byte) ([]byte, error) {
 	if err != nil {
 		return nil, errBadCiphertext
 	}
-	// the holders in order: the next one is tried only when this one could not answer (locked, removed), never when it said the text is bad
-	var last error
-	for _, h := range k.Versions[n-1].Holders() {
-		tok := f.Tokens[h.Token]
-		point, err := tok.Point(h.Label)
-		if err == nil {
-			err = keyops.Pinned(k.Versions[n-1], point)
-		}
-		if err == nil {
-			var plain []byte
-			if plain, err = ecies.Unwrap(point, derive{tok, h.Label}, string(text), aad); err == nil {
-				return plain, nil
-			}
-		}
-		if !errors.Is(err, backend.ErrUnavailable) {
-			return nil, err
-		}
-		last = err
-	}
-	return nil, last
+	return keyops.Open(f.Tokens, k.Versions[n-1], string(text), aad)
 }
-
-type derive struct {
-	t     backend.Token
-	label string
-}
-
-func (d derive) Derive(peer []byte) ([]byte, error) { return d.t.Derive(d.label, peer) }
 
 func (f *Face) failTokenErr(done func(int, string, string, bool), err error) {
 	switch {

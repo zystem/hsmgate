@@ -1,0 +1,446 @@
+package kmsjson
+
+// The sealing operations of the face: Encrypt, Decrypt, ReEncrypt, GenerateDataKey, GenerateDataKeyWithoutPlaintext and GenerateRandom, for keys with the usage encrypt_decrypt.
+// The service seals and opens, as in the Transit face (ecies1; the token does only the ECDH of the opening), and it sees the plaintext while it works. The EncryptionContext of
+// the request is the additional data of the AEAD (a key in context mode) or must be absent (a key in fixed mode). The ciphertext blob is ours: opaque to clients, which only
+// carry it; it names the key and its version, so that Decrypt works without a KeyId, as clients expect.
+
+import (
+	"bytes"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/binary"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"sort"
+	"strings"
+
+	"github.com/zystem/hsmgate/internal/audit"
+	"github.com/zystem/hsmgate/internal/config"
+	"github.com/zystem/hsmgate/internal/keyops"
+	"github.com/zystem/hsmgate/internal/policy"
+	"github.com/zystem/hsmgate/internal/scheme/ecies"
+)
+
+const (
+	blobMagic    = "HGK1"
+	algorithm    = "SYMMETRIC_DEFAULT"
+	maxPlaintext = 4096 // the limit of the cloud service for Encrypt
+	maxRandom    = 1024
+	maxContext   = 1024 // written to the audit: keep a line small
+	usageErrText = "the key cannot be used for this operation"
+)
+
+// call is one authenticated request that is being served.
+type call struct {
+	f       *Face
+	w       http.ResponseWriter
+	r       *http.Request
+	client  string
+	ev      *audit.Event
+	refuse  func(status int, typ, msg, result string, retry bool)
+	succeed func(any)
+}
+
+type cryptoReq struct {
+	KeyID                          string            `json:"KeyId"`
+	Plaintext                      []byte            `json:"Plaintext"`
+	CiphertextBlob                 []byte            `json:"CiphertextBlob"`
+	EncryptionContext              map[string]string `json:"EncryptionContext"`
+	EncryptionAlgorithm            string            `json:"EncryptionAlgorithm"`
+	DryRun                         bool              `json:"DryRun"`
+	KeySpec                        string            `json:"KeySpec"`
+	NumberOfBytes                  *int              `json:"NumberOfBytes"`
+	SourceKeyID                    string            `json:"SourceKeyId"`
+	DestinationKeyID               string            `json:"DestinationKeyId"`
+	SourceEncryptionContext        map[string]string `json:"SourceEncryptionContext"`
+	DestinationEncryptionContext   map[string]string `json:"DestinationEncryptionContext"`
+	SourceEncryptionAlgorithm      string            `json:"SourceEncryptionAlgorithm"`
+	DestinationEncryptionAlgorithm string            `json:"DestinationEncryptionAlgorithm"`
+	CustomKeyStoreID               string            `json:"CustomKeyStoreId"`
+	Recipient                      json.RawMessage   `json:"Recipient"`
+}
+
+func isCryptoOp(op string) bool {
+	switch op {
+	case "Encrypt", "Decrypt", "ReEncrypt", "GenerateDataKey", "GenerateDataKeyWithoutPlaintext", "GenerateRandom":
+		return true
+	}
+	return false
+}
+
+func (c *call) crypto(op string, body []byte) {
+	var req cryptoReq
+	if err := json.Unmarshal(body, &req); err != nil {
+		c.refuse(400, "SerializationException", "the request is not valid JSON", "bad_request", false)
+		return
+	}
+	if len(req.Recipient) > 0 && string(req.Recipient) != "null" {
+		c.refuse(400, "ValidationException", "Recipient (an attestation document) is not supported", "bad_request", false)
+		return
+	}
+	if req.CustomKeyStoreID != "" {
+		c.refuse(400, "ValidationException", "custom key stores are not supported", "bad_request", false)
+		return
+	}
+	switch op {
+	case "GenerateRandom":
+		c.random(req)
+	case "Encrypt":
+		c.encrypt(req)
+	case "Decrypt":
+		c.decrypt(req)
+	case "ReEncrypt":
+		c.reencrypt(req)
+	default:
+		c.dataKey(op, req)
+	}
+}
+
+func okAlgorithm(a string) bool { return a == "" || a == algorithm }
+
+// target finds the key of an id for an operation and judges the request: the key is enabled for the face with the usage encrypt_decrypt, the client has the right and the budget,
+// and the context is acceptable. ver 0 is the latest.
+func (c *call) target(id string, ver int, op string, ctx map[string]string) (name string, v int, key config.Key, aad []byte, ok bool) {
+	f := c.f
+	name, idVer, found := f.resolve(id)
+	if !found || !f.Policy.Allowed(c.client, name) {
+		c.refuse(400, "AccessDeniedException", "the key does not exist or the client has no right to it", "forbidden", false)
+		return
+	}
+	if ver == 0 {
+		ver = idVer
+	}
+	key = f.Cfg.Keys[name]
+	c.ev.Key = name
+	if key.Usage() != config.UsageEncryptDecrypt {
+		c.refuse(400, "InvalidKeyUsageException", usageErrText, "bad_usage", false)
+		return
+	}
+	switch f.Policy.Check(c.client, name, op) {
+	case policy.Forbidden:
+		c.refuse(400, "AccessDeniedException", "the client has no right to "+op+" with this key", "forbidden", false)
+		return
+	case policy.Throttled:
+		c.w.Header().Set("Retry-After", "5")
+		c.refuse(400, "ThrottlingException", "rate limit exceeded", "throttled", true)
+		return
+	}
+	if ver == 0 {
+		ver = len(key.Versions)
+	}
+	if ver < 1 || ver > len(key.Versions) {
+		c.refuse(400, "InvalidCiphertextException", "the ciphertext is not valid for this key", "bad_ciphertext", false)
+		return
+	}
+	aad, ok = c.aadOf(name, key, ctx)
+	return name, ver, key, aad, ok
+}
+
+// aadOf: the additional data of a request. A key in fixed mode takes no context; a key in context mode needs one, which is made canonical (sorted "name=value" lines) and judged by the
+// same rules as the context of the Transit face.
+func (c *call) aadOf(name string, k config.Key, ctx map[string]string) ([]byte, bool) {
+	if k.AAD.Mode == "fixed" {
+		if len(ctx) > 0 {
+			c.refuse(400, "ValidationException", "this key takes no encryption context", "bad_context", false)
+			return nil, false
+		}
+		return []byte(k.FixedAAD(name)), true
+	}
+	if len(ctx) == 0 {
+		c.refuse(400, "ValidationException", "this key needs an encryption context", "bad_context", false)
+		return nil, false
+	}
+	names := make([]string, 0, len(ctx))
+	for n := range ctx {
+		if n == "" || strings.ContainsAny(n, "=\n") || strings.Contains(ctx[n], "\n") {
+			c.refuse(400, "ValidationException", "an encryption context name or value has a forbidden character", "bad_context", false)
+			return nil, false
+		}
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	var b strings.Builder
+	for i, n := range names {
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		b.WriteString(n + "=" + ctx[n])
+	}
+	aad := []byte(b.String())
+	if len(aad) > maxContext {
+		c.refuse(400, "ValidationException", "the encryption context is too long", "bad_context", false)
+		return nil, false
+	}
+	c.ev.Context = string(aad) // public by rule, as in the Transit face
+	if !anyLine(aad, func(l []byte) bool { return c.f.Policy.ContextOK(c.client, name, l) }) {
+		c.refuse(400, "AccessDeniedException", "the client has no right to this encryption context", "forbidden_context", false)
+		return nil, false
+	}
+	if !anyLine(aad, func(l []byte) bool { return policy.ContextAllowed(k, l) }) {
+		c.refuse(400, "ValidationException", "this encryption context is not allowed for this key", "bad_context", false)
+		return nil, false
+	}
+	return aad, true
+}
+
+// anyLine: the patterns of a key and of a grant are prefixes (as in the Transit face); a context here is a set of "name=value" lines, so it is allowed when one of its lines begins with
+// an allowed prefix, such as "purpose=dek". The same pattern, "purpose=dek", is then a requirement on the field "purpose".
+func anyLine(ctx []byte, ok func([]byte) bool) bool {
+	for _, l := range bytes.Split(ctx, []byte("\n")) {
+		if ok(l) {
+			return true
+		}
+	}
+	return false
+}
+
+func makeBlob(name string, ver int, text string) []byte {
+	b := append([]byte(blobMagic), byte(len(name)))
+	b = append(b, name...)
+	b = binary.BigEndian.AppendUint16(b, uint16(ver))
+	return append(b, text...)
+}
+
+var errBlob = errors.New("the ciphertext is not valid")
+
+func parseBlob(b []byte) (name string, ver int, text string, err error) {
+	if len(b) < len(blobMagic)+1+1+2+1 || string(b[:len(blobMagic)]) != blobMagic {
+		return "", 0, "", errBlob
+	}
+	n := int(b[len(blobMagic)])
+	rest := b[len(blobMagic)+1:]
+	if n == 0 || len(rest) < n+2+1 {
+		return "", 0, "", errBlob
+	}
+	name = string(rest[:n])
+	ver = int(binary.BigEndian.Uint16(rest[n : n+2]))
+	text = string(rest[n+2:])
+	if ver < 1 || !strings.HasPrefix(text, ecies.FormatTag+".") {
+		return "", 0, "", errBlob
+	}
+	return name, ver, text, nil
+}
+
+func (c *call) seal(name string, ver int, key config.Key, plain, aad []byte) ([]byte, bool) {
+	f := c.f
+	release, ok := f.Gate.Take(c.r.Context())
+	if !ok {
+		c.refuse(400, "ThrottlingException", "the service is busy", "busy", true)
+		return nil, false
+	}
+	defer release()
+	point, err := keyops.PointOf(f.Tokens, key.Versions[ver-1])
+	if err != nil {
+		f.tokenFailure(c.refuse, err)
+		return nil, false
+	}
+	text, err := ecies.Wrap(point, plain, aad)
+	if err != nil {
+		c.refuse(500, "KMSInternalException", "internal error", "internal_error", true)
+		return nil, false
+	}
+	return makeBlob(name, ver, text), true
+}
+
+func (c *call) open(key config.Key, ver int, text string, aad []byte) ([]byte, bool) {
+	f := c.f
+	release, ok := f.Gate.Take(c.r.Context())
+	if !ok {
+		c.refuse(400, "ThrottlingException", "the service is busy", "busy", true)
+		return nil, false
+	}
+	defer release()
+	plain, err := keyops.Open(f.Tokens, key.Versions[ver-1], text, aad)
+	if err != nil {
+		if errors.Is(err, ecies.ErrDamaged) || errors.Is(err, ecies.ErrWrongKey) {
+			c.refuse(400, "InvalidCiphertextException", "the ciphertext cannot be opened with this key and context", "bad_ciphertext", false)
+		} else {
+			f.tokenFailure(c.refuse, err)
+		}
+		return nil, false
+	}
+	return plain, true
+}
+
+func wipe(b []byte) {
+	for i := range b {
+		b[i] = 0
+	}
+}
+
+func b64(b []byte) string { return base64.StdEncoding.EncodeToString(b) }
+
+func (c *call) encrypt(req cryptoReq) {
+	if !okAlgorithm(req.EncryptionAlgorithm) {
+		c.refuse(400, "ValidationException", "EncryptionAlgorithm must be "+algorithm, "bad_request", false)
+		return
+	}
+	name, ver, key, aad, ok := c.target(req.KeyID, 0, "encrypt", req.EncryptionContext)
+	if !ok {
+		return
+	}
+	max := maxPlaintext
+	if key.MaxBytes > 0 && key.MaxBytes < max {
+		max = key.MaxBytes
+	}
+	if len(req.Plaintext) == 0 || len(req.Plaintext) > max {
+		c.refuse(400, "ValidationException", "Plaintext must be 1 to "+itoa(max)+" bytes", "bad_request", false)
+		return
+	}
+	if req.DryRun {
+		c.refuse(400, "DryRunOperationException", "the request would have succeeded, but the DryRun option is set", "dry_run", false)
+		return
+	}
+	blob, ok := c.seal(name, ver, key, req.Plaintext, aad)
+	if !ok {
+		return
+	}
+	c.succeed(map[string]any{"CiphertextBlob": b64(blob), "KeyId": c.f.arn(name), "EncryptionAlgorithm": algorithm})
+}
+
+// source reads the blob of a request and the key it names; id, when the client gave one, must be that key.
+func (c *call) source(blob []byte, id string, ctx map[string]string) (name string, ver int, key config.Key, text string, aad []byte, ok bool) {
+	bname, bver, text, err := parseBlob(blob)
+	if err != nil {
+		c.refuse(400, "InvalidCiphertextException", "the ciphertext is not valid", "bad_ciphertext", false)
+		return
+	}
+	if id != "" {
+		given, _, found := c.f.resolve(id)
+		if !found || !c.f.Policy.Allowed(c.client, given) {
+			c.refuse(400, "AccessDeniedException", "the key does not exist or the client has no right to it", "forbidden", false)
+			return
+		}
+		if given != bname {
+			c.ev.Key = given
+			c.refuse(400, "IncorrectKeyException", "the key does not match the ciphertext", "wrong_key", false)
+			return
+		}
+	}
+	name, ver, key, aad, ok = c.target(bname, bver, "decrypt", ctx)
+	return name, ver, key, text, aad, ok
+}
+
+func (c *call) decrypt(req cryptoReq) {
+	if !okAlgorithm(req.EncryptionAlgorithm) {
+		c.refuse(400, "ValidationException", "EncryptionAlgorithm must be "+algorithm, "bad_request", false)
+		return
+	}
+	name, ver, key, text, aad, ok := c.source(req.CiphertextBlob, req.KeyID, req.EncryptionContext)
+	if !ok {
+		return
+	}
+	if req.DryRun {
+		c.refuse(400, "DryRunOperationException", "the request would have succeeded, but the DryRun option is set", "dry_run", false)
+		return
+	}
+	plain, ok := c.open(key, ver, text, aad)
+	if !ok {
+		return
+	}
+	defer wipe(plain)
+	c.succeed(map[string]any{"KeyId": c.f.arn(name), "Plaintext": b64(plain), "EncryptionAlgorithm": algorithm})
+}
+
+func (c *call) reencrypt(req cryptoReq) {
+	if !okAlgorithm(req.SourceEncryptionAlgorithm) || !okAlgorithm(req.DestinationEncryptionAlgorithm) {
+		c.refuse(400, "ValidationException", "the encryption algorithm must be "+algorithm, "bad_request", false)
+		return
+	}
+	if req.DestinationKeyID == "" {
+		c.refuse(400, "ValidationException", "DestinationKeyId is required", "bad_request", false)
+		return
+	}
+	sname, sver, skey, text, saad, ok := c.source(req.CiphertextBlob, req.SourceKeyID, req.SourceEncryptionContext)
+	if !ok {
+		return
+	}
+	dname, dver, dkey, daad, ok := c.target(req.DestinationKeyID, 0, "encrypt", req.DestinationEncryptionContext)
+	if !ok {
+		return
+	}
+	c.ev.Key = sname
+	c.ev.Context = "to=" + dname
+	_ = dver
+	if req.DryRun {
+		c.refuse(400, "DryRunOperationException", "the request would have succeeded, but the DryRun option is set", "dry_run", false)
+		return
+	}
+	plain, ok := c.open(skey, sver, text, saad)
+	if !ok {
+		return
+	}
+	defer wipe(plain)
+	blob, ok := c.seal(dname, len(dkey.Versions), dkey, plain, daad)
+	if !ok {
+		return
+	}
+	c.succeed(map[string]any{"CiphertextBlob": b64(blob), "SourceKeyId": c.f.arn(sname), "KeyId": c.f.arn(dname),
+		"SourceEncryptionAlgorithm": algorithm, "DestinationEncryptionAlgorithm": algorithm})
+}
+
+func (c *call) dataKey(op string, req cryptoReq) {
+	if !okAlgorithm(req.EncryptionAlgorithm) {
+		c.refuse(400, "ValidationException", "EncryptionAlgorithm must be "+algorithm, "bad_request", false)
+		return
+	}
+	var n int
+	switch {
+	case req.KeySpec != "" && req.NumberOfBytes != nil:
+		c.refuse(400, "ValidationException", "give KeySpec or NumberOfBytes, not both", "bad_request", false)
+		return
+	case req.KeySpec == "AES_256":
+		n = 32
+	case req.KeySpec == "AES_128":
+		n = 16
+	case req.KeySpec == "" && req.NumberOfBytes != nil && *req.NumberOfBytes >= 1 && *req.NumberOfBytes <= maxRandom:
+		n = *req.NumberOfBytes
+	default:
+		c.refuse(400, "ValidationException", "KeySpec must be AES_128 or AES_256, or NumberOfBytes 1 to "+itoa(maxRandom), "bad_request", false)
+		return
+	}
+	name, ver, key, aad, ok := c.target(req.KeyID, 0, "encrypt", req.EncryptionContext)
+	if !ok {
+		return
+	}
+	if req.DryRun {
+		c.refuse(400, "DryRunOperationException", "the request would have succeeded, but the DryRun option is set", "dry_run", false)
+		return
+	}
+	dek := make([]byte, n)
+	if _, err := rand.Read(dek); err != nil {
+		c.refuse(500, "KMSInternalException", "internal error", "internal_error", true)
+		return
+	}
+	defer wipe(dek)
+	blob, ok := c.seal(name, ver, key, dek, aad)
+	if !ok {
+		return
+	}
+	out := map[string]any{"CiphertextBlob": b64(blob), "KeyId": c.f.arn(name)}
+	if op == "GenerateDataKey" {
+		out["Plaintext"] = b64(dek)
+	}
+	c.succeed(out)
+}
+
+// random: bytes of the operating system's generator, not of the token (a card's generator is slow and a single session; the bytes are not secret keys of the service).
+func (c *call) random(req cryptoReq) {
+	if req.NumberOfBytes == nil || *req.NumberOfBytes < 1 || *req.NumberOfBytes > maxRandom {
+		c.refuse(400, "ValidationException", "NumberOfBytes must be 1 to "+itoa(maxRandom), "bad_request", false)
+		return
+	}
+	if c.f.Policy.CheckList(c.client) != policy.Allow {
+		c.refuse(400, "ThrottlingException", "rate limit exceeded", "throttled", true)
+		return
+	}
+	b := make([]byte, *req.NumberOfBytes)
+	if _, err := rand.Read(b); err != nil {
+		c.refuse(500, "KMSInternalException", "internal error", "internal_error", true)
+		return
+	}
+	defer wipe(b)
+	c.succeed(map[string]any{"Plaintext": b64(b)})
+}

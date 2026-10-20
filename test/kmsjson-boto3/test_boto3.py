@@ -72,12 +72,13 @@ kmsjson: {{enabled: true, region: local}}
 tokens: [{{name: soft, type: soft, keys: {{m1: {f('k1.hex')}, m2: {f('k2.hex')}}}}}]
 keys:
   etcd: {{kmsjson: true, versions: [{{token: soft, label: m1}}, {{token: soft, label: m2}}], aad: {{mode: fixed}}}}
+  seal: {{kmsjson: true, kmsjson_usage: encrypt_decrypt, versions: [{{token: soft, label: m1}}], aad: {{mode: fixed}}}}
   hidden: {{versions: [{{token: soft, label: m1}}], aad: {{mode: fixed}}}}
 clients:
   - name: boto
     identity: {{cn: boto-client}}
     sigv4: {{access_key_id: {AKID}, secret_file: {f('sigv4-secret')}}}
-    keys: {{etcd: {{ops: [derive]}}}}
+    keys: {{etcd: {{ops: [derive]}}, seal: {{ops: [encrypt, decrypt]}}}}
 """.encode())
     PROC = subprocess.Popen([BIN, "serve", "-config", f("hsmgate.yaml")])
     host, port = addr.split(":")
@@ -128,8 +129,29 @@ class KMSJSON(unittest.TestCase):
         md = c.describe_key(KeyId="etcd")["KeyMetadata"]
         self.assertEqual((md["KeyId"], md["Enabled"], md["KeyState"], md["KeyUsage"]), ("etcd", True, "Enabled", "KEY_AGREEMENT"))
         self.assertIn("CreationDate", md)
-        self.assertEqual([k["KeyId"] for k in c.list_keys()["Keys"]], ["etcd"])
-        self.assertEqual([a["AliasName"] for a in c.list_aliases()["Aliases"]], ["alias/etcd"])
+        self.assertEqual(sorted(k["KeyId"] for k in c.list_keys()["Keys"]), ["etcd", "seal"])
+        self.assertEqual(sorted(a["AliasName"] for a in c.list_aliases()["Aliases"]), ["alias/etcd", "alias/seal"])
+
+    def test_encrypt_decrypt_and_data_keys(self):
+        c = mtls_client()
+        md = c.describe_key(KeyId="seal")["KeyMetadata"]
+        self.assertEqual((md["KeyUsage"], md["KeySpec"]), ("ENCRYPT_DECRYPT", "SYMMETRIC_DEFAULT"))
+        enc = c.encrypt(KeyId="alias/seal", Plaintext=b"hello")
+        dec = c.decrypt(CiphertextBlob=enc["CiphertextBlob"])  # no KeyId, as services do
+        self.assertEqual((dec["Plaintext"], dec["KeyId"]), (b"hello", enc["KeyId"]))
+        dk = c.generate_data_key(KeyId="seal", KeySpec="AES_256")
+        self.assertEqual(len(dk["Plaintext"]), 32)
+        self.assertEqual(c.decrypt(CiphertextBlob=dk["CiphertextBlob"], KeyId="seal")["Plaintext"], dk["Plaintext"])
+        re = c.re_encrypt(CiphertextBlob=enc["CiphertextBlob"], DestinationKeyId="seal")
+        self.assertEqual(c.decrypt(CiphertextBlob=re["CiphertextBlob"])["Plaintext"], b"hello")
+        self.assertEqual(len(c.generate_random(NumberOfBytes=40)["Plaintext"]), 40)
+        bad = bytearray(enc["CiphertextBlob"]); bad[-2] ^= 1
+        with self.assertRaises(ClientError) as e:
+            c.decrypt(CiphertextBlob=bytes(bad))
+        self.assertEqual(code(e), "InvalidCiphertextException")
+        with self.assertRaises(ClientError) as e:
+            c.encrypt(KeyId="etcd", Plaintext=b"x")
+        self.assertEqual(code(e), "InvalidKeyUsageException")
 
     def test_errors(self):
         c = mtls_client()

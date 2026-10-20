@@ -134,3 +134,28 @@ clients:
 		t.Error("a credential with the face off was accepted")
 	}
 }
+
+func TestKMSJSONUsage(t *testing.T) {
+	base := func(keys string) string {
+		return "kmsjson: {enabled: true}\ntokens: [{name: t, type: soft, keys: {m: /x}}]\nkeys:\n" + keys + "clients:\n  - {name: a, identity: {cn: x}, sigv4: {access_key_id: AKIAEXAMPLEEXAMPLE1, secret_file: /s}, keys: {s: {ops: [encrypt, decrypt]}}}\n"
+	}
+	v := "versions: [{token: t, label: m}]"
+	// a sealing key may be in context mode: the context is checked on this face
+	if _, err := Parse([]byte(base("  s: {kmsjson: true, kmsjson_usage: encrypt_decrypt, " + v + ", aad: {mode: context, allow: [\"purpose=dek\"]}}\n"))); err != nil {
+		t.Errorf("a sealing key in context mode: %v", err)
+	}
+	for name, keys := range map[string]string{
+		"usage without kmsjson":    "  s: {kmsjson_usage: encrypt_decrypt, " + v + ", aad: {mode: fixed}}\n",
+		"an unknown usage":         "  s: {kmsjson: true, kmsjson_usage: sign, " + v + ", aad: {mode: fixed}}\n",
+		"key agreement in context": "  s: {kmsjson: true, kmsjson_usage: key_agreement, " + v + ", aad: {mode: context, allow: [\"a\"]}}\n",
+	} {
+		if _, err := Parse([]byte(base(keys))); err == nil {
+			t.Errorf("%s was accepted", name)
+		}
+	}
+	// derive is for key agreement only
+	derive := "kmsjson: {enabled: true}\ntokens: [{name: t, type: soft, keys: {m: /x}}]\nkeys:\n  s: {kmsjson: true, kmsjson_usage: encrypt_decrypt, " + v + ", aad: {mode: fixed}}\nclients:\n  - {name: a, identity: {cn: x}, sigv4: {access_key_id: AKIAEXAMPLEEXAMPLE1, secret_file: /s}, keys: {s: {ops: [derive]}}}\n"
+	if _, err := Parse([]byte(derive)); err == nil {
+		t.Error("derive on a sealing key was accepted")
+	}
+}

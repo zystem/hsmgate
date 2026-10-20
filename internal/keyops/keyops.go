@@ -57,4 +57,34 @@ func Derive(tokens map[string]backend.Token, v config.Version, peer []byte) ([]b
 	return nil, last
 }
 
+// Open opens an ecies1 text sealed to a version: the holders in order, the next only when this one could not answer (locked, removed), never when it said the text is bad.
+func Open(tokens map[string]backend.Token, v config.Version, text string, aad []byte) ([]byte, error) {
+	var last error
+	for _, h := range v.Holders() {
+		tok := tokens[h.Token]
+		point, err := tok.Point(h.Label)
+		if err == nil {
+			err = Pinned(v, point)
+		}
+		if err == nil {
+			var plain []byte
+			if plain, err = ecies.Unwrap(point, deriver{tok, h.Label}, text, aad); err == nil {
+				return plain, nil
+			}
+		}
+		if !isUnavailable(err) {
+			return nil, err
+		}
+		last = err
+	}
+	return nil, last
+}
+
+type deriver struct {
+	t     backend.Token
+	label string
+}
+
+func (d deriver) Derive(peer []byte) ([]byte, error) { return d.t.Derive(d.label, peer) }
+
 func isUnavailable(err error) bool { return err != nil && errorsIs(err, backend.ErrUnavailable) }
