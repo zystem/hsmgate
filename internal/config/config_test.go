@@ -171,6 +171,14 @@ func TestNoCertRules(t *testing.T) {
 	if _, err := Parse([]byte(base + cl("no_cert: true, allow_from: [10.0.0.0/8, 192.168.1.5]", "s: {ops: [encrypt, decrypt]}"))); err != nil {
 		t.Fatalf("a valid client without a certificate: %v", err)
 	}
+	// signing and MAC keys are allowed without a certificate too (cosign, Terraform and others cannot show one)
+	more := "  sg: {kmsjson: true, kmsjson_usage: sign_verify, versions: [{token: t, label: n}], aad: {mode: fixed}}\n"
+	more2 := "  mk: {kmsjson: true, kmsjson_usage: generate_verify_mac, versions: [{token: t, label: o}], aad: {mode: fixed}}\n"
+	withTokens := strings.Replace(base, "keys: {m: /x}", "keys: {m: /x, n: /y, o: /z}", 1)
+	clients := "  - {name: a, sigv4: {access_key_id: AKIAEXAMPLEEXAMPLE1, secret_file: /s, no_cert: true, allow_from: [10.0.0.0/8]}, keys: {sg: {ops: [sign, verify]}, mk: {ops: [generate_mac, verify_mac]}}}\n"
+	if _, err := Parse([]byte(strings.Replace(withTokens, "clients:\n", more+more2+"clients:\n", 1) + clients)); err != nil {
+		t.Errorf("a client without a certificate with a signing key and a MAC key: %v", err)
+	}
 	for name, c := range map[string]string{
 		"no address list":         cl("no_cert: true", "s: {ops: [encrypt]}"),
 		"a bad address":           cl("no_cert: true, allow_from: [nonsense]", "s: {ops: [encrypt]}"),

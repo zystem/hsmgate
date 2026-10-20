@@ -144,8 +144,9 @@ type SigV4 struct {
 	// AllowFrom limits the addresses this credential may be used from (addresses or CIDR blocks; the address of the TCP peer, never a header). Empty: any, which NoCert does not allow.
 	AllowFrom []string `yaml:"allow_from"`
 	// NoCert: this client may call with the signature alone, without a client certificate, for programs that cannot present one (the SDKs of cloud key services take only a CA bundle).
-	// It is one proof instead of two: the secret is then the only thing that says who calls, and it must be 32 bytes or more. Allowed only for keys of the usage encrypt_decrypt and
-	// the rights encrypt and decrypt, from listed addresses. The client needs no identity (if it has one, a certificate that is shown must still agree).
+	// It is one proof instead of two: the secret is then the only thing that says who calls, and it must be 32 bytes or more. Allowed for keys of the usages encrypt_decrypt, sign_verify
+	// and generate_verify_mac (not key_agreement), from listed addresses. A secret that is stolen and used from a listed address signs or makes MACs as the client: give such a client
+	// keys of its own and per_minute limits. The client needs no identity (if it has one, a certificate that is shown must still agree).
 	NoCert bool `yaml:"no_cert"`
 }
 
@@ -467,12 +468,13 @@ func (c *Config) validateKMSJSON() error {
 					return fmt.Errorf("client %s: sigv4.no_cert needs sigv4.allow_from (a client without a certificate is held to listed addresses)", cl.Name)
 				}
 				for key, g := range cl.Keys {
-					if k := c.Keys[key]; !k.KMSJSON || k.Usage() != UsageEncryptDecrypt {
-						return fmt.Errorf("client %s key %s: a client without a certificate may use keys with kmsjson_usage encrypt_decrypt only", cl.Name, key)
+					// the usage key_agreement (DeriveSharedSecret) needs a certificate: it opens whatever is sealed to the key and has no context to check
+					if k := c.Keys[key]; !k.KMSJSON || k.Usage() == UsageKeyAgreement {
+						return fmt.Errorf("client %s key %s: a client without a certificate may use keys with kmsjson_usage encrypt_decrypt, sign_verify or generate_verify_mac, not key_agreement", cl.Name, key)
 					}
 					for _, op := range g.Ops {
-						if op != "encrypt" && op != "decrypt" {
-							return fmt.Errorf("client %s key %s: a client without a certificate may have the rights encrypt and decrypt only", cl.Name, key)
+						if op == "derive" || op == "rewrap" {
+							return fmt.Errorf("client %s key %s: a client without a certificate may not have the right %s", cl.Name, key, op)
 						}
 					}
 				}

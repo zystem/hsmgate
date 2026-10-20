@@ -13,7 +13,7 @@ What a client needs:
 | Key id | the name of the key in `hsmgate.yaml` (`app`), `alias/app`, or `arn:hsmgate:kms:<region>:000000000000:key/app`; `app@2` asks for version 2 |
 | Client certificate | **required** unless the client has `sigv4.no_cert: true` (see the specification, section 5: one proof instead of two, listed addresses, sealing keys only) |
 
-Most programs cannot show a client certificate (the SDKs take only a CA bundle), so they need a client with `no_cert: true`, and for that the keys they use must have `kmsjson_usage: encrypt_decrypt` (`Encrypt`, `Decrypt`, `GenerateDataKey`). Signing, MAC and `DeriveSharedSecret` need the certificate: use an SDK that can pass one (below) or a TLS front that presents it.
+Most programs cannot show a client certificate (the SDKs take only a CA bundle), so they need a client with `no_cert: true`. That client may use keys with `kmsjson_usage: encrypt_decrypt` (`Encrypt`, `Decrypt`, `GenerateDataKey`), `sign_verify` (`Sign`, `Verify`: cosign, Terraform, code signing) and `generate_verify_mac` (`GenerateMac`, `VerifyMac`). `DeriveSharedSecret` (keys with `key_agreement`) needs the certificate: use an SDK that can pass one (below) or a TLS front that presents it. A stolen secret used from a listed address signs or makes MACs as that client, so give such a client keys of its own, `per_minute` limits and the shortest `allow_from` that works.
 
 A client in `hsmgate.yaml`:
 
@@ -100,7 +100,7 @@ Same `seal "awskms"` block as for OpenBao (above), but Vault's wrapper hands its
 
 ## cosign (tried, 3.1.4): `awskms://`
 
-`cosign sign-blob` and `verify-blob` with `--key awskms://<host>:<port>/alias/<name>` work, signing through the face and verifying with the public key from `GetPublicKey`. Three things to know: cosign accepts a key **id** only as a UUID, so name the key by **alias** (`alias/<name>`), which hsmgate keys always have; it builds `https://<host>:<port>` itself, so the endpoint must be TLS; and it cannot show a client certificate, while signing needs one: put a **TLS front that presents the certificate** in front of hsmgate (a few lines of Go with `httputil.ReverseProxy`; keep the `Host` header, the signature covers it) and make cosign trust the front with `SSL_CERT_FILE`.
+`cosign sign-blob` and `verify-blob` with `--key awskms://<host>:<port>/alias/<name>` work, signing through the face and verifying with the public key from `GetPublicKey`. Two things to know: cosign accepts a key **id** only as a UUID, so name the key by **alias** (`alias/<name>`), which hsmgate keys always have; and it builds `https://<host>:<port>` itself, so the endpoint must be TLS, trusted with `SSL_CERT_FILE`. Signing needs no certificate when the client has `sigv4.no_cert: true` with a `sign_verify` key (the first test used a TLS front that presents a certificate, a few lines of Go with `httputil.ReverseProxy` that keeps the `Host` header; a front is still the way for a client that must be held to mutual TLS but cannot show a certificate).
 
 ## Terraform (tried, 1.16.6, provider aws)
 

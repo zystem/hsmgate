@@ -49,7 +49,7 @@ keys:
   ecdh:  {kmsjson: true, versions: [{token: soft, label: m1}], aad: {mode: fixed}}
 clients:
   - {name: app, identity: {cn: app}, sigv4: {access_key_id: ` + akid + `, secret_file: /unused}, keys: {seal: {ops: [encrypt, decrypt]}, seal2: {ops: [encrypt]}, org: {ops: [encrypt, decrypt]}, ecdh: {ops: [derive, encrypt]}, sig: {ops: [sign, verify]}, mac: {ops: [generate_mac, verify_mac]}, macrot: {ops: [generate_mac, verify_mac]}}}
-  - {name: bot, sigv4: {access_key_id: AKIDBOTBOTBOTBOT00, secret_file: /unused, no_cert: true, allow_from: [127.0.0.0/8]}, keys: {seal: {ops: [encrypt, decrypt]}}}
+  - {name: bot, sigv4: {access_key_id: AKIDBOTBOTBOTBOT00, secret_file: /unused, no_cert: true, allow_from: [127.0.0.0/8]}, keys: {seal: {ops: [encrypt, decrypt]}, sig: {ops: [sign, verify]}, mac: {ops: [generate_mac, verify_mac]}}}
   - {name: reader, identity: {cn: reader}, sigv4: {access_key_id: AKIDVIEWERVIEWER00, secret_file: /unused}, keys: {seal: {ops: [decrypt]}}}
 `))
 	if err != nil {
@@ -687,4 +687,42 @@ func TestAnIdentifierGivenByTheClientIsGivenBack(t *testing.T) {
 			t.Errorf("%q was echoed", odd)
 		}
 	}
+}
+
+// A credential without a certificate signs and makes MACs too (cosign, Terraform and others cannot show a certificate): the same rights, the same audit, the same address list.
+func TestCertlessSignAndMac(t *testing.T) {
+	r := cryptoRig(t)
+	msg := []byte("release v1")
+	st, sg := r.certless("AKIDBOTBOTBOTBOT00", "Sign", map[string]any{"KeyId": "alias/sig", "Message": msg, "SigningAlgorithm": "ECDSA_SHA_256"})
+	if st != 200 {
+		t.Fatalf("Sign: %d %v", st, sg)
+	}
+	if st, out := r.certless("AKIDBOTBOTBOTBOT00", "Verify", map[string]any{"KeyId": "sig", "Message": msg, "Signature": mustB64(t, sg["Signature"]), "SigningAlgorithm": "ECDSA_SHA_256"}); st != 200 || out["SignatureValid"] != true {
+		t.Errorf("Verify: %d %v", st, out)
+	}
+	st, mc := r.certless("AKIDBOTBOTBOTBOT00", "GenerateMac", map[string]any{"KeyId": "mac", "Message": msg, "MacAlgorithm": "HMAC_SHA_256"})
+	if st != 200 {
+		t.Fatalf("GenerateMac: %d %v", st, mc)
+	}
+	if st, out := r.certless("AKIDBOTBOTBOTBOT00", "VerifyMac", map[string]any{"KeyId": "mac", "Message": msg, "Mac": mustB64(t, mc["Mac"]), "MacAlgorithm": "HMAC_SHA_256"}); st != 200 || out["MacValid"] != true {
+		t.Errorf("VerifyMac: %d %v", st, out)
+	}
+	// the rights are the grants: a key the bot has no grant on, and the other credentials without a certificate, stay refused
+	if st, out := r.certless("AKIDBOTBOTBOTBOT00", "GenerateMac", map[string]any{"KeyId": "macrot", "Message": msg, "MacAlgorithm": "HMAC_SHA_256"}); st != 400 || typ(out) != "AccessDeniedException" {
+		t.Errorf("a key without a grant: %d %v", st, out)
+	}
+	if st, out := r.certless(akid, "Sign", map[string]any{"KeyId": "sig", "Message": msg, "SigningAlgorithm": "ECDSA_SHA_256"}); st != 403 {
+		t.Errorf("a credential that did not ask for it: %d %v", st, out)
+	}
+	if a := r.audit.String(); !strings.Contains(a, `"client":"bot","face":"kmsjson","key":"sig","op":"sign"`) {
+		t.Errorf("audit: %s", a)
+	}
+}
+
+func mustB64(t *testing.T, v any) []byte {
+	b, err := base64.StdEncoding.DecodeString(v.(string))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
 }
