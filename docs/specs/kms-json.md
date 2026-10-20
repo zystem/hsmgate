@@ -74,3 +74,7 @@ Rules checked at load: a `kmsjson` key of usage `key_agreement` must be `aad.mod
 ## 6. Tests
 
 Unit tests per package; a server test with both faces on one mTLS listener; `test/kmsjson-sdk` builds the real binary and calls it with the official Go SDK (shared secret equals local ECDH, versions, listings, error codes, wrong secret, unknown access key, unsupported operation). `test/kmsjson-boto3` does the same with the vendor's Python SDK (a second, independent client). Both run in CI.
+
+## 7. Verified with a real program (2026-10-20)
+
+OpenBao v2.6.1 with `seal "awskms"` (`endpoint` = hsmgate, `kms_key_id = seal`, `AWS_CA_BUNDLE` = the CA of the service, a credential of a client with `no_cert: true` and `allow_from: [127.0.0.1]`, a soft key with `kmsjson_usage: encrypt_decrypt`): `operator init`, a secret written, OpenBao stopped and started again; it unsealed by itself through hsmgate (`describekey`, `decrypt`, `encrypt` as client `openbao` in the audit) and returned the secret. OpenBao 2.6 warns that this seal moves into an external plugin in the next minor release. Not tried: SOPS, a card behind the key.
