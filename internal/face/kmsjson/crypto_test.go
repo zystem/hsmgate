@@ -601,3 +601,34 @@ func TestMacVersions(t *testing.T) {
 		t.Errorf("version 1: %d %v", st, out)
 	}
 }
+
+func TestReloadDropsDerivedMacKeys(t *testing.T) {
+	r := cryptoRig(t)
+	n := 0
+	r.face.Tokens["soft"] = countingToken{r.face.Tokens["soft"], &n}
+	r.cfg.KMSJSON.MacCacheSeconds = 60
+	gen := func() {
+		r.app("GenerateMac", map[string]any{"KeyId": "mac", "Message": []byte("m"), "MacAlgorithm": "HMAC_SHA_256"})
+	}
+	gen()
+	gen()
+	if n != 1 {
+		t.Fatalf("cache: %d", n)
+	}
+	r.face.Reload(r.cfg, r.face.Tokens, r.face.Policy, r.face.Identify, r.face.Creds)
+	gen()
+	if n != 2 {
+		t.Errorf("after a reload the key is derived again: %d", n)
+	}
+}
+
+func TestPeerAddressWithAZone(t *testing.T) {
+	req := &http.Request{RemoteAddr: "[fe80::1%eth0]:5555"}
+	a := peerAddr(req)
+	if !a.IsValid() || a.Zone() != "" || !fromAllowed([]netip.Prefix{netip.MustParsePrefix("fe80::/10")}, a) {
+		t.Errorf("%v", a)
+	}
+	if a := peerAddr(&http.Request{RemoteAddr: "[::ffff:10.1.2.3]:1"}); !fromAllowed([]netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")}, a) {
+		t.Errorf("a mapped address: %v", a)
+	}
+}

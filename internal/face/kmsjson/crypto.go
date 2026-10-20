@@ -406,7 +406,6 @@ func (c *call) reencrypt(req cryptoReq) {
 	}
 	c.ev.Key = sname
 	c.ev.Context = "to=" + dname
-	_ = dver
 	if req.DryRun {
 		c.refuse(400, "DryRunOperationException", "the request would have succeeded, but the DryRun option is set", "dry_run", false)
 		return
@@ -416,7 +415,7 @@ func (c *call) reencrypt(req cryptoReq) {
 		return
 	}
 	defer wipe(plain)
-	blob, ok := c.seal(dname, len(dkey.Versions), dkey, plain, daad)
+	blob, ok := c.seal(dname, dver, dkey, plain, daad) // the version the destination id names, else the latest
 	if !ok {
 		return
 	}
@@ -617,6 +616,19 @@ func (k *macCache) get(id string, now time.Time) ([]byte, bool) {
 		return nil, false
 	}
 	return e.key, true
+}
+
+// clear drops every derived key (a reload: the configuration, the clients or the tokens may have changed).
+func (k *macCache) clear() {
+	if k == nil {
+		return
+	}
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	for id, e := range k.m {
+		wipe(e.key)
+		delete(k.m, id)
+	}
 }
 
 func (k *macCache) put(id string, key []byte, until time.Time) {

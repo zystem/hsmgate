@@ -86,6 +86,7 @@ func (f *Face) Reload(cfg *config.Config, tokens map[string]backend.Token, pol *
 	defer f.mu.Unlock()
 	old := f.track
 	f.Cfg, f.Tokens, f.Policy, f.Identify, f.Creds = cfg, tokens, pol, id, creds
+	f.MacKeys.clear() // a reload drops the MAC keys that were derived under the previous generation
 	f.track = &tracker{}
 	if old == nil {
 		return func() {}
@@ -118,6 +119,14 @@ func IsKMSJSON(r *http.Request) bool {
 	return r.Method == http.MethodPost && strings.HasPrefix(r.Header.Get("X-Amz-Target"), targetStart)
 }
 
+func knownOp(op string) bool {
+	switch op {
+	case "GetPublicKey", "DescribeKey", "ListKeys", "ListAliases", "DeriveSharedSecret":
+		return true
+	}
+	return isCryptoOp(op)
+}
+
 func (f *Face) noCertificate(r *http.Request) bool {
 	if f.NoCertificate != nil {
 		return f.NoCertificate(r)
@@ -135,7 +144,7 @@ func peerAddr(r *http.Request) netip.Addr {
 	if err != nil {
 		return netip.Addr{}
 	}
-	return a.Unmap()
+	return a.Unmap().WithZone("") // a zone (fe80::1%eth0) would make a prefix never contain the address
 }
 
 func fromAllowed(from []netip.Prefix, a netip.Addr) bool {
@@ -160,6 +169,9 @@ func (f *Face) serve(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("x-amzn-RequestId", rid)
 	op := strings.TrimPrefix(r.Header.Get("X-Amz-Target"), targetStart)
 	ev := audit.Event{RequestID: rid, Face: face, Op: strings.ToLower(op)}
+	if !knownOp(op) { // the name is the peer's, and the line is written before anyone is known: a long or odd name must not reach the log
+		ev.Op = "unknown"
+	}
 	refuse := func(status int, typ, msg, result string, retry bool) {
 		ev.Result = result
 		f.Audit.Write(ev)

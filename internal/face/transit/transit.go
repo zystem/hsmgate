@@ -160,7 +160,7 @@ func (f *Face) serve(w http.ResponseWriter, r *http.Request) {
 		reply(w, 200, payload)
 	}
 	if !ok {
-		ev.Client = ""
+		ev.Client, ev.Key, ev.Op = "", "", "unknown" // the path is the peer's, and with no certificate nobody is known: a long or odd name must not reach the log
 		done(403, "unauthenticated", "permission denied", false)
 		return
 	}

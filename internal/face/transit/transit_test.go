@@ -187,6 +187,18 @@ func TestDenyByDefault(t *testing.T) {
 	}
 }
 
+// A peer with no certificate chooses the path, and nobody is known: its key and operation names do not reach the log.
+func TestAnonymousNamesAreNotLogged(t *testing.T) {
+	r := newRig(t, nil)
+	long := strings.Repeat("k", 3000)
+	if st, _, _ := r.call("", "PUT", "/v1/transit/encrypt/"+long, map[string]string{"plaintext": b64("x")}); st != 403 {
+		t.Fatalf("%d", st)
+	}
+	if a := r.audit.String(); strings.Contains(a, long) || !strings.Contains(a, `"op":"unknown"`) {
+		t.Errorf("audit: %.200s", a)
+	}
+}
+
 func TestRateLimit(t *testing.T) {
 	r := newRig(t, nil)
 	r.cfg.Clients[1].Keys["cinim"] = config.Grant{Ops: []string{"encrypt", "decrypt"}, PerMinute: 3}

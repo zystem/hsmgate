@@ -359,3 +359,20 @@ func TestOnlyTheTargetOfThisFaceIsServed(t *testing.T) {
 		t.Error("a Transit request was taken for this face")
 	}
 }
+
+// The name of the operation is the peer's: an unknown or long one is logged as "unknown", also for a request that is not signed.
+func TestUnknownOperationNameIsNotLogged(t *testing.T) {
+	r := newRig(t, nil)
+	long := strings.Repeat("A", 3000)
+	req, _ := http.NewRequest("POST", r.srv.URL+"/", strings.NewReader("{}"))
+	req.Header.Set("X-Amz-Target", "TrentService."+long)
+	req.Header.Set("X-Test-Client", "shop")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if a := r.audit.String(); strings.Contains(a, long) || !strings.Contains(a, `"op":"unknown"`) {
+		t.Errorf("audit: %.200s", a)
+	}
+}
