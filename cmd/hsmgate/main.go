@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -93,19 +94,25 @@ func main() {
 		}
 	}()
 	stop := make(chan os.Signal, 1)
+	stopped := make(chan struct{})
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		<-stop
-		s.Close()
+		s.Close() // stops the listener, then logs the tokens out and makes them forget the PIN
 		fmt.Fprintln(os.Stderr, "hsmgate: stopped, tokens logged out")
-		os.Exit(0)
+		close(stopped)
 	}()
 	l, err := net.Listen("tcp", cfg.Listen)
 	if err != nil {
 		die(err)
 	}
 	fmt.Fprintln(os.Stderr, "hsmgate: listening on", l.Addr())
-	die(s.Serve(l))
+	err = s.Serve(l)
+	if errors.Is(err, http.ErrServerClosed) { // a requested stop is not a failure: wait for the tokens to be closed, exit 0
+		<-stopped
+		return
+	}
+	die(err)
 }
 
 // unlock hands a PIN to the running service over its admin socket. The PIN is read from the terminal without echo (or from standard input) and is never an argument.
