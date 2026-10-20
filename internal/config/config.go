@@ -4,6 +4,7 @@ package config
 import (
 	"encoding/hex"
 	"fmt"
+	"net/netip"
 	"net/url"
 	"os"
 	"strings"
@@ -127,6 +128,30 @@ type Client struct {
 type SigV4 struct {
 	AccessKeyID string `yaml:"access_key_id"`
 	SecretFile  string `yaml:"secret_file"`
+	// AllowFrom limits the addresses this credential may be used from (addresses or CIDR blocks; the address of the TCP peer, never a header). Empty: any, which NoCert does not allow.
+	AllowFrom []string `yaml:"allow_from"`
+	// NoCert: this client may call with the signature alone, without a client certificate, for programs that cannot present one (the SDKs of cloud key services take only a CA bundle).
+	// It is one proof instead of two: the secret is then the only thing that says who calls, and it must be 32 bytes or more. Allowed only for keys of the usage encrypt_decrypt and
+	// the rights encrypt and decrypt, from listed addresses. The client needs no identity (if it has one, a certificate that is shown must still agree).
+	NoCert bool `yaml:"no_cert"`
+}
+
+// Prefixes reads AllowFrom.
+func (s SigV4) Prefixes() ([]netip.Prefix, error) {
+	var out []netip.Prefix
+	for _, a := range s.AllowFrom {
+		if p, err := netip.ParsePrefix(a); err == nil {
+			out = append(out, p.Masked())
+			continue
+		}
+		ip, err := netip.ParseAddr(a)
+		if err != nil {
+			return nil, fmt.Errorf("allow_from: %q is not an address or a CIDR block", a)
+		}
+		ip = ip.Unmap()
+		out = append(out, netip.PrefixFrom(ip, ip.BitLen()))
+	}
+	return out, nil
 }
 
 // Identity: any one that is set must match. URI is a URI SAN, SHA256 the hex SHA-256 of the certificate, CN the last resort.
@@ -279,7 +304,8 @@ func (c *Config) Validate() error {
 			set++
 			ident = "cn:" + id.CN
 		}
-		if set != 1 {
+		certless := set == 0 && cl.SigV4 != nil && cl.SigV4.NoCert // identified by its signature alone
+		if set != 1 && !certless {
 			return fmt.Errorf("client %s: exactly one of identity.uri, identity.sha256, identity.cn is required (several would be an OR)", cl.Name)
 		}
 		if ident != "" {
@@ -366,6 +392,26 @@ func (c *Config) validateKMSJSON() error {
 		if derives && cl.SigV4 == nil {
 			return fmt.Errorf("client %s: derive needs a sigv4 credential", cl.Name)
 		}
+		if cl.SigV4 != nil {
+			if _, err := cl.SigV4.Prefixes(); err != nil {
+				return fmt.Errorf("client %s: sigv4.%w", cl.Name, err)
+			}
+			if cl.SigV4.NoCert {
+				if len(cl.SigV4.AllowFrom) == 0 {
+					return fmt.Errorf("client %s: sigv4.no_cert needs sigv4.allow_from (a client without a certificate is held to listed addresses)", cl.Name)
+				}
+				for key, g := range cl.Keys {
+					if k := c.Keys[key]; !k.KMSJSON || k.Usage() != UsageEncryptDecrypt {
+						return fmt.Errorf("client %s key %s: a client without a certificate may use keys with kmsjson_usage encrypt_decrypt only", cl.Name, key)
+					}
+					for _, op := range g.Ops {
+						if op != "encrypt" && op != "decrypt" {
+							return fmt.Errorf("client %s key %s: a client without a certificate may have the rights encrypt and decrypt only", cl.Name, key)
+						}
+					}
+				}
+			}
+		}
 		if cl.SigV4 != nil && !c.KMSJSON.Enabled {
 			return fmt.Errorf("client %s has a sigv4 credential but kmsjson.enabled is false", cl.Name)
 		}
@@ -380,6 +426,16 @@ func (c *Config) validateKMSJSON() error {
 		}
 	}
 	return nil
+}
+
+// CertOptional: some client may call the KMS-JSON face without a client certificate, so the listener must let a connection without one through (the Transit face refuses it per request).
+func (c *Config) CertOptional() bool {
+	for _, cl := range c.Clients {
+		if cl.SigV4 != nil && cl.SigV4.NoCert {
+			return true
+		}
+	}
+	return false
 }
 
 // FixedAAD is the constant additional data of a key in mode fixed.

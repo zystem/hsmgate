@@ -117,3 +117,29 @@ func TestHeaderValuesAreFolded(t *testing.T) {
 		t.Errorf("%v", err)
 	}
 }
+
+// Whatever an unauthenticated peer sends, the verifier does not panic, and it accepts only what carries the right signature: a mutated header or body of a valid request is refused.
+func FuzzVerify(f *testing.F) {
+	now := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
+	good, _ := signed(&testing.T{}, `{"KeyId":"k"}`, now)
+	f.Add(good.Header.Get("Authorization"), good.Header.Get("X-Amz-Date"), `{"KeyId":"k"}`)
+	f.Add("AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/20261020/local/kms/aws4_request, SignedHeaders=host;x-amz-date;x-amz-target, Signature=00", "20261020T120000Z", "")
+	f.Add("", "", "")
+	f.Add("AWS4-HMAC-SHA256 Credential=//////, SignedHeaders=;;;, Signature=", "x", "y")
+	v := &Verifier{Region: "local", Service: "kms", Secrets: lookup, Now: func() time.Time { return now }, Require: []string{"host", "x-amz-date", "x-amz-target"}}
+	f.Fuzz(func(t *testing.T, auth, date, body string) {
+		r, _ := http.NewRequest("POST", "http://kms.local:8443/", strings.NewReader(body))
+		r.Header.Set("Authorization", auth)
+		r.Header.Set("X-Amz-Date", date)
+		r.Header.Set("X-Amz-Target", "TrentService.GetPublicKey")
+		if akid, err := v.Verify(r, []byte(body)); err == nil {
+			// accepted: then it must be a request that this very secret signs
+			r2, _ := http.NewRequest("POST", "http://kms.local:8443/", strings.NewReader(body))
+			r2.Header.Set("X-Amz-Target", "TrentService.GetPublicKey")
+			Sign(r2, []byte(body), akid, secret, "local", "kms", now)
+			if r2.Header.Get("Authorization") != auth && date != r2.Header.Get("X-Amz-Date") {
+				t.Fatalf("accepted a request that was not signed with the secret: %q", auth)
+			}
+		}
+	})
+}

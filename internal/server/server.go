@@ -85,7 +85,7 @@ func New(cfg *config.Config, auditOut io.Writer) (*Server, error) {
 	s.face.Limit(s.gate)
 	var handler http.Handler = s.face
 	if cfg.KMSJSON.Enabled {
-		s.kms = &kmsjson.Face{Cfg: cfg, Tokens: gen.tokens, Policy: gen.pol, Audit: s.audit, Creds: gen.creds, Gate: s.gate, Created: time.Now()}
+		s.kms = &kmsjson.Face{Cfg: cfg, Tokens: gen.tokens, Policy: gen.pol, Audit: s.audit, Creds: gen.creds, Gate: s.gate, Created: time.Now(), Fails: kmsjson.NewFailures()}
 		handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if kmsjson.IsKMSJSON(r) {
 				s.kms.ServeHTTP(w, r)
@@ -213,7 +213,11 @@ func loadTLS(cfg *config.Config) (*tls.Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &tls.Config{MinVersion: tls.VersionTLS13, ClientAuth: tls.RequireAndVerifyClientCert, ClientCAs: pool, Certificates: []tls.Certificate{cert}, NextProtos: []string{"h2", "http/1.1"}}, nil
+	auth := tls.RequireAndVerifyClientCert
+	if cfg.CertOptional() { // a certificate that is shown is still verified; a connection without one is judged per request: the Transit face refuses it, the KMS-JSON face only for clients that may
+		auth = tls.VerifyClientCertIfGiven
+	}
+	return &tls.Config{MinVersion: tls.VersionTLS13, ClientAuth: auth, ClientCAs: pool, Certificates: []tls.Certificate{cert}, NextProtos: []string{"h2", "http/1.1"}}, nil
 }
 
 // VerifyReplicas: every holder of a key version that answers must have the same public key (and the pinned one, if the version has a fingerprint).
@@ -387,10 +391,14 @@ func loadCreds(cfg *config.Config) (map[string]kmsjson.Cred, error) {
 			return nil, fmt.Errorf("client %s: sigv4.secret_file: %w", c.Name, err)
 		}
 		sec := []byte(strings.TrimSpace(string(b)))
-		if len(sec) < 20 {
-			return nil, fmt.Errorf("client %s: the signing secret is shorter than 20 bytes", c.Name)
+		if len(sec) < 20 || (c.SigV4.NoCert && len(sec) < 32) {
+			return nil, fmt.Errorf("client %s: the signing secret is shorter than %d bytes", c.Name, map[bool]int{false: 20, true: 32}[c.SigV4.NoCert])
 		}
-		creds[c.SigV4.AccessKeyID] = kmsjson.Cred{Client: c.Name, Secret: sec}
+		from, err := c.SigV4.Prefixes()
+		if err != nil {
+			return nil, fmt.Errorf("client %s: %w", c.Name, err)
+		}
+		creds[c.SigV4.AccessKeyID] = kmsjson.Cred{Client: c.Name, Secret: sec, NoCert: c.SigV4.NoCert, From: from}
 	}
 	return creds, nil
 }

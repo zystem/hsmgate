@@ -9,6 +9,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/base64"
+	"encoding/json"
 	"encoding/pem"
 	"io"
 	"math/big"
@@ -323,5 +324,78 @@ func TestTheSecondFaceOnTheSameListener(t *testing.T) {
 	off.KMSJSON.Enabled = false
 	if err := s.Reload(&off); err == nil {
 		t.Error("kmsjson.enabled changed in a reload")
+	}
+}
+
+// A client that cannot show a certificate (no_cert): the signature alone, from a listed address, for sealing keys only. The Transit face and every other client still need a certificate.
+func TestClientWithoutACertificate(t *testing.T) {
+	dir := t.TempDir()
+	ca := mk(t, "ca", nil, true, false)
+	srvCert := mk(t, "hsmgate", &ca, false, true)
+	good := mk(t, "openbao", &ca, false, false)
+	cfg := baseConfig(t, dir, ca, srvCert)
+	secretFile := filepath.Join(dir, "sdk-secret")
+	os.WriteFile(secretFile, []byte("a-long-secret-for-the-sdk-client-0123456789\n"), 0o600)
+	cfg.KMSJSON.Enabled = true
+	cfg.Keys["seal"] = config.Key{KMSJSON: true, KMSJSONUsage: config.UsageEncryptDecrypt, AAD: config.AAD{Mode: "fixed"}, Versions: cfg.Keys["bao-seal"].Versions}
+	cfg.Clients = append(cfg.Clients, config.Client{Name: "sdk", Keys: map[string]config.Grant{"seal": {Ops: []string{"encrypt", "decrypt"}}},
+		SigV4: &config.SigV4{AccessKeyID: "AKIDSDKSDKSDKSDK00", SecretFile: secretFile, NoCert: true, AllowFrom: []string{"127.0.0.0/8"}}})
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	s, err := New(cfg, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	l, _ := net.Listen("tcp", "127.0.0.1:0")
+	go s.Serve(l)
+	defer s.HTTP.Close()
+	pool := x509.NewCertPool()
+	pool.AddCert(ca.x)
+	bare := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool}}}
+	withCert := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool, Certificates: []tls.Certificate{good.cert}}}}
+	base := "https://" + l.Addr().String()
+	kms := func(cl *http.Client, akid, secret, op, body string) (int, string) {
+		req, _ := http.NewRequest("POST", base+"/", strings.NewReader(body))
+		req.Header.Set("X-Amz-Target", "TrentService."+op)
+		req.Header.Set("Content-Type", "application/x-amz-json-1.1")
+		sigv4.Sign(req, []byte(body), akid, []byte(secret), "local", "kms", time.Now())
+		resp, err := cl.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(b)
+	}
+	secret := "a-long-secret-for-the-sdk-client-0123456789"
+	pt := base64.StdEncoding.EncodeToString([]byte("hello"))
+	st, out := kms(bare, "AKIDSDKSDKSDKSDK00", secret, "Encrypt", `{"KeyId":"seal","Plaintext":"`+pt+`"}`)
+	if st != 200 || !strings.Contains(out, "CiphertextBlob") {
+		t.Fatalf("a client without a certificate: %d %s", st, out)
+	}
+	var enc struct{ CiphertextBlob string }
+	json.Unmarshal([]byte(out), &enc)
+	if st, out := kms(bare, "AKIDSDKSDKSDKSDK00", secret, "Decrypt", `{"CiphertextBlob":"`+enc.CiphertextBlob+`"}`); st != 200 || !strings.Contains(out, pt) {
+		t.Errorf("Decrypt: %d %s", st, out)
+	}
+	// the other client's credential is not good without its certificate, and Transit needs the certificate
+	if st, _ := kms(bare, "AKIDSDKSDKSDKSDK00", "wrong-secret-wrong-secret-wrong-secret", "Encrypt", `{"KeyId":"seal","Plaintext":"`+pt+`"}`); st != 400 {
+		t.Errorf("a wrong secret: %d", st)
+	}
+	req, _ := http.NewRequest("PUT", base+"/v1/transit/encrypt/bao-seal", strings.NewReader(`{"plaintext":"`+pt+`"}`))
+	if resp, err := bare.Do(req); err != nil || resp.StatusCode != 403 {
+		t.Errorf("Transit without a certificate: %v %v", resp, err)
+	}
+	if st, _ := kms(withCert, "AKIDSDKSDKSDKSDK00", secret, "Encrypt", `{"KeyId":"seal","Plaintext":"`+pt+`"}`); st != 403 {
+		t.Errorf("a certificate of one client with the credential of another: %d", st)
+	}
+	// the address list is judged at the reload
+	cfg.Clients[len(cfg.Clients)-1].SigV4.AllowFrom = []string{"10.0.0.0/8"}
+	if err := s.Reload(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if st, out := kms(bare, "AKIDSDKSDKSDKSDK00", secret, "Encrypt", `{"KeyId":"seal","Plaintext":"`+pt+`"}`); st != 403 || !strings.Contains(out, "AccessDenied") {
+		t.Errorf("from another address: %d %s", st, out)
 	}
 }

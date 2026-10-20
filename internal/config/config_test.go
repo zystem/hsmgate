@@ -159,3 +159,28 @@ func TestKMSJSONUsage(t *testing.T) {
 		t.Error("derive on a sealing key was accepted")
 	}
 }
+
+func TestNoCertRules(t *testing.T) {
+	v := "versions: [{token: t, label: m}]"
+	base := "kmsjson: {enabled: true}\ntokens: [{name: t, type: soft, keys: {m: /x}}]\nkeys:\n" +
+		"  s: {kmsjson: true, kmsjson_usage: encrypt_decrypt, " + v + ", aad: {mode: fixed}}\n" +
+		"  e: {kmsjson: true, " + v + ", aad: {mode: fixed}}\n  plain: {" + v + ", aad: {mode: fixed}}\nclients:\n"
+	cl := func(sig, keys string) string {
+		return "  - {name: a, sigv4: {access_key_id: AKIAEXAMPLEEXAMPLE1, secret_file: /s, " + sig + "}, keys: {" + keys + "}}\n"
+	}
+	if _, err := Parse([]byte(base + cl("no_cert: true, allow_from: [10.0.0.0/8, 192.168.1.5]", "s: {ops: [encrypt, decrypt]}"))); err != nil {
+		t.Fatalf("a valid client without a certificate: %v", err)
+	}
+	for name, c := range map[string]string{
+		"no address list":         cl("no_cert: true", "s: {ops: [encrypt]}"),
+		"a bad address":           cl("no_cert: true, allow_from: [nonsense]", "s: {ops: [encrypt]}"),
+		"a key for key agreement": cl("no_cert: true, allow_from: [10.0.0.0/8]", "e: {ops: [encrypt]}"),
+		"a key without kmsjson":   cl("no_cert: true, allow_from: [10.0.0.0/8]", "plain: {ops: [encrypt]}"),
+		"the right rewrap":        cl("no_cert: true, allow_from: [10.0.0.0/8]", "s: {ops: [rewrap]}"),
+		"no identity and no flag": cl("allow_from: [10.0.0.0/8]", "s: {ops: [encrypt]}"),
+	} {
+		if _, err := Parse([]byte(base + c)); err == nil {
+			t.Errorf("%s was accepted", name)
+		}
+	}
+}

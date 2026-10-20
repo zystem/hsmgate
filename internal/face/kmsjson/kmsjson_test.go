@@ -72,7 +72,7 @@ clients:
 	now := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
 	f := &Face{Cfg: cfg, Tokens: tokens, Policy: policy.New(cfg, nil), Audit: audit.New(buf), Gate: gate.New(4, time.Second), Created: now, Now: func() time.Time { return now },
 		Identify: func(r *http.Request) (string, bool) { c := r.Header.Get("X-Test-Client"); return c, c != "-" },
-		Creds:    map[string]Cred{akid: {"shop", secret}, "AKIDVIEWERVIEWER00": {"viewer", secret}}}
+		Creds:    map[string]Cred{akid: {Client: "shop", Secret: secret}, "AKIDVIEWERVIEWER00": {Client: "viewer", Secret: secret}}}
 	if mutate != nil {
 		mutate(cfg, tokens, f)
 		f.Tokens = tokens

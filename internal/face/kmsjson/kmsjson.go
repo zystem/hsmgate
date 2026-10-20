@@ -20,7 +20,9 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
+	"net/netip"
 	"sort"
 	"strconv"
 	"strings"
@@ -49,6 +51,9 @@ const (
 type Cred struct {
 	Client string
 	Secret []byte
+	// NoCert: the client may call without a client certificate. From: the addresses the credential may be used from (empty: any).
+	NoCert bool
+	From   []netip.Prefix
 }
 
 type Face struct {
@@ -62,6 +67,10 @@ type Face struct {
 	Gate     *gate.Gate
 	Created  time.Time
 	Now      func() time.Time // for tests
+	// NoCertificate says that the connection of a request showed no client certificate; nil: judged from the TLS state. For tests.
+	NoCertificate func(*http.Request) bool
+	// Fails counts the refused signatures by the address of the peer; created by the first request, shared by the generations.
+	Fails *Failures
 
 	mu    sync.RWMutex
 	track *tracker
@@ -94,7 +103,7 @@ func (f *Face) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f.mu.Unlock()
 	}
 	f.mu.RLock()
-	g := &Face{Cfg: f.Cfg, Tokens: f.Tokens, Policy: f.Policy, Audit: f.Audit, Identify: f.Identify, Creds: f.Creds, Gate: f.Gate, Created: f.Created, Now: f.Now}
+	g := &Face{Cfg: f.Cfg, Tokens: f.Tokens, Policy: f.Policy, Audit: f.Audit, Identify: f.Identify, Creds: f.Creds, Gate: f.Gate, Created: f.Created, Now: f.Now, NoCertificate: f.NoCertificate, Fails: f.Fails}
 	t := f.track
 	t.wg.Add(1) // under the read lock, as in the Transit face
 	f.mu.RUnlock()
@@ -105,6 +114,35 @@ func (f *Face) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // IsKMSJSON: does the request look like a call of this face? The server uses it to choose between the faces.
 func IsKMSJSON(r *http.Request) bool {
 	return r.Method == http.MethodPost && strings.HasPrefix(r.Header.Get("X-Amz-Target"), targetStart)
+}
+
+func (f *Face) noCertificate(r *http.Request) bool {
+	if f.NoCertificate != nil {
+		return f.NoCertificate(r)
+	}
+	return r.TLS != nil && len(r.TLS.PeerCertificates) == 0
+}
+
+// peerAddr is the address of the TCP peer; a header is never believed.
+func peerAddr(r *http.Request) netip.Addr {
+	h, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		h = r.RemoteAddr
+	}
+	a, err := netip.ParseAddr(h)
+	if err != nil {
+		return netip.Addr{}
+	}
+	return a.Unmap()
+}
+
+func fromAllowed(from []netip.Prefix, a netip.Addr) bool {
+	for _, p := range from {
+		if p.Contains(a) {
+			return true
+		}
+	}
+	return false
 }
 
 func (f *Face) now() time.Time {
@@ -135,11 +173,22 @@ func (f *Face) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// who: the certificate, then the signature, and they must agree
-	client, ok := f.Identify(r)
-	if !ok {
-		refuse(403, "AccessDeniedException", "the client is not known to the service", "unauthenticated", false)
+	// who: the certificate, then the signature, and they must agree. A request with no certificate at all is judged after the signature: only a credential marked no_cert may be used so.
+	src := peerAddr(r)
+	if f.Fails.Blocked(src, f.now()) {
+		w.Header().Set("Retry-After", "60")
+		refuse(400, "ThrottlingException", "too many refused signatures from this address", "throttled_auth", true)
 		return
+	}
+	client, ok := f.Identify(r)
+	certless := false
+	if !ok {
+		if !f.noCertificate(r) {
+			f.Fails.Add(src, f.now())
+			refuse(403, "AccessDeniedException", "the client is not known to the service", "unauthenticated", false)
+			return
+		}
+		certless, client = true, ""
 	}
 	v := &sigv4.Verifier{Region: f.Cfg.KMSJSON.Region, Service: "kms", Now: f.Now, Secrets: func(akid string) ([]byte, bool) {
 		c, ok := f.Creds[akid]
@@ -156,10 +205,21 @@ func (f *Face) serve(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, sigv4.ErrMalformed):
 			typ, result = "IncompleteSignatureException", "malformed_signature"
 		}
+		f.Fails.Add(src, f.now())
 		refuse(400, typ, err.Error(), result, false)
 		return
 	}
 	cred := f.Creds[akid]
+	if certless && !cred.NoCert {
+		f.Fails.Add(src, f.now())
+		refuse(403, "AccessDeniedException", "the client is not known to the service", "unauthenticated", false)
+		return
+	}
+	if len(cred.From) > 0 && !fromAllowed(cred.From, src) {
+		f.Fails.Add(src, f.now())
+		refuse(403, "AccessDeniedException", "the credential may not be used from this address", "address_refused", false)
+		return
+	}
 	if client != "" && client != cred.Client {
 		refuse(403, "AccessDeniedException", "the credential does not belong to the client certificate", "credential_mismatch", false)
 		return
@@ -452,4 +512,54 @@ func fail(w http.ResponseWriter, status int, typ, msg string, retry bool) {
 	w.Header().Set("x-amzn-ErrorType", typ)
 	w.Header().Set("X-Hsmgate-Retryable", strconv.FormatBool(retry))
 	reply(w, status, map[string]string{"__type": typ, "message": msg})
+}
+
+// Failures counts the refused signatures and credentials by the address of the peer: from an address with too many in a minute nothing is judged for the next minute. It bounds the guessing
+// of a secret (which a secret of 20 bytes or more already makes pointless) and the cost of a noisy client.
+type Failures struct {
+	mu sync.Mutex
+	by map[netip.Addr][]time.Time
+}
+
+const (
+	failLimit  = 20
+	failWindow = time.Minute
+)
+
+func NewFailures() *Failures { return &Failures{by: map[netip.Addr][]time.Time{}} }
+
+func (x *Failures) recent(a netip.Addr, now time.Time) []time.Time {
+	keep := x.by[a][:0]
+	for _, t := range x.by[a] {
+		if now.Sub(t) < failWindow {
+			keep = append(keep, t)
+		}
+	}
+	if len(keep) == 0 {
+		delete(x.by, a)
+	} else {
+		x.by[a] = keep
+	}
+	return keep
+}
+
+func (x *Failures) Add(a netip.Addr, now time.Time) {
+	if x == nil || !a.IsValid() {
+		return
+	}
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	if len(x.by) > 10000 { // a flood from many addresses must not grow the table without end
+		x.by = map[netip.Addr][]time.Time{}
+	}
+	x.by[a] = append(x.recent(a, now), now)
+}
+
+func (x *Failures) Blocked(a netip.Addr, now time.Time) bool {
+	if x == nil || !a.IsValid() {
+		return false
+	}
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	return len(x.recent(a, now)) >= failLimit
 }

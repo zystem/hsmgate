@@ -3,8 +3,10 @@ package kmsjson
 import (
 	"bytes"
 	"encoding/base64"
+	"github.com/zystem/hsmgate/internal/sigv4"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
@@ -33,6 +35,7 @@ keys:
   ecdh:  {kmsjson: true, versions: [{token: soft, label: m1}], aad: {mode: fixed}}
 clients:
   - {name: app, identity: {cn: app}, sigv4: {access_key_id: ` + akid + `, secret_file: /unused}, keys: {seal: {ops: [encrypt, decrypt]}, seal2: {ops: [encrypt]}, org: {ops: [encrypt, decrypt]}, ecdh: {ops: [derive, encrypt]}}}
+  - {name: bot, sigv4: {access_key_id: AKIDBOTBOTBOTBOT00, secret_file: /unused, no_cert: true, allow_from: [127.0.0.0/8]}, keys: {seal: {ops: [encrypt, decrypt]}}}
   - {name: reader, identity: {cn: reader}, sigv4: {access_key_id: AKIDVIEWERVIEWER00, secret_file: /unused}, keys: {seal: {ops: [decrypt]}}}
 `))
 	if err != nil {
@@ -46,7 +49,9 @@ clients:
 	now := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
 	f := &Face{Cfg: cfg, Tokens: map[string]backend.Token{"soft": soft}, Policy: policy.New(cfg, nil), Audit: audit.New(buf), Gate: gate.New(4, time.Second), Created: now, Now: func() time.Time { return now },
 		Identify: func(r *http.Request) (string, bool) { c := r.Header.Get("X-Test-Client"); return c, c != "-" },
-		Creds:    map[string]Cred{akid: {"app", secret}, "AKIDVIEWERVIEWER00": {"reader", secret}}}
+		Creds: map[string]Cred{akid: {Client: "app", Secret: secret}, "AKIDVIEWERVIEWER00": {Client: "reader", Secret: secret},
+			"AKIDBOTBOTBOTBOT00": {Client: "bot", Secret: secret, NoCert: true, From: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}}},
+		NoCertificate: func(r *http.Request) bool { return r.Header.Get("X-Test-NoCert") == "1" }, Fails: NewFailures()}
 	srv := httptest.NewServer(f)
 	t.Cleanup(srv.Close)
 	return &rig{t, srv, f, buf, cfg, now, dir}
@@ -233,5 +238,113 @@ func TestSealingNeedsTheAuditLine(t *testing.T) {
 	st, out := r.app("Encrypt", map[string]any{"KeyId": "seal", "Plaintext": base64.StdEncoding.EncodeToString([]byte("x"))})
 	if st != 500 || out["CiphertextBlob"] != nil {
 		t.Errorf("%d %v", st, out)
+	}
+}
+
+func TestParseBlobNeverPanics(t *testing.T) {
+	good := makeBlob("seal", 1, "ecies1.aa.bb.cc")
+	if n, v, txt, err := parseBlob(good); err != nil || n != "seal" || v != 1 || txt != "ecies1.aa.bb.cc" {
+		t.Fatalf("%q %d %q %v", n, v, txt, err)
+	}
+	for i := 0; i <= len(good); i++ {
+		parseBlob(good[:i])
+	}
+	for _, b := range [][]byte{nil, []byte("HGK1"), []byte("HGK1\x00"), []byte("HGK1\xffab"), []byte("HGK1\x01a\x00\x00ecies1."), []byte("HGK1\x01a\x00\x00x")} {
+		if _, _, _, err := parseBlob(b); err == nil {
+			t.Errorf("accepted %q", b)
+		}
+	}
+}
+
+func FuzzParseBlob(f *testing.F) {
+	f.Add(makeBlob("seal", 1, "ecies1.aa.bb.cc"))
+	f.Add([]byte("HGK1\x01a\x00\x01ecies1.x"))
+	f.Add([]byte{})
+	f.Fuzz(func(t *testing.T, b []byte) {
+		name, ver, text, err := parseBlob(b)
+		if err == nil && (name == "" || ver < 1 || !strings.HasPrefix(text, "ecies1.")) {
+			t.Fatalf("accepted %q", b)
+		}
+	})
+}
+
+// Any body, signed with a good credential, gets a JSON answer with a known status and never a panic; a body that is not signed never gets a 200.
+func FuzzRequestBody(f *testing.F) {
+	f.Add("Encrypt", `{"KeyId":"seal","Plaintext":"aGk="}`)
+	f.Add("Decrypt", `{"CiphertextBlob":"SEdLMQ=="}`)
+	f.Add("ReEncrypt", `{"CiphertextBlob":null,"DestinationKeyId":5}`)
+	f.Add("GenerateDataKey", `{"KeyId":"org","EncryptionContext":{"a":"b"},"NumberOfBytes":-1}`)
+	f.Add("DeriveSharedSecret", `[1,2,3]`)
+	f.Add("GenerateRandom", `{"NumberOfBytes":99999999999999999999}`)
+	r := cryptoRig(&testing.T{})
+	f.Fuzz(func(t *testing.T, op, body string) {
+		if strings.ContainsAny(op, "\r\n\x00") {
+			return
+		}
+		req, _ := http.NewRequest("POST", r.srv.URL+"/", strings.NewReader(body))
+		req.Header.Set("X-Amz-Target", "TrentService."+op)
+		req.Header.Set("X-Test-Client", "app")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return // a target the HTTP client refuses to send
+		}
+		resp.Body.Close()
+		if resp.StatusCode == 200 {
+			t.Fatalf("an unsigned %s was served", op)
+		}
+	})
+}
+
+func (r *rig) certless(akid, op string, body any) (int, map[string]any) {
+	st, out, _ := r.call("-", akid, op, body, func(req *http.Request, b []byte) {
+		req.Header.Set("X-Test-NoCert", "1")
+		sigv4.Sign(req, b, akid, secret, "local", "kms", r.now)
+	})
+	return st, out
+}
+
+func TestACredentialWithoutACertificate(t *testing.T) {
+	r := cryptoRig(t)
+	pt := base64.StdEncoding.EncodeToString([]byte("x"))
+	st, enc := r.certless("AKIDBOTBOTBOTBOT00", "Encrypt", map[string]any{"KeyId": "seal", "Plaintext": pt})
+	if st != 200 {
+		t.Fatalf("%d %v", st, enc)
+	}
+	if st, dec := r.certless("AKIDBOTBOTBOTBOT00", "Decrypt", map[string]any{"CiphertextBlob": enc["CiphertextBlob"]}); st != 200 || dec["Plaintext"] != pt {
+		t.Errorf("%d %v", st, dec)
+	}
+	// the credential of a client that did not ask for it is not good without a certificate
+	if st, out := r.certless(akid, "Encrypt", map[string]any{"KeyId": "seal", "Plaintext": pt}); st != 403 || typ(out) != "AccessDeniedException" {
+		t.Errorf("another credential: %d %v", st, out)
+	}
+	// from an address that is not listed
+	r.face.Creds["AKIDBOTBOTBOTBOT00"] = Cred{Client: "bot", Secret: secret, NoCert: true, From: []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")}}
+	if st, out := r.certless("AKIDBOTBOTBOTBOT00", "Encrypt", map[string]any{"KeyId": "seal", "Plaintext": pt}); st != 403 || typ(out) != "AccessDeniedException" {
+		t.Errorf("from another address: %d %v", st, out)
+	}
+	// the audit tells why
+	if a := r.audit.String(); !strings.Contains(a, `"result":"address_refused"`) || !strings.Contains(a, `"result":"unauthenticated"`) {
+		t.Errorf("audit: %s", a)
+	}
+}
+
+func TestRefusedSignaturesAreCounted(t *testing.T) {
+	r := cryptoRig(t)
+	for i := 0; i < failLimit; i++ {
+		r.call("app", akid, "GetPublicKey", map[string]string{"KeyId": "ecdh"}, func(req *http.Request, b []byte) {
+			sigv4.Sign(req, b, akid, []byte("a-wrong-secret-a-wrong-secret-0000"), "local", "kms", r.now)
+		})
+	}
+	// from this address nothing is judged any more, not even a good request
+	st, out := r.app("GetPublicKey", map[string]string{"KeyId": "ecdh"})
+	if st != 400 || typ(out) != "ThrottlingException" {
+		t.Errorf("after %d refusals: %d %v", failLimit, st, out)
+	}
+	// and it ends with the window
+	r.face.Now = func() time.Time { return r.now.Add(2 * time.Minute) }
+	if st, _, _ := r.call("app", akid, "GetPublicKey", map[string]string{"KeyId": "ecdh"}, func(req *http.Request, b []byte) {
+		sigv4.Sign(req, b, akid, secret, "local", "kms", r.now.Add(2*time.Minute))
+	}); st != 200 {
+		t.Errorf("after the window: %d", st)
 	}
 }
