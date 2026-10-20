@@ -6,6 +6,7 @@ tls:
   client_ca: /etc/hsmgate/clients-ca.pem   # only certificates from this CA get past the handshake
 admin_socket: /run/hsmgate/admin.sock # unlock and status; mode 0600, a short path (unix sockets allow ~108 bytes)
 audit: {file: /var/log/hsmgate/audit.log}
+# metrics: {enabled: false, detail: basic}    # GET /metrics on the admin socket; sensitive (docs/operations.md)
 # optional second face (docs/specs/kms-json.md): ECDH for clients that sign requests; enabling it needs a restart
 # kmsjson: {enabled: true, region: local, mac_cache_seconds: 0}
 

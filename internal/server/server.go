@@ -84,8 +84,10 @@ func New(cfg *config.Config, auditOut io.Writer) (*Server, error) {
 	if wait == 0 {
 		wait = 2 * time.Second
 	}
-	s.stats = metrics.New()
-	s.audit.Observer = s.stats.Observe
+	if cfg.Metrics.Enabled {
+		s.stats = metrics.New(cfg.Metrics.Detail == "full")
+		s.audit.Observer = s.stats.Observe
+	}
 	s.gate = gate.New(conc, wait)
 	s.face.Limit(s.gate)
 	var handler http.Handler = s.face
@@ -410,6 +412,9 @@ func loadCreds(cfg *config.Config) (map[string]kmsjson.Cred, error) {
 
 // metricsHandler renders the counters and the state of the tokens and of the line to them, for the admin socket.
 func (s *Server) metricsHandler() http.Handler {
+	if s.stats == nil { // off unless the configuration turns it on
+		return nil
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var g []metrics.Gauge
 		tokens := s.Tokens()

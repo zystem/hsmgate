@@ -56,7 +56,7 @@ Kubernetes KMS v2 and Transit only encrypt and decrypt; on a token that is used 
 
 Mutual TLS **and** a request signature (except for a client with `no_cert`, §5) (SigV4, `AWS4-HMAC-SHA256`, service `kms`, the region from `kmsjson.region`). The access key id maps to a client in the policy; the certificate's client and the signature's client **must be the same**, else `AccessDeniedException`. Signed headers must include `host`, `x-amz-date`, `x-amz-target`; clock skew at most five minutes. The secret is read from `secret_file` (mode 0600, at least 20 bytes) and is replaced by SIGHUP reload. In development mode (loopback, no certificate) the client is taken from the credential.
 
-**No replay cache**: the transport is mutual TLS, so a captured request cannot be seen; a cache would falsely refuse a legitimate retry within the same second (the signature has one-second resolution).
+**No replay cache** (decided 2026-10-21): a captured request cannot be read off the transport (TLS 1.3), the window of the signature is five minutes, and a cache would falsely refuse a legitimate retry within the same second (the signature has one-second resolution). The residual risk is a front or a proxy that logs whole requests; for a client that must be protected against that, keep it on mutual TLS and do not log the `Authorization` header.
 
 ## 4. Configuration
 

@@ -90,7 +90,7 @@ func TestMetricsOnTheAdminSocket(t *testing.T) {
 	tk := &lockable{pin: "1"}
 	buf := &bytes.Buffer{}
 	log := audit.New(buf)
-	reg := metrics.New()
+	reg := metrics.New(true)
 	log.Observer = reg.Observe
 	log.Write(audit.Event{Face: "transit", Op: "encrypt", Result: "ok", Client: "someone"})
 	h := adminHandler(func() map[string]backend.Token { return map[string]backend.Token{"card": tk} }, log, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

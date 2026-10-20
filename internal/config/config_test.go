@@ -261,3 +261,22 @@ func TestKMSJSONKeyNames(t *testing.T) {
 		t.Errorf("a Transit-only key name: %v", err)
 	}
 }
+
+func TestMetricsRules(t *testing.T) {
+	base := "tokens: [{name: t, type: soft, keys: {m: /x}}]\nkeys:\n  k: {versions: [{token: t, label: m}], aad: {mode: fixed}}\nclients:\n"
+	c, err := Parse([]byte("metrics: {enabled: true}\nadmin_socket: /run/h/a.sock\n" + base))
+	if err != nil || c.Metrics.Detail != "basic" {
+		t.Fatalf("%v %q", err, c.Metrics.Detail)
+	}
+	if c, err := Parse([]byte(base)); err != nil || c.Metrics.Enabled {
+		t.Errorf("metrics are off unless asked for: %v", err)
+	}
+	for name, y := range map[string]string{
+		"no admin socket":   "metrics: {enabled: true}\n" + base,
+		"an unknown detail": "metrics: {enabled: true, detail: everything}\nadmin_socket: /run/h/a.sock\n" + base,
+	} {
+		if _, err := Parse([]byte(y)); err == nil {
+			t.Errorf("%s was accepted", name)
+		}
+	}
+}

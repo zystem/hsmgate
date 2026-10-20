@@ -28,6 +28,12 @@ type Config struct {
 		// a key derived from the token's key into the memory of the process for that time.
 		MacCacheSeconds int `yaml:"mac_cache_seconds"`
 	} `yaml:"kmsjson"`
+	// Metrics: GET /metrics on the admin socket, off unless enabled. Detail "basic" (the default) counts decisions by face and outcome class only; "full" adds the operation and the
+	// result words of the audit log. What is counted tells when secrets are used and how much is refused, so it is treated as sensitive (docs/threat-model.md).
+	Metrics struct {
+		Enabled bool   `yaml:"enabled"`
+		Detail  string `yaml:"detail"`
+	} `yaml:"metrics"`
 	// AdminSocket is a unix socket (mode 0600) for unlock and status; unset: no admin door.
 	AdminSocket string `yaml:"admin_socket"`
 	// Limits bound the work that reaches the tokens at once (a card serves one operation at a time). Changing them needs a restart.
@@ -224,6 +230,16 @@ func (c *Config) Validate() error {
 	}
 	if c.Limits.MaxConcurrent < 0 || c.Limits.QueueSeconds < 0 || c.Limits.MaxConcurrent > 1024 || c.Limits.QueueSeconds > 60 {
 		return fmt.Errorf("limits: max_concurrent 0..1024 and queue_seconds 0..60")
+	}
+	switch c.Metrics.Detail {
+	case "":
+		c.Metrics.Detail = "basic"
+	case "basic", "full":
+	default:
+		return fmt.Errorf("metrics.detail must be basic or full")
+	}
+	if c.Metrics.Enabled && c.AdminSocket == "" {
+		return fmt.Errorf("metrics.enabled needs admin_socket (the metrics are served on it, not on the network)")
 	}
 	tokens := map[string]Token{}
 	for _, t := range c.Tokens {

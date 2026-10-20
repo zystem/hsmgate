@@ -10,7 +10,7 @@ import (
 )
 
 func TestCountersAndGauges(t *testing.T) {
-	r := New()
+	r := New(true)
 	r.Observe(audit.Event{Face: "kmsjson", Op: "encrypt", Result: "ok", Client: "secret-client", Key: "secret-key"}, nil)
 	r.Observe(audit.Event{Face: "kmsjson", Op: "encrypt", Result: "ok"}, nil)
 	r.Observe(audit.Event{Face: "transit", Op: "decrypt", Result: "forbidden"}, errors.New("disk full"))
@@ -37,7 +37,7 @@ func TestCountersAndGauges(t *testing.T) {
 }
 
 func TestTheTableIsBounded(t *testing.T) {
-	r := New()
+	r := New(true)
 	for i := 0; i < 5000; i++ {
 		r.Observe(audit.Event{Face: "f", Op: "o", Result: strings.Repeat("r", i%35) + string(rune('a'+i%26)) + string(rune('a'+i/26%26))}, nil)
 	}
@@ -46,5 +46,27 @@ func TestTheTableIsBounded(t *testing.T) {
 	r.mu.Unlock()
 	if n > 2000 {
 		t.Errorf("%d series", n)
+	}
+}
+
+// The basic level counts by face and outcome class only: no operation, no result word, no client, no key.
+func TestBasicLevelIsCoarse(t *testing.T) {
+	r := New(false)
+	r.Observe(audit.Event{Face: "kmsjson", Op: "decrypt", Result: "ok", Client: "c", Key: "k"}, nil)
+	r.Observe(audit.Event{Face: "kmsjson", Op: "sign", Result: "bad_signature"}, nil)
+	r.Observe(audit.Event{Face: "kmsjson", Op: "sign", Result: "unknown_access_key"}, nil)
+	r.Observe(audit.Event{Face: "transit", Op: "encrypt", Result: "throttled"}, nil)
+	var b bytes.Buffer
+	r.Write(&b, nil)
+	out := b.String()
+	for _, want := range []string{`hsmgate_requests_total{face="kmsjson",outcome="ok"} 1`, `hsmgate_requests_total{face="kmsjson",outcome="denied"} 2`, `hsmgate_requests_total{face="transit",outcome="throttled"} 1`} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+	for _, leak := range []string{"decrypt", "sign", "bad_signature", "unknown_access_key", "encrypt"} {
+		if strings.Contains(out, leak) {
+			t.Errorf("the basic level shows %q:\n%s", leak, out)
+		}
 	}
 }

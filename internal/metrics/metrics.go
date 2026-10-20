@@ -15,14 +15,33 @@ import (
 
 type key struct{ face, op, result string }
 
-// Registry holds the counters.
+// Registry holds the counters. In the basic level a decision is counted by face and outcome class only (the op is empty and the result is the class); in the full level by face,
+// operation and the result word of the audit log.
 type Registry struct {
 	mu        sync.Mutex
+	full      bool
 	requests  map[key]uint64
 	auditFail uint64
 }
 
-func New() *Registry { return &Registry{requests: map[key]uint64{}} }
+func New(full bool) *Registry { return &Registry{full: full, requests: map[key]uint64{}} }
+
+// Outcome puts a result word of the audit log into one of a few classes.
+func Outcome(result string) string {
+	switch result {
+	case "ok", "attempt":
+		return "ok"
+	case "forbidden", "forbidden_context", "unauthenticated", "unknown_access_key", "bad_signature", "unsigned", "malformed_signature", "credential_mismatch", "address_refused", "bad_usage", "bad_algorithm", "not_lockable":
+		return "denied"
+	case "throttled", "busy", "throttled_auth":
+		return "throttled"
+	case "locked", "unavailable", "internal_error":
+		return "error"
+	case "":
+		return "other"
+	}
+	return "invalid"
+}
 
 // Observe is the observer of the audit log: every decision is one line, and every line is counted.
 func (r *Registry) Observe(e audit.Event, err error) {
@@ -31,8 +50,12 @@ func (r *Registry) Observe(e audit.Event, err error) {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	k := key{clean(e.Face), "", Outcome(e.Result)}
+	if r.full {
+		k = key{clean(e.Face), clean(e.Op), clean(e.Result)}
+	}
 	if len(r.requests) < 2000 { // a bound, whatever the results are
-		r.requests[key{clean(e.Face), clean(e.Op), clean(e.Result)}]++
+		r.requests[k]++
 	}
 	if err != nil {
 		r.auditFail++
@@ -78,10 +101,14 @@ func (r *Registry) Write(w io.Writer, gauges []Gauge) {
 	fail := r.auditFail
 	r.mu.Unlock()
 
-	fmt.Fprintln(w, "# HELP hsmgate_requests_total Decisions of the service, by face, operation and result.")
+	fmt.Fprintln(w, "# HELP hsmgate_requests_total Decisions of the service, by face and outcome class (basic) or by face, operation and result (full).")
 	fmt.Fprintln(w, "# TYPE hsmgate_requests_total counter")
 	for i, k := range keys {
-		fmt.Fprintf(w, "hsmgate_requests_total{face=%q,op=%q,result=%q} %d\n", k.face, k.op, k.result, counts[i])
+		if r.full {
+			fmt.Fprintf(w, "hsmgate_requests_total{face=%q,op=%q,result=%q} %d\n", k.face, k.op, k.result, counts[i])
+		} else {
+			fmt.Fprintf(w, "hsmgate_requests_total{face=%q,outcome=%q} %d\n", k.face, k.result, counts[i])
+		}
 	}
 	fmt.Fprintln(w, "# HELP hsmgate_audit_write_failures_total Audit lines that could not be written.")
 	fmt.Fprintln(w, "# TYPE hsmgate_audit_write_failures_total counter")
