@@ -1,7 +1,7 @@
 # hsmgate with the OpenSC PKCS#11 module (a SmartCard-HSM through the host's pcscd). cgo is needed by the PKCS#11 binding, so the binary is dynamic.
 # The final image is distroless: glibc, the CA certificates and nothing else (no shell, no package manager, none of the 97 packages of a Debian image that the service never uses);
 # the OpenSC module and the libraries it needs are copied into it from a Debian stage. Base images are pinned by digest (Renovate updates them).
-FROM golang:1.26.9-bookworm@sha256:d9c68c2c51161e12fd77e4c6320687c9cd86e1af1e3ad6e6cd63ff970641453c AS build
+FROM golang:1.26.10-bookworm@sha256:ee3901c61e423732605a51f1b8157c849ec01194ea0a274213b5202b2c11e7bf AS build
 ARG VERSION=dev
 WORKDIR /src
 COPY go.mod go.sum ./

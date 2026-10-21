@@ -1,6 +1,6 @@
 steps:
   test:
-    image: golang:1.26.9-bookworm
+    image: golang:1.26.10-bookworm
     commands:
       - git config --global --add safe.directory "$CI_WORKSPACE"
       - test -z "$(gofmt -l .)"
@@ -14,7 +14,7 @@ steps:
 
   static:
     # static analysis: staticcheck, and gosec without G104 (unchecked errors: closing files and the best-effort audit line of a refusal, on purpose); each exception in the code has its reason
-    image: golang:1.26.9-bookworm
+    image: golang:1.26.10-bookworm
     commands:
       - git config --global --add safe.directory "$CI_WORKSPACE"
       - go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./...
@@ -28,7 +28,7 @@ steps:
 
   softhsm:
     # the PKCS#11 backend against SoftHSM2 (a software token); the card itself is run by hand with tools/card-decrypt-test.sh
-    image: golang:1.26.9-bookworm
+    image: golang:1.26.10-bookworm
     commands:
       - apt-get update -qq
       - apt-get install -y -qq --no-install-recommends softhsm2 opensc
@@ -42,7 +42,7 @@ steps:
 
   fuzz:
     # the parsers that face the network, a minute each; runs on a schedule: a cron job named "fuzz" in the repository settings of Woodpecker (Settings, Crons), not on every push
-    image: golang:1.26.9-bookworm
+    image: golang:1.26.10-bookworm
     commands:
       - git config --global --add safe.directory "$CI_WORKSPACE"
       - go test -run '^$' -fuzz '^FuzzDecryptRequest$' -fuzztime 60s ./internal/face/transit
@@ -58,7 +58,7 @@ steps:
 
   kmsjson_sdk:
     # the KMS-JSON face against the vendor's official Go SDK (a module of its own: test/kmsjson-sdk)
-    image: golang:1.26.9-bookworm
+    image: golang:1.26.10-bookworm
     commands:
       - git config --global --add safe.directory "$CI_WORKSPACE"
       - cd test/kmsjson-sdk && go test -count=1 ./...
@@ -71,7 +71,7 @@ steps:
 
   build:
     # cgo (the PKCS#11 binding): the binary is dynamic, so it is built where it will run: Debian bookworm
-    image: golang:1.26.9-bookworm
+    image: golang:1.26.10-bookworm
     commands:
       - mkdir -p build
       - CGO_ENABLED=1 go build -buildmode=pie -trimpath -buildvcs=false -ldflags "-s -w -linkmode=external -extldflags '-Wl,-z,relro,-z,now' -X main.version=${CI_COMMIT_TAG:-dev}" -o build/hsmgate ./cmd/hsmgate
