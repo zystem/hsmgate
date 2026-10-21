@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: hsmgate (Transit API)
-  version: 0.1.2
+  version: 0.2.0
   summary: The Vault/OpenBao Transit subset that hsmgate serves in front of a PKCS#11 token.
   description: |
     hsmgate speaks the part of the HashiCorp Vault / OpenBao **Transit** API that OpenBao's `seal "transit"`, `vault-kubernetes-kms` and CiNim use.
