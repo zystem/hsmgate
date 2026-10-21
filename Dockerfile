@@ -1,5 +1,6 @@
 # hsmgate with the OpenSC PKCS#11 module (a SmartCard-HSM through the host's pcscd). cgo is needed by the PKCS#11 binding, so the binary is dynamic.
-# Base images are pinned by digest (Renovate updates them).
+# The final image is distroless: glibc, the CA certificates and nothing else (no shell, no package manager, none of the 97 packages of a Debian image that the service never uses);
+# the OpenSC module and the libraries it needs are copied into it from a Debian stage. Base images are pinned by digest (Renovate updates them).
 FROM golang:1.26.9-bookworm@sha256:d9c68c2c51161e12fd77e4c6320687c9cd86e1af1e3ad6e6cd63ff970641453c AS build
 ARG VERSION=dev
 WORKDIR /src
@@ -9,10 +10,22 @@ COPY . .
 # a position-independent executable with the relocations made at start and then read-only (ASLR for the whole program, no writable GOT)
 RUN CGO_ENABLED=1 go build -buildmode=pie -trimpath -buildvcs=false -ldflags "-s -w -linkmode=external -extldflags '-Wl,-z,relro,-z,now' -X main.version=${VERSION}" -o /out/hsmgate ./cmd/hsmgate
 
-FROM debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587
-# only the PKCS#11 module and the PC/SC client library (OpenSC loads libpcsclite with dlopen; it is only "recommended" by the package): pcscd runs on the host, its socket is mounted
-RUN apt-get update && apt-get install -y --no-install-recommends opensc-pkcs11 libpcsclite1 ca-certificates && rm -rf /var/lib/apt/lists/* \
- && useradd --system --uid 10001 --user-group --home-dir /nonexistent --shell /usr/sbin/nologin hsmgate
+# the module of OpenSC and what it needs (the PC/SC client library is loaded by OpenSC with dlopen, so ldd does not show it), with the same paths, into /rootfs;
+# the core of glibc comes from the final image
+FROM debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587 AS libs
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+# (the versions of the packages are not pinned on purpose: the base is pinned by digest, the packages are the current security updates of it)
+# hadolint ignore=DL3008
+RUN apt-get update && apt-get install -y --no-install-recommends opensc-pkcs11 libpcsclite1 && rm -rf /var/lib/apt/lists/* \
+ && mkdir -p /rootfs \
+ && cp --parents -L /usr/lib/x86_64-linux-gnu/opensc-pkcs11.so /usr/lib/x86_64-linux-gnu/libpcsclite.so.1 /rootfs/ \
+ && for lib in $(ldd /usr/lib/x86_64-linux-gnu/opensc-pkcs11.so /usr/lib/x86_64-linux-gnu/libpcsclite.so.1 | awk '/=>/ {print $3}' | sort -u); do \
+      case "$lib" in */libc.so.6|*/libm.so.6|*/libdl.so.2|*/libpthread.so.0|*/librt.so.1) ;; *) cp --parents -L "$lib" /rootfs/ ;; esac; \
+    done \
+ && test -s /rootfs/usr/lib/x86_64-linux-gnu/opensc-pkcs11.so && test -s /rootfs/usr/lib/x86_64-linux-gnu/libpcsclite.so.1 && test -n "$(find /rootfs -name 'libopensc.so*' -print -quit)" && test -n "$(find /rootfs -name 'libcrypto.so*' -print -quit)"
+
+FROM gcr.io/distroless/base-debian12@sha256:7f0c72cd138b442ae0deeb69c08b1acf5525439ba251a49ad93c320a061567e5
+COPY --from=libs /rootfs/ /
 COPY --from=build /out/hsmgate /usr/local/bin/hsmgate
 LABEL org.opencontainers.image.source="https://github.com/zystem/hsmgate" \
       org.opencontainers.image.description="hsmgate: a policy-checked network door in front of a key token (Transit API, optional KMS-JSON API)" \

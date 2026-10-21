@@ -41,7 +41,7 @@ steps:
       - event: tag
 
   fuzz:
-    # the parsers that face the network, a minute each; runs on a schedule (a cron job of the repository in Woodpecker), not on every push
+    # the parsers that face the network, a minute each; runs on a schedule: a cron job named "fuzz" in the repository settings of Woodpecker (Settings, Crons), not on every push
     image: golang:1.26.9-bookworm
     commands:
       - git config --global --add safe.directory "$CI_WORKSPACE"
@@ -54,6 +54,7 @@ steps:
       - go test -run '^$' -fuzz '^FuzzRequestBody$' -fuzztime 60s ./internal/face/kmsjson
     when:
       - event: cron
+        cron: fuzz   # the name of the cron job in the repository settings
 
   kmsjson_sdk:
     # the KMS-JSON face against the vendor's official Go SDK (a module of its own: test/kmsjson-sdk)
@@ -109,6 +110,22 @@ steps:
     when:
       - event: tag
         ref: refs/tags/v*
+
+  image:
+    # the Dockerfile builds (nothing is pushed): the same plugin as the release, in dry-run
+    image: woodpeckerci/plugin-docker-buildx:5.2.0
+    settings:
+      dry_run: true
+      repo: ghcr.io/${CI_REPO}
+      platforms:
+        - linux/amd64
+      build_args:
+        - VERSION=dev
+    depends_on:
+      - test
+    when:
+      - event: push
+      - event: pull_request
 
   publish_image:
     # the same plugin as the other repositories of this server (it needs WOODPECKER_PLUGINS_PRIVILEGED; a newer `woodpecker-cli lint` warns about that).

@@ -12,6 +12,9 @@
 ### Fixed before release (audit of 2026-10-21, see docs/audit-response-2026-10-21.md)
 - With the KMS-JSON face in use no two keys may rest on the same private key (CR-01); ciphertext blobs authenticate the key name and version (CR-02, format `HGK2`); the derived MAC key cache returns a copy under its lock (CR-03); `UNSIGNED-PAYLOAD` and similar payload modes are refused (CR-04); Decrypt honours `max_bytes` (CR-05); the audit no longer holds a prefix of the message hash unless `kmsjson.audit_message_prefix` is set; the test requirements use `cryptography` 50.0.2.
 
+### Image
+- The image is distroless (42 MB instead of 99 MB; Trivy: 0 critical and 1 high without a fix, instead of 5 and 68), the binary is a PIE with full RELRO, CI builds the image on every push (dry run). Tried against the real card.
+
 ### Changed
 - The operation, key and client names of a request nobody is known for are logged as `unknown` in both faces.
 - Docs: the OpenSC PKCS#11 module exposes no AES; the card itself is not said to lack it.
