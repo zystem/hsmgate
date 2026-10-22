@@ -1,5 +1,5 @@
 .git
-.woodpecker.yaml
+.github
 renovate.json
 docs
 deploy

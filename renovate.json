@@ -4,8 +4,8 @@
   "customManagers": [
     {
       "customType": "regex",
-      "description": "tools run with `go run module/cmd/tool@version` in the Woodpecker pipeline",
-      "managerFilePatterns": ["/^\\.woodpecker\\.ya?ml$/"],
+      "description": "tools run with `go run module/cmd/tool@version` in the GitHub Actions workflows",
+      "managerFilePatterns": ["/^\\.github/workflows/[^/]+\\.ya?ml$/"],
       "matchStrings": ["go run (?<depName>[a-zA-Z0-9./_-]+?)(?:/cmd/[a-z]+)?@(?<currentValue>v[0-9][^\\s]*)"],
       "datasourceTemplate": "go"
     }

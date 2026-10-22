@@ -1,0 +1,133 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+    inputs:
+      version:
+        type: string
+        default: dev
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# cgo (the PKCS#11 binding): the binary is dynamic, so the jobs run in Debian bookworm, the release the image (distroless debian12) is made from
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    container: golang:1.26.10-bookworm
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - run: test -z "$(gofmt -l .)"
+      - run: go vet ./...
+      - run: go test -race ./...
+      - run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+
+  static:
+    # staticcheck, and gosec without G104 (unchecked errors: closing files and the best-effort audit line of a refusal, on purpose); each exception in the code has its reason
+    needs: test
+    runs-on: ubuntu-latest
+    container: golang:1.26.10-bookworm
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./...
+      - run: go run github.com/securego/gosec/v2/cmd/gosec@v2.29.0 -quiet -exclude=G104 -exclude-dir=test -exclude-dir=tools -exclude-generated ./...
+
+  softhsm:
+    # the PKCS#11 backend against SoftHSM2 (a software token); the card itself is run by hand with tools/card-decrypt-test.sh
+    needs: test
+    runs-on: ubuntu-latest
+    container: golang:1.26.10-bookworm
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - run: apt-get update -qq && apt-get install -y -qq --no-install-recommends softhsm2 opensc
+      - run: tools/softhsm-test.sh
+
+  sdk:
+    # the faces against the official client libraries of the services they imitate (modules of their own: test/*-sdk)
+    needs: test
+    runs-on: ubuntu-latest
+    container: golang:1.26.10-bookworm
+    strategy:
+      fail-fast: false
+      matrix:
+        module: [kmsjson-sdk, kmsgrpc-sdk, kmsrest-sdk]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - run: cd test/${{ matrix.module }} && go test -count=1 ./...
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    container: golang:1.26.10-bookworm
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Build
+        env:
+          VERSION: ${{ inputs.version || 'dev' }}
+        run: |
+          mkdir -p build
+          CGO_ENABLED=1 go build -buildmode=pie -trimpath -buildvcs=false -ldflags "-s -w -linkmode=external -extldflags '-Wl,-z,relro,-z,now' -X main.version=${VERSION}" -o build/hsmgate ./cmd/hsmgate
+          readelf -h build/hsmgate | grep -q "DYN" && readelf -d build/hsmgate | grep -q "BIND_NOW"
+          build/hsmgate version
+      - uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        with:
+          name: hsmgate-linux-amd64
+          path: build/hsmgate
+          retention-days: 7
+
+  boto3:
+    # the KMS-JSON face against the vendor's Python SDK, with the binary the build job made
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@cc203385981b70ca67e1cc392babf9cc229d5806 # v4.1.9
+        with:
+          name: hsmgate-linux-amd64
+          path: build
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+      - run: chmod +x build/hsmgate
+      - run: |
+          python -m venv /tmp/venv
+          /tmp/venv/bin/pip install -q -r test/kmsjson-boto3/requirements.txt
+          /tmp/venv/bin/python test/kmsjson-boto3/test_boto3.py build/hsmgate
+
+  image:
+    # the Dockerfile builds (nothing is pushed)
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+      - uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        with:
+          context: .
+          push: false
+          platforms: linux/amd64
+          build-args: VERSION=${{ inputs.version || 'dev' }}

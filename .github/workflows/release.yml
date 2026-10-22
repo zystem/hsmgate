@@ -1,0 +1,100 @@
+name: Release
+
+# a tag v* : the tests, then the binary, the image on ghcr.io and the GitHub release, each signed (keyless, with the identity of this workflow) and with a build provenance attestation
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+    with:
+      version: ${{ github.ref_name }}
+
+  release:
+    needs: ci
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write        # the release
+      packages: write        # the image
+      id-token: write        # the keyless signature and the attestation
+      attestations: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@cc203385981b70ca67e1cc392babf9cc229d5806 # v4.1.9
+        with:
+          name: hsmgate-linux-amd64
+          path: build
+      - uses: sigstore/cosign-installer@d58896d6a1865668819e1d91763c7751a165e159 # v3.9.2
+
+      - name: Package
+        run: |
+          mkdir -p dist
+          cp build/hsmgate dist/hsmgate-linux-amd64
+          chmod 755 dist/hsmgate-linux-amd64
+          sha256sum dist/hsmgate-linux-amd64 > dist/hsmgate-linux-amd64.sha256
+          tar -czf dist/hsmgate-deploy.tar.gz LICENSE README.md api deploy docs
+
+      - name: SBOM
+        uses: anchore/sbom-action@7b36ad622f042cab6f59a75c2ac24ccb256e9b45 # v0.20.4
+        with:
+          path: .
+          format: spdx-json
+          output-file: dist/hsmgate.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Sign the files
+        run: |
+          for f in dist/hsmgate-linux-amd64 dist/hsmgate-deploy.tar.gz dist/hsmgate.spdx.json; do
+            cosign sign-blob --yes --bundle "$f.sigstore.json" "$f"
+          done
+
+      - name: Provenance of the files
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-path: |
+            dist/hsmgate-linux-amd64
+            dist/hsmgate-deploy.tar.gz
+
+      - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+      - uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image
+        id: push
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64
+          build-args: VERSION=${{ github.ref_name }}
+          tags: |
+            ghcr.io/${{ github.repository }}:${{ github.ref_name }}
+            ghcr.io/${{ github.repository }}:latest
+
+      - name: Sign the image
+        env:
+          IMAGE: ghcr.io/${{ github.repository }}@${{ steps.push.outputs.digest }}
+        run: cosign sign --yes "$IMAGE"
+
+      - name: Provenance of the image
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-name: ghcr.io/${{ github.repository }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+
+      - name: GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: gh release create "$TAG" dist/* --title "$TAG" --generate-notes --verify-tag

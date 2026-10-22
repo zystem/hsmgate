@@ -74,6 +74,7 @@ Open: the badge itself (a project page on bestpractices.dev, created by the owne
 
 ### SLSA
 
-- **Build L1** (provenance exists): the build is a script (`.woodpecker.yaml`) and the release is built by it, not by hand; a SHA-256 file is published with the binary. There is no machine-readable provenance document.
-- **Build L2** (signed provenance from the build service): not met. Woodpecker does not issue attestations. The way to L2 is to build and sign the release in a GitHub Actions workflow (`slsa-github-generator`, or `cosign` keyless with the OIDC identity of the workflow). That changes where releases are made and needs a workflow, permissions and a decision of the owner; it is not done here.
-- The container image is pinned by digest at the base and built by the same script; the signing of the image (cosign) has the same dependency.
+CI and releases run in GitHub Actions (`.github/workflows/`): `ci.yml` (tests, static analysis, SoftHSM, the SDK tests, build, image), `fuzz.yml` (weekly), `release.yml` (a tag `v*`), `scorecard.yml`. All actions are pinned by commit.
+
+- **Build L1** (provenance exists) and **L2** (signed provenance made by the build service): a release is built by the workflow, never by hand. For the binary, the deploy archive and the image, `actions/attest-build-provenance` issues a signed attestation (verify with `gh attestation verify FILE -R zystem/hsmgate`), and every file and the image are signed with cosign (keyless, the identity of the workflow; `cosign verify-blob --bundle FILE.sigstore.json --certificate-identity-regexp 'https://github.com/zystem/hsmgate/.github/workflows/release.yml@.*' --certificate-oidc-issuer https://token.actions.githubusercontent.com FILE`). An SBOM in SPDX format is published with the release. **Not yet exercised by a real release**: the first tag after this change is the test.
+- **Build L3** is not claimed: the build job is not isolated from the workflow's other jobs by a separate reusable builder, and the tests that precede it run in the same workflow.

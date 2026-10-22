@@ -1,0 +1,27 @@
+name: Fuzz
+
+# the parsers that face the network, a minute each, once a week (not on every push)
+on:
+  schedule:
+    - cron: "17 3 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    container: golang:1.26.10-bookworm
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - run: go test -run '^$' -fuzz '^FuzzDecryptRequest$' -fuzztime 60s ./internal/face/transit
+      - run: go test -run '^$' -fuzz '^FuzzUnwrap$' -fuzztime 60s ./internal/scheme/ecies
+      - run: go test -run '^$' -fuzz '^FuzzRoundTrip$' -fuzztime 30s ./internal/scheme/ecies
+      - run: go test -run '^$' -fuzz '^FuzzParse$' -fuzztime 60s ./internal/config
+      - run: go test -run '^$' -fuzz '^FuzzVerify$' -fuzztime 60s ./internal/sigv4
+      - run: go test -run '^$' -fuzz '^FuzzParseBlob$' -fuzztime 60s ./internal/face/kmsjson
+      - run: go test -run '^$' -fuzz '^FuzzRequestBody$' -fuzztime 60s ./internal/face/kmsjson
