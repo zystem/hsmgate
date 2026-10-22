@@ -49,3 +49,12 @@ All parts are lowercase hexadecimal, separated by `.`; there are exactly four.
 - The text hides the data key; its **length** shows the length of the data key.
 - It does not authenticate who sealed it: anyone with the public key can seal. Who may *open* is decided by the token and by the policy of the service.
 - Growth: a data key of `n` bytes gives a text of `283 + 2n` characters (347 for 32 bytes).
+
+## `ecies2`: the same with approved algorithms
+
+For a deployment that must use only algorithms approved in a FIPS 140-3 module (`require_fips`, [../compliance.md](../compliance.md)). The text is `ecies2.<fingerprint>.<ephemeral point>.<body>`, with the same fingerprint and point; what differs:
+
+- `K = HKDF-SHA256(ikm = Z, salt = "hsmgate/ecies2", info = fp ‖ "|" ‖ hex(eph), length 32)`;
+- `body = nonce ‖ AES-256-GCM(K, nonce, plaintext, aad)` with a random 12-byte nonce and a 16-byte tag; at least 28 bytes. A key is made for this one text (a fresh ephemeral key), so a random nonce cannot repeat under it.
+
+Choice: `seal_format` (`ecies1`, the default, or `ecies2`; `require_fips` makes it `ecies2`). Both formats are always read, except that `require_fips` refuses `ecies1`. The card plays the same part in both: one ECDH; the AEAD runs on the host.

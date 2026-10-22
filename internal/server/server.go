@@ -5,6 +5,7 @@
 package server
 
 import (
+	"crypto/fips140"
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
@@ -29,6 +30,7 @@ import (
 	"github.com/zystem/hsmgate/internal/metrics"
 	"github.com/zystem/hsmgate/internal/peer"
 	"github.com/zystem/hsmgate/internal/policy"
+	"github.com/zystem/hsmgate/internal/scheme/ecies"
 )
 
 // maxDrain bounds the wait for requests of an old generation before the tokens a reload dropped are closed anyway (a stuck driver call cannot be cancelled).
@@ -76,6 +78,9 @@ func New(cfg *config.Config, auditOut io.Writer) (*Server, error) {
 			}
 			auditOut = f
 		}
+	}
+	if err := applyCrypto(cfg); err != nil {
+		return nil, err
 	}
 	s := &Server{audit: audit.New(auditOut)}
 	gen, _, fresh, err := s.prepare(cfg, nil)
@@ -173,6 +178,15 @@ func New(cfg *config.Config, auditOut io.Writer) (*Server, error) {
 		return s.gen.tlsCfg, nil
 	}}
 	return s, nil
+}
+
+// applyCrypto sets the sealing format of the process from the configuration; with require_fips it first checks that the cryptographic module is in FIPS 140-3 mode.
+func applyCrypto(cfg *config.Config) error {
+	if cfg.RequireFIPS && !fips140.Enabled() {
+		return fmt.Errorf("require_fips: the Go cryptographic module is not in FIPS 140-3 mode (start with GODEBUG=fips140=on, or use a binary built with GOFIPS140)")
+	}
+	ecies.Configure(cfg.SealFormat == "ecies2", cfg.RequireFIPS)
+	return nil
 }
 
 func identifier(a *authn.Authenticator) transit.Identify {
@@ -377,9 +391,15 @@ func (s *Server) Reload(cfg *config.Config) error {
 	if cfg.Listen != oc.Listen || cfg.AdminSocket != oc.AdminSocket || cfg.Audit.File != oc.Audit.File || cfg.Limits != oc.Limits || cfg.Transit.Mount != oc.Transit.Mount {
 		return fmt.Errorf("listen, admin_socket, audit.file, limits and transit.mount cannot change in a reload: restart")
 	}
+	if cfg.RequireFIPS != oc.RequireFIPS || cfg.SealFormat != oc.SealFormat {
+		if err := applyCrypto(cfg); err != nil {
+			return err
+		}
+	}
 	gen, removed, fresh, err := s.prepare(cfg, old)
 	if err != nil {
 		closeTokens(fresh) // only what this attempt opened; nothing that is running was touched
+		applyCrypto(oc)    // #nosec G104 -- the old settings were valid; put them back
 		return err
 	}
 	s.mu.Lock()

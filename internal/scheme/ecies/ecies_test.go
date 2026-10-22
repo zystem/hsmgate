@@ -161,3 +161,51 @@ func FuzzRoundTrip(f *testing.F) {
 		}
 	})
 }
+
+func TestV2RoundTripAndWhatItBinds(t *testing.T) {
+	_, key, pub := load(t)
+	Configure(true, false)
+	defer Configure(false, false)
+	a, err := Wrap(pub, []byte("data key"), []byte("ctx"))
+	if err != nil || !strings.HasPrefix(a, "ecies2.") {
+		t.Fatalf("%q %v", a, err)
+	}
+	b, _ := Wrap(pub, []byte("data key"), []byte("ctx"))
+	if a == b {
+		t.Error("two wraps gave the same text")
+	}
+	if p, err := Unwrap(pub, key, a, []byte("ctx")); err != nil || string(p) != "data key" {
+		t.Errorf("%q %v", p, err)
+	}
+	// another place, a changed byte, a text made into the older format by relabelling
+	if _, err := Unwrap(pub, key, a, []byte("other")); err != ErrDamaged {
+		t.Errorf("another context: %v", err)
+	}
+	parts := strings.Split(a, ".")
+	bad := []byte(parts[3])
+	bad[10] ^= 1
+	parts[3] = string(bad)
+	if _, err := Unwrap(pub, key, strings.Join(parts, "."), []byte("ctx")); err == nil {
+		t.Error("a changed byte opened")
+	}
+	parts[0], parts[3] = "ecies1", strings.Split(a, ".")[3]
+	if _, err := Unwrap(pub, key, strings.Join(parts, "."), []byte("ctx")); err == nil {
+		t.Error("a relabelled text opened")
+	}
+	// both formats open while the older one is allowed; only the newer when it is not
+	Configure(false, false)
+	old, _ := Wrap(pub, []byte("x"), nil)
+	if !strings.HasPrefix(old, "ecies1.") {
+		t.Fatal("the default is not ecies1")
+	}
+	if _, err := Unwrap(pub, key, a, []byte("ctx")); err != nil {
+		t.Errorf("ecies2 under the default: %v", err)
+	}
+	Configure(true, true)
+	if _, err := Unwrap(pub, key, old, nil); err != ErrLegacyRefused {
+		t.Errorf("ecies1 when refused: %v", err)
+	}
+	if _, err := Unwrap(pub, key, a, []byte("ctx")); err != nil {
+		t.Errorf("ecies2 when ecies1 is refused: %v", err)
+	}
+}

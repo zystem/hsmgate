@@ -3,12 +3,14 @@
 # the OpenSC module and the libraries it needs are copied into it from a Debian stage. Base images are pinned by digest (Renovate updates them).
 FROM golang:1.26.10-bookworm@sha256:ee3901c61e423732605a51f1b8157c849ec01194ea0a274213b5202b2c11e7bf AS build
 ARG VERSION=dev
+# GOFIPS140=v1.0.0 builds with the frozen Go cryptographic module and runs with fips140=on by default (docs/compliance.md); empty: the usual build
+ARG GOFIPS140=
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 # a position-independent executable with the relocations made at start and then read-only (ASLR for the whole program, no writable GOT)
-RUN CGO_ENABLED=1 go build -buildmode=pie -trimpath -buildvcs=false -ldflags "-s -w -linkmode=external -extldflags '-Wl,-z,relro,-z,now' -X main.version=${VERSION}" -o /out/hsmgate ./cmd/hsmgate
+RUN CGO_ENABLED=1 GOFIPS140=${GOFIPS140} go build -buildmode=pie -trimpath -buildvcs=false -ldflags "-s -w -linkmode=external -extldflags '-Wl,-z,relro,-z,now' -X main.version=${VERSION}" -o /out/hsmgate ./cmd/hsmgate
 
 # the module of OpenSC and what it needs (the PC/SC client library is loaded by OpenSC with dlopen, so ldd does not show it), with the same paths, into /rootfs;
 # the core of glibc comes from the final image
