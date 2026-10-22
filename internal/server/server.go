@@ -242,7 +242,7 @@ func loadTLS(cfg *config.Config) (*tls.Config, error) {
 func VerifyDistinct(cfg *config.Config, tokens map[string]backend.Token) error {
 	inUse := cfg.KMSJSON.Enabled
 	for _, k := range cfg.Keys {
-		inUse = inUse || k.KMSJSON
+		inUse = inUse || k.OnAnyFace()
 	}
 	if !inUse {
 		return nil

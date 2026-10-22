@@ -86,6 +86,9 @@ type Key struct {
 	// KMSJSON lets clients with the "derive" right use the key through the KMS-JSON face: ECDH with a key that stays on the token. That face has no context, so whoever may derive
 	// can open anything sealed to the key: such a key must be in "fixed" mode (a key in context mode would lose the isolation of its contexts) and is best dedicated to this use.
 	KMSJSON bool `yaml:"kmsjson"`
+	// KMSGRPC and KMSVault expose the key on the other two key-service faces (the gRPC/REST one and the Vault-style one), with the same usage and the same rules as KMSJSON.
+	KMSGRPC  bool `yaml:"kmsgrpc"`
+	KMSVault bool `yaml:"kmsvault"`
 	// KMSJSONUsage: "key_agreement" (the default: DeriveSharedSecret, the client seals and opens) or "encrypt_decrypt" (Encrypt, Decrypt, ReEncrypt, GenerateDataKey: the service seals
 	// and opens, as in the Transit face, and the request's EncryptionContext is the additional data) or "sign_verify" (Sign and Verify: ECDSA P-256 with SHA-256, the signature made on the
 	// token; the key label must be used by no other key) or "generate_verify_mac" (GenerateMac and VerifyMac: HMAC-SHA-256 with a key derived on the token by ECDH, see
@@ -99,6 +102,22 @@ const (
 	UsageSignVerify     = "sign_verify"
 	UsageMAC            = "generate_verify_mac"
 )
+
+// OnAnyFace: the key is exposed on at least one of the key-service faces; the rules about names, usages and separate private keys hold for all of them.
+func (k Key) OnAnyFace() bool { return k.KMSJSON || k.KMSGRPC || k.KMSVault }
+
+// OnFace: the key is exposed on the face of this name ("kmsjson", "kmsgrpc", "kmsvault").
+func (k Key) OnFace(face string) bool {
+	switch face {
+	case "kmsjson":
+		return k.KMSJSON
+	case "kmsgrpc":
+		return k.KMSGRPC
+	case "kmsvault":
+		return k.KMSVault
+	}
+	return false
+}
 
 // Usage of a key on the KMS-JSON face.
 func (k Key) Usage() string {
@@ -384,21 +403,21 @@ func (c *Config) validateKMSJSON() error {
 		}
 	}
 	for name, k := range c.Keys {
-		if k.KMSJSON {
+		if k.OnAnyFace() {
 			// the name is read back from a key id ("name", "alias/name", an identifier ending in ":key/name", "name@N") and written into ciphertext blobs with a length byte
 			if len(name) == 0 || len(name) > 128 || strings.Trim(name, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.-") != "" {
-				return fmt.Errorf("key %s: a key with kmsjson: true is named with 1 to 128 letters, digits, dots, dashes and underscores", name)
+				return fmt.Errorf("key %s: a key exposed on a key-service face is named with 1 to 128 letters, digits, dots, dashes and underscores", name)
 			}
 			if len(k.Versions) > 1000 {
-				return fmt.Errorf("key %s: a key with kmsjson: true has at most 1000 versions", name)
+				return fmt.Errorf("key %s: a key exposed on a key-service face has at most 1000 versions", name)
 			}
 		}
-		if k.KMSJSONUsage != "" && !k.KMSJSON {
-			return fmt.Errorf("key %s: kmsjson_usage needs kmsjson: true", name)
+		if k.KMSJSONUsage != "" && !k.OnAnyFace() {
+			return fmt.Errorf("key %s: kmsjson_usage needs kmsjson: true (or kmsgrpc, kmsvault)", name)
 		}
 		switch k.KMSJSONUsage {
 		case "", UsageKeyAgreement:
-			if k.KMSJSON && k.AAD.Mode != "fixed" {
+			if k.OnAnyFace() && k.AAD.Mode != "fixed" {
 				return fmt.Errorf("key %s: kmsjson key agreement needs aad mode fixed (DeriveSharedSecret has no context, so a key in context mode would lose the isolation of its contexts); use kmsjson_usage: encrypt_decrypt for a key with contexts", name)
 			}
 		case UsageEncryptDecrypt:
@@ -417,16 +436,16 @@ func (c *Config) validateKMSJSON() error {
 		for key, g := range cl.Keys {
 			for _, op := range g.Ops {
 				k := c.Keys[key]
-				if (op == "sign" || op == "verify") && !(k.KMSJSON && k.Usage() == UsageSignVerify) {
+				if (op == "sign" || op == "verify") && !(k.OnAnyFace() && k.Usage() == UsageSignVerify) {
 					return fmt.Errorf("client %s key %s: the right %s needs kmsjson: true and the usage sign_verify on the key", cl.Name, key, op)
 				}
-				if k.KMSJSON && k.Usage() == UsageSignVerify && op != "sign" && op != "verify" {
+				if k.OnAnyFace() && k.Usage() == UsageSignVerify && op != "sign" && op != "verify" {
 					return fmt.Errorf("client %s key %s: a key with the usage sign_verify has the rights sign and verify only, not %s", cl.Name, key, op)
 				}
-				if (op == "generate_mac" || op == "verify_mac") && !(k.KMSJSON && k.Usage() == UsageMAC) {
+				if (op == "generate_mac" || op == "verify_mac") && !(k.OnAnyFace() && k.Usage() == UsageMAC) {
 					return fmt.Errorf("client %s key %s: the right %s needs kmsjson: true and the usage generate_verify_mac on the key", cl.Name, key, op)
 				}
-				if k.KMSJSON && k.Usage() == UsageMAC && op != "generate_mac" && op != "verify_mac" {
+				if k.OnAnyFace() && k.Usage() == UsageMAC && op != "generate_mac" && op != "verify_mac" {
 					return fmt.Errorf("client %s key %s: a key with the usage generate_verify_mac has the rights generate_mac and verify_mac only, not %s", cl.Name, key, op)
 				}
 				if op == "derive" {
@@ -523,7 +542,7 @@ func (c *Config) physicalKey(tokenName, label string) string {
 func (c *Config) distinctKeys() error {
 	inUse := false
 	for _, k := range c.Keys {
-		inUse = inUse || k.KMSJSON
+		inUse = inUse || k.OnAnyFace()
 	}
 	if !c.KMSJSON.Enabled && !inUse {
 		return nil
