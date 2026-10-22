@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **gRPC face** (optional, `kmsgrpc.enabled`): a subset of the gRPC API of a cloud key service, for its client libraries (`GetPublicKey`, `AsymmetricSign`, `Encrypt`, `Decrypt`, `MacSign`, `MacVerify`, metadata calls, `GenerateRandomBytes`), authenticated by a service account (`jwt` on a client: token endpoint and self-signed bearers). See [docs/specs/kms-grpc.md](docs/specs/kms-grpc.md). Tried with the official Go client library (`test/kmsgrpc-sdk`).
+- `internal/kmsops`, `internal/generation`, `internal/peer`: the parts that the key-service faces share.
+
 ## 0.2.0 — 2026-10-21
 
 ### Added
