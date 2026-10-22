@@ -68,7 +68,7 @@ Everything else under the mount (`datakey`, `sign`, `hmac`, key creation, export
 
 ## 4. The ciphertext
 
-`vault:v<N>:<base64 of an ecies1 text>`. `N` is the key version it was sealed under. OpenBao splits it at the colons into three; the third part has no colon. For a 32-byte data key the ciphertext is 473 characters. Clients must treat it as opaque.
+`vault:v<N>:<base64 of an ecies2 text>`. `N` is the key version it was sealed under. OpenBao splits it at the colons into three; the third part has no colon. For a 32-byte data key the ciphertext is 441 characters. Clients must treat it as opaque.
 
 ## 5. Errors
 

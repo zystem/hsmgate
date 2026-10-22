@@ -43,7 +43,7 @@ Everything else answers `404`. Errors: `{"error": {"code", "message"}}`: `401 Un
 
 ## 4. What does not work
 
-- The algorithm names `A256GCM` and `A256KW` are what the clients send; the cipher is the one of the blob of the service (an ecies1 blob that authenticates the key name and the version). The blob goes in `value`; `iv` and `tag` are not used, and a client that wants to read them out of the answer gets none.
+- The algorithm names `A256GCM` and `A256KW` are what the clients send; the cipher is the one of the blob of the service (an ecies2 blob that authenticates the key name and the version). The blob goes in `value`; `iv` and `tag` are not used, and a client that wants to read them out of the answer gets none.
 - Signing is ECDSA P-256 only (`ES256`); RSA, P-384 and P-521 keys are not offered.
 - `go.step.sm/crypto/kms/azurekms` takes the vault from the name of the key (`vault.vault.azure.net`) and does not let the endpoint be set: to use it the name must resolve to hsmgate with a certificate the client trusts. The official SDK takes the vault URL and the authority host (CI: `test/kmsrest-sdk`).
 - Key creation, rotation, import, backup and deletion: not supported (keys are in the configuration).

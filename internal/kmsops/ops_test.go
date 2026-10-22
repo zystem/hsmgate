@@ -294,14 +294,14 @@ func TestRandomDescribeList(t *testing.T) {
 }
 
 func TestBlobParsingIsStrict(t *testing.T) {
-	good := MakeBlob("seal", 1, "ecies1.aa.bb.cc")
-	if n, v, txt, err := ParseBlob(good); err != nil || n != "seal" || v != 1 || txt != "ecies1.aa.bb.cc" {
+	good := MakeBlob("seal", 1, "ecies2.aa.bb.cc")
+	if n, v, txt, err := ParseBlob(good); err != nil || n != "seal" || v != 1 || txt != "ecies2.aa.bb.cc" {
 		t.Fatal(n, v, txt, err)
 	}
 	for i := 0; i < len(good); i++ {
 		ParseBlob(good[:i]) // no panic on any prefix
 	}
-	for _, b := range [][]byte{nil, []byte("HGK2"), []byte("HGK1\x01a\x00\x01ecies1.x"), []byte("HGK2\x00a\x00\x01ecies1.x"), []byte("HGK2\x01a\x00\x00ecies1.x"), []byte("HGK2\x01a\x00\x01nope")} {
+	for _, b := range [][]byte{nil, []byte("HGK2"), []byte("HGK1\x01a\x00\x01ecies2.x"), []byte("HGK2\x00a\x00\x01ecies2.x"), []byte("HGK2\x01a\x00\x00ecies2.x"), []byte("HGK2\x01a\x00\x01nope")} {
 		if _, _, _, err := ParseBlob(b); err == nil {
 			t.Errorf("accepted %q", b)
 		}

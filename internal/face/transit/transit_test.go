@@ -48,7 +48,7 @@ type rig struct {
 
 func newRig(t *testing.T, mutate func(*config.Config, map[string]backend.Token)) *rig {
 	t.Helper()
-	raw, err := os.ReadFile("../../../testdata/vectors/ecies1.json")
+	raw, err := os.ReadFile("../../../testdata/vectors/ecies2.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +130,7 @@ func TestOpenBaoSealRoundTrip(t *testing.T) {
 	}
 }
 
-// Ciphertexts made by the Nim kekd for OpenBao's seal keep opening: aad "openbao/seal/v1|<key>", wrapped in vault:v1:<base64>.
+// Ciphertexts of the test vectors, made for OpenBao's seal keep opening: aad "openbao/seal/v1|<key>", wrapped in vault:v1:<base64>.
 func TestNimMadeOpenBaoCiphertextOpens(t *testing.T) {
 	r := newRig(t, nil)
 	for _, c := range r.vec.Valid {
@@ -145,7 +145,7 @@ func TestNimMadeOpenBaoCiphertextOpens(t *testing.T) {
 	}
 }
 
-// CiNim's wrapped keys (aad "cinim/dek/v1|...") open through the context.
+// Wrapped keys of CiNim's shape (aad "cinim/dek/v1|...") open through the context.
 func TestNimMadeCinimCiphertextOpensWithContext(t *testing.T) {
 	r := newRig(t, nil)
 	c := r.vec.Valid[0]
@@ -290,7 +290,7 @@ func TestReplicaAnswersWhenThePrimaryIsLocked(t *testing.T) {
 		t.Fatalf("%d %v", st, out)
 	}
 	// damaged text: not retried elsewhere, final
-	if st, _, h := r.call("openbao", "PUT", "/v1/transit/decrypt/bao-seal", map[string]string{"ciphertext": "vault:v1:" + b64("ecies1.x")}); st != 400 || h.Get("X-Hsmgate-Retryable") != "false" {
+	if st, _, h := r.call("openbao", "PUT", "/v1/transit/decrypt/bao-seal", map[string]string{"ciphertext": "vault:v1:" + b64("ecies2.x")}); st != 400 || h.Get("X-Hsmgate-Retryable") != "false" {
 		t.Errorf("damaged: %d", st)
 	}
 	// both holders locked: retryable
@@ -455,7 +455,7 @@ func TestKeyInfoHasABudgetAndConcurrencyIsBounded(t *testing.T) {
 	r2.face.Limit(gate.New(1, 50*time.Millisecond))
 	block := make(chan struct{})
 	r2.face.Tokens["soft"] = slowToken{r2.face.Tokens["soft"], block}
-	body := map[string]string{"ciphertext": "vault:v1:" + b64("ecies1.x.y.z")}
+	body := map[string]string{"ciphertext": "vault:v1:" + b64("ecies2.x.y.z")}
 	// the first operation holds the slot: it is sent from another goroutine with plain net/http (a test helper that calls t.Fatal must not run there)
 	first := make(chan struct{})
 	go func() {
@@ -491,7 +491,7 @@ func TestAdmissionIsAFiniteLine(t *testing.T) {
 	r.face.Limit(gate.New(1, 5*time.Second))
 	block := make(chan struct{})
 	r.face.Tokens["soft"] = slowToken{r.face.Tokens["soft"], block}
-	body, _ := json.Marshal(map[string]string{"ciphertext": "vault:v1:" + b64("ecies1.x.y.z")})
+	body, _ := json.Marshal(map[string]string{"ciphertext": "vault:v1:" + b64("ecies2.x.y.z")})
 	send := func(wg *sync.WaitGroup) {
 		defer wg.Done()
 		req, _ := http.NewRequest("PUT", r.srv.URL+"/v1/transit/decrypt/bao-seal", bytes.NewReader(body))
@@ -508,7 +508,7 @@ func TestAdmissionIsAFiniteLine(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	start := time.Now()
-	st, _, _ := r.call("openbao", "PUT", "/v1/transit/decrypt/bao-seal", map[string]string{"ciphertext": "vault:v1:" + b64("ecies1.x.y.z")})
+	st, _, _ := r.call("openbao", "PUT", "/v1/transit/decrypt/bao-seal", map[string]string{"ciphertext": "vault:v1:" + b64("ecies2.x.y.z")})
 	took := time.Since(start)
 	close(block)
 	wg.Wait()
@@ -522,7 +522,7 @@ func TestReloadWaitsForRequestsInFlight(t *testing.T) {
 	r := newRig(t, nil)
 	block := make(chan struct{})
 	r.face.Tokens["soft"] = slowToken{r.face.Tokens["soft"], block}
-	body, _ := json.Marshal(map[string]string{"ciphertext": "vault:v1:" + b64("ecies1.x.y.z")})
+	body, _ := json.Marshal(map[string]string{"ciphertext": "vault:v1:" + b64("ecies2.x.y.z")})
 	req, _ := http.NewRequest("PUT", r.srv.URL+"/v1/transit/decrypt/bao-seal", bytes.NewReader(body))
 	req.Header.Set("X-Test-Client", "openbao")
 	finished := make(chan struct{})

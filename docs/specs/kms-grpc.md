@@ -34,7 +34,7 @@ The client functions are those of `go.step.sm/crypto/kms/cloudkms` (Apache-2.0) 
 |---|---|---|
 | `GetPublicKey` | `CloudKMS.GetPublicKey`, `CloudKMS.CreateSigner` (reads the key once) | sign_verify keys; PEM, `EC_SIGN_P256_SHA256`, `pem_crc32c` |
 | `AsymmetricSign` | `Signer.Sign` | SHA-256 digest only; ECDSA on the token, DER signature; `digest_crc32c` checked |
-| `Encrypt`, `Decrypt` | the library's symmetric calls | encrypt_decrypt keys; sealing under the key's token key (ecies1 blob that authenticates name and version); additional authenticated data passed as it is; 64 KiB; `*_crc32c` checked and answered |
+| `Encrypt`, `Decrypt` | the library's symmetric calls | encrypt_decrypt keys; sealing under the key's token key (ecies2 blob that authenticates name and version); additional authenticated data passed as it is; 64 KiB; `*_crc32c` checked and answered |
 | `MacSign`, `MacVerify` | the library's MAC calls | HMAC-SHA-256 under a key derived on the token |
 | `GetCryptoKey`, `GetCryptoKeyVersion`, `ListCryptoKeys`, `ListCryptoKeyVersions` | tools that look a key up | only keys on the face the client may see; state ENABLED, protection level HSM |
 | `GenerateRandomBytes` | the library's call | 1–1024 bytes of the operating system's generator |

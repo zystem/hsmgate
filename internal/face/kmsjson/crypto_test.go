@@ -261,14 +261,14 @@ func TestSealingNeedsTheAuditLine(t *testing.T) {
 }
 
 func TestParseBlobNeverPanics(t *testing.T) {
-	good := makeBlob("seal", 1, "ecies1.aa.bb.cc")
-	if n, v, txt, err := parseBlob(good); err != nil || n != "seal" || v != 1 || txt != "ecies1.aa.bb.cc" {
+	good := makeBlob("seal", 1, "ecies2.aa.bb.cc")
+	if n, v, txt, err := parseBlob(good); err != nil || n != "seal" || v != 1 || txt != "ecies2.aa.bb.cc" {
 		t.Fatalf("%q %d %q %v", n, v, txt, err)
 	}
 	for i := 0; i <= len(good); i++ {
 		parseBlob(good[:i])
 	}
-	for _, b := range [][]byte{nil, []byte("HGK1"), []byte("HGK1\x00"), []byte("HGK1\xffab"), []byte("HGK1\x01a\x00\x00ecies1."), []byte("HGK1\x01a\x00\x00x")} {
+	for _, b := range [][]byte{nil, []byte("HGK1"), []byte("HGK1\x00"), []byte("HGK1\xffab"), []byte("HGK1\x01a\x00\x00ecies2."), []byte("HGK1\x01a\x00\x00x")} {
 		if _, _, _, err := parseBlob(b); err == nil {
 			t.Errorf("accepted %q", b)
 		}
@@ -276,12 +276,12 @@ func TestParseBlobNeverPanics(t *testing.T) {
 }
 
 func FuzzParseBlob(f *testing.F) {
-	f.Add(makeBlob("seal", 1, "ecies1.aa.bb.cc"))
-	f.Add([]byte("HGK1\x01a\x00\x01ecies1.x"))
+	f.Add(makeBlob("seal", 1, "ecies2.aa.bb.cc"))
+	f.Add([]byte("HGK1\x01a\x00\x01ecies2.x"))
 	f.Add([]byte{})
 	f.Fuzz(func(t *testing.T, b []byte) {
 		name, ver, text, err := parseBlob(b)
-		if err == nil && (name == "" || ver < 1 || !strings.HasPrefix(text, "ecies1.")) {
+		if err == nil && (name == "" || ver < 1 || !strings.HasPrefix(text, "ecies2.")) {
 			t.Fatalf("accepted %q", b)
 		}
 	})

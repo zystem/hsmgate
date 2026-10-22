@@ -31,9 +31,11 @@ type vectors struct {
 	} `json:"invalid"`
 }
 
-func load(t *testing.T) (vectors, SoftKey, []byte) {
+const vectorFile = "../../../testdata/vectors/ecies2.json"
+
+func load(t testing.TB) (vectors, SoftKey, []byte) {
 	t.Helper()
-	raw, err := os.ReadFile("../../../testdata/vectors/ecies1.json")
+	raw, err := os.ReadFile(vectorFile)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +62,7 @@ func TestFingerprintMatchesVector(t *testing.T) {
 	}
 }
 
-func TestNimVectorsOpen(t *testing.T) {
+func TestVectorsOpen(t *testing.T) {
 	v, key, pub := load(t)
 	for _, c := range v.Valid {
 		plain, err := Unwrap(pub, key, c.Wrapped, []byte(c.AAD))
@@ -70,7 +72,7 @@ func TestNimVectorsOpen(t *testing.T) {
 	}
 }
 
-func TestNimInvalidVectors(t *testing.T) {
+func TestInvalidVectors(t *testing.T) {
 	v, key, pub := load(t)
 	want := map[string]error{"damaged": ErrDamaged, "wrong_key": ErrWrongKey}
 	for _, c := range v.Invalid {
@@ -83,20 +85,22 @@ func TestNimInvalidVectors(t *testing.T) {
 func TestRoundTripAndFreshEphemeral(t *testing.T) {
 	_, key, pub := load(t)
 	a, err := Wrap(pub, []byte("data key"), []byte("ctx"))
-	if err != nil {
-		t.Fatal(err)
+	if err != nil || !strings.HasPrefix(a, "ecies2.") {
+		t.Fatalf("%q %v", a, err)
 	}
 	b, _ := Wrap(pub, []byte("data key"), []byte("ctx"))
 	if a == b {
 		t.Error("two wraps gave the same text")
 	}
-	p, err := Unwrap(pub, key, a, []byte("ctx"))
-	if err != nil || string(p) != "data key" {
+	if p, err := Unwrap(pub, key, a, []byte("ctx")); err != nil || string(p) != "data key" {
 		t.Errorf("%q %v", p, err)
+	}
+	if _, err := Unwrap(pub, key, a, []byte("other")); !errors.Is(err, ErrDamaged) {
+		t.Errorf("another context: %v", err)
 	}
 }
 
-func TestTamperAndOffCurve(t *testing.T) {
+func TestTamperOffCurveAndTag(t *testing.T) {
 	_, key, pub := load(t)
 	w, _ := Wrap(pub, []byte("k"), nil)
 	p := strings.Split(w, ".")
@@ -112,29 +116,28 @@ func TestTamperAndOffCurve(t *testing.T) {
 	if _, err := Unwrap(pub, key, strings.Join([]string{p[0], p[1], off, p[3]}, "."), nil); !errors.Is(err, ErrDamaged) {
 		t.Errorf("off curve: %v", err)
 	}
+	// the format that this one replaced is not read, even with the same fields
+	if _, err := Unwrap(pub, key, strings.Join([]string{"ecies1", p[1], p[2], p[3]}, "."), nil); !errors.Is(err, ErrDamaged) {
+		t.Errorf("the earlier format tag: %v", err)
+	}
 }
 
 // Fuzzing: whatever text arrives, Unwrap neither panics nor opens it, except the genuine ones.
 func FuzzUnwrap(f *testing.F) {
-	raw, _ := os.ReadFile("../../../testdata/vectors/ecies1.json")
-	var v vectors
-	json.Unmarshal(raw, &v)
+	v, key, pub := load(f)
 	for _, c := range v.Valid {
 		f.Add(c.Wrapped, []byte(c.AAD))
 	}
-	f.Add("ecies1.x.y.z", []byte("a"))
-	privB, _ := hex.DecodeString(v.Master.PrivateHex)
-	priv, _ := ecdh.P256().NewPrivateKey(privB)
-	pub := priv.PublicKey().Bytes()
+	f.Add("ecies2.x.y.z", []byte("a"))
 	f.Fuzz(func(t *testing.T, wrapped string, aad []byte) {
-		plain, err := Unwrap(pub, SoftKey{priv}, wrapped, aad)
+		plain, err := Unwrap(pub, key, wrapped, aad)
 		if err == nil {
 			// the only texts that open are ones sealed to this key with this aad: seal the result again and check it is consistent
 			again, err := Wrap(pub, plain, aad)
 			if err != nil {
 				t.Fatal(err)
 			}
-			back, err := Unwrap(pub, SoftKey{priv}, again, aad)
+			back, err := Unwrap(pub, key, again, aad)
 			if err != nil || !bytes.Equal(back, plain) {
 				t.Fatalf("inconsistent: %v", err)
 			}
@@ -144,8 +147,8 @@ func FuzzUnwrap(f *testing.F) {
 
 func FuzzRoundTrip(f *testing.F) {
 	f.Add([]byte("k"), []byte("aad"))
+	_, key, pub := load(f)
 	f.Fuzz(func(t *testing.T, plain, aad []byte) {
-		_, key, pub := load(t)
 		w, err := Wrap(pub, plain, aad)
 		if err != nil {
 			t.Fatal(err)
@@ -160,52 +163,4 @@ func FuzzRoundTrip(f *testing.F) {
 			}
 		}
 	})
-}
-
-func TestV2RoundTripAndWhatItBinds(t *testing.T) {
-	_, key, pub := load(t)
-	Configure(true, false)
-	defer Configure(false, false)
-	a, err := Wrap(pub, []byte("data key"), []byte("ctx"))
-	if err != nil || !strings.HasPrefix(a, "ecies2.") {
-		t.Fatalf("%q %v", a, err)
-	}
-	b, _ := Wrap(pub, []byte("data key"), []byte("ctx"))
-	if a == b {
-		t.Error("two wraps gave the same text")
-	}
-	if p, err := Unwrap(pub, key, a, []byte("ctx")); err != nil || string(p) != "data key" {
-		t.Errorf("%q %v", p, err)
-	}
-	// another place, a changed byte, a text made into the older format by relabelling
-	if _, err := Unwrap(pub, key, a, []byte("other")); err != ErrDamaged {
-		t.Errorf("another context: %v", err)
-	}
-	parts := strings.Split(a, ".")
-	bad := []byte(parts[3])
-	bad[10] ^= 1
-	parts[3] = string(bad)
-	if _, err := Unwrap(pub, key, strings.Join(parts, "."), []byte("ctx")); err == nil {
-		t.Error("a changed byte opened")
-	}
-	parts[0], parts[3] = "ecies1", strings.Split(a, ".")[3]
-	if _, err := Unwrap(pub, key, strings.Join(parts, "."), []byte("ctx")); err == nil {
-		t.Error("a relabelled text opened")
-	}
-	// both formats open while the older one is allowed; only the newer when it is not
-	Configure(false, false)
-	old, _ := Wrap(pub, []byte("x"), nil)
-	if !strings.HasPrefix(old, "ecies1.") {
-		t.Fatal("the default is not ecies1")
-	}
-	if _, err := Unwrap(pub, key, a, []byte("ctx")); err != nil {
-		t.Errorf("ecies2 under the default: %v", err)
-	}
-	Configure(true, true)
-	if _, err := Unwrap(pub, key, old, nil); err != ErrLegacyRefused {
-		t.Errorf("ecies1 when refused: %v", err)
-	}
-	if _, err := Unwrap(pub, key, a, []byte("ctx")); err != nil {
-		t.Errorf("ecies2 when ecies1 is refused: %v", err)
-	}
 }

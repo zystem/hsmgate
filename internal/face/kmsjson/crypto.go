@@ -1,7 +1,7 @@
 package kmsjson
 
 // The sealing operations of the face: Encrypt, Decrypt, ReEncrypt, GenerateDataKey, GenerateDataKeyWithoutPlaintext and GenerateRandom, for keys with the usage encrypt_decrypt.
-// The service seals and opens, as in the Transit face (ecies1; the token does only the ECDH of the opening), and it sees the plaintext while it works. The EncryptionContext of
+// The service seals and opens, as in the Transit face (ecies2; the token does only the ECDH of the opening), and it sees the plaintext while it works. The EncryptionContext of
 // the request is the additional data of the AEAD (a key in context mode) or must be absent (a key in fixed mode). The ciphertext blob is ours: opaque to clients, which only
 // carry it; it names the key and its version, so that Decrypt works without a KeyId, as clients expect.
 
@@ -271,7 +271,7 @@ func parseBlob(b []byte) (name string, ver int, text string, err error) {
 	name = string(rest[:n])
 	ver = int(binary.BigEndian.Uint16(rest[n : n+2]))
 	text = string(rest[n+2:])
-	if ver < 1 || !(strings.HasPrefix(text, ecies.FormatTag+".") || strings.HasPrefix(text, ecies.FormatTag2+".")) {
+	if ver < 1 || !strings.HasPrefix(text, ecies.FormatTag+".") {
 		return "", 0, "", errBlob
 	}
 	return name, ver, text, nil

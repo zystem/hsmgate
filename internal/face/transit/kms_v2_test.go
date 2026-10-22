@@ -153,25 +153,25 @@ func TestKMSv2StatusEncryptDecryptSequence(t *testing.T) {
 	if st != 200 || id != "1" || !strings.HasPrefix(ct, "vault:v1:") {
 		t.Fatalf("%q %q %d", ct, id, st)
 	}
-	if len(ct) != 473 { // the number in the specification
-		t.Errorf("the ciphertext of a 32-byte DEK is %d bytes, the spec says 473", len(ct))
+	if len(ct) != 441 { // the number in the specification
+		t.Errorf("the ciphertext of a 32-byte DEK is %d bytes, the spec says 441", len(ct))
 	}
 	if got, st := p.decrypt("bao-seal", ct); st != 200 || !bytes.Equal(got, dek) {
 		t.Errorf("%x %d", got, st)
 	}
 }
 
-// KMS v2 requires a ciphertext under 1 kB; the specification says a plaintext of up to 238 bytes fits.
+// KMS v2 requires a ciphertext under 1 kB; the specification says a plaintext of up to 250 bytes fits.
 func TestKMSv2CiphertextStaysUnderOneKilobyte(t *testing.T) {
 	r := newRig(t, nil)
 	p := &plugin{t, r, "openbao"}
-	fits, _, st := p.encrypt("bao-seal", bytes.Repeat([]byte{1}, 238))
+	fits, _, st := p.encrypt("bao-seal", bytes.Repeat([]byte{1}, 250))
 	if st != 200 || len(fits) >= 1024 {
-		t.Errorf("238 bytes: %d bytes of ciphertext, status %d", len(fits), st)
+		t.Errorf("250 bytes: %d bytes of ciphertext, status %d", len(fits), st)
 	}
-	over, _, st := p.encrypt("bao-seal", bytes.Repeat([]byte{1}, 239))
+	over, _, st := p.encrypt("bao-seal", bytes.Repeat([]byte{1}, 251))
 	if st != 200 || len(over) < 1024 {
-		t.Errorf("239 bytes: %d bytes of ciphertext, status %d (the specification's bound is 238)", len(over), st)
+		t.Errorf("251 bytes: %d bytes of ciphertext, status %d (the specification's bound is 250)", len(over), st)
 	}
 }
 

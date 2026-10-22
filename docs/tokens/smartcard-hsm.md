@@ -62,7 +62,7 @@ An EC key refuses the AES commands (`6A81`) and an AES key refuses ECDH (`6A86`)
 
 Every operation on the card costs 17 to 43 ms whatever it is: the time is the round trip through the reader and the card, and the card does one thing at a time. The PKCS#11 layer adds about a millisecond; the vendor's module and OpenSC are equal. What this means for the designs:
 
-- `ecies1` (ECDH): a **seal needs no card at all** (the public key; 0.1 ms in software), an **open is one ECDH, 37 ms**: at most about 27 opens per second per card. Sealing scales; opening is the limit.
+- `ecies2` (ECDH): a **seal needs no card at all** (the public key; 0.1 ms in software), an **open is one ECDH, 37 ms**: at most about 27 opens per second per card. Sealing scales; opening is the limit.
 - AES on the card (CMAC as a PRF, or CBC with CMAC): **every seal and every open is a card operation** (one or two, 19 to 37 ms), so sealing becomes 200 to 400 times slower and depends on the card, and the card's 20 to 55 operations per second are shared by seals and opens.
 - MAC: the key derived by ECDH is one 37 ms operation per MAC without the cache and none with it (`kmsjson.mac_cache_seconds`); a MAC on the card is 19 ms (CMAC) or 43 ms (HMAC-SHA256 function) every time.
 - The line to the card (`limits`: 8 at once, 2 seconds of waiting by default) is sized for these numbers: a burst of more than about 50 simultaneous opens finds the queue full and gets `busy`/`throttled` with a retry.

@@ -8,14 +8,13 @@ Honest summary. hsmgate is a **software gateway** in front of a token. Standards
 
 **What is done.**
 - The cryptography of the process is the Go standard library; the Go Cryptographic Module (`crypto/internal/fips140`) is validated under CMVP. `require_fips: true` makes the service refuse to start unless that module is in FIPS 140-3 mode (`GODEBUG=fips140=on`, or a binary built with `GOFIPS140=v1.0.0`, which the Dockerfile does with `--build-arg GOFIPS140=v1.0.0`). The module's own self-tests run at start.
-- Algorithms in use: ECDSA and ECDH on P-256, SHA-256, HMAC-SHA-256, HKDF-SHA-256, AES-256-GCM (format `ecies2`), RSA ≥ 2048 for the verification of tokens, TLS 1.3. All are approved. The one that was not, ChaCha20-Poly1305 of `ecies1`, is not used for sealing under `require_fips`, and `ecies1` is not opened ([specs/ecies1.md](specs/ecies1.md)). The test suite passes under `GODEBUG=fips140=on` and `fips140=only`.
+- Algorithms in use: ECDSA and ECDH on P-256, SHA-256, HMAC-SHA-256, HKDF-SHA-256, AES-256-GCM (format `ecies2`), RSA ≥ 2048 for the verification of tokens, TLS 1.3. All are approved; the one that was not, ChaCha20-Poly1305 of the earlier format `ecies1`, is gone from the code ([specs/ecies2.md](specs/ecies2.md)). The test suite passes under `GODEBUG=fips140=on` and `fips140=only`.
 - The token does only ECDH and ECDSA; sealing runs on the host, so the lack of AES-GCM on the card does not matter.
 
 **What is not done, and why.**
 - The Go module's certificate is for the version and the operating environments in its Security Policy. A binary on another platform is "built with a validated module" but is not the tested configuration; whoever must prove compliance must compare with the certificate.
 - The SmartCard-HSM has its own status (its vendor states it; we do not claim it). The private key never leaves it, but the module that holds it is not covered by the Go certificate.
 - Keys that the host derives (the MAC key of `generate_verify_mac`, the data keys of `ecies`) live in the memory of the process for the time of the operation. Level 3 of FIPS 140 wants key entry and output protected; that is a property of a device, which a process on a server is not.
-- `ecies1` data of CiNim must be re-sealed (`rewrap`) before `require_fips` is turned on.
 
 ## 2. OWASP ASVS 4.0 (level 2), self-assessment
 

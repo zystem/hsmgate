@@ -80,7 +80,7 @@ func Sign(tokens map[string]backend.Token, v config.Version, digest []byte) ([]b
 	return nil, last
 }
 
-// Open opens an ecies1 text sealed to a version: the holders in order, the next only when this one could not answer (locked, removed), never when it said the text is bad.
+// Open opens an ecies2 text sealed to a version: the holders in order, the next only when this one could not answer (locked, removed), never when it said the text is bad.
 func Open(tokens map[string]backend.Token, v config.Version, text string, aad []byte) ([]byte, error) {
 	var last error
 	for _, h := range v.Holders() {

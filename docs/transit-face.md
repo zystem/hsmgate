@@ -1,6 +1,6 @@
 # The Transit face: the API for CiNim
 
-> The contract is written in [specs/transit.md](specs/transit.md) (and [specs/ecies1.md](specs/ecies1.md), [specs/kubernetes-kms-v2.md](specs/kubernetes-kms-v2.md), [specs/kms-json.md](specs/kms-json.md)). This page is the design and the record of what was tried.
+> The contract is written in [specs/transit.md](specs/transit.md) (and [specs/ecies2.md](specs/ecies2.md), [specs/kubernetes-kms-v2.md](specs/kubernetes-kms-v2.md), [specs/kms-json.md](specs/kms-json.md)). This page is the design and the record of what was tried.
 
 Decision (2026-10-19): CiNim talks to hsmgate through the **Vault/OpenBao Transit API** (`encrypt`, `decrypt`, `rewrap`, `keys/<name>`). No own protocol. The AWS KMS option (`DeriveSharedSecret`) is kept only as a
 possible later face: [specs/kms-json.md](specs/kms-json.md).
@@ -15,7 +15,7 @@ The service does the ECIES itself (the token does only ECDH, so a token or a mod
 | mount (`transit` by default, configurable) | one face instance; a host may run several hsmgate processes, each with its own mount/port |
 | key name | a configured key: `name -> (token, key id, scheme)`; a tenant's own KEK is just another name |
 | `context` (base64) | per key, `aad.mode`: **`fixed`** (the default for OpenBao's seal, which sends no context): AAD is a constant for the key, `openbao/seal/v1\|<key name>` unless `aad.fixed` says otherwise (the value `kekd` used, so existing ciphertexts open), and a request with a context is refused; **`context`** (CiNim): AAD is the context bytes exactly as sent, required, and must begin with one of `aad.allow` (e.g. `cinim/dek/v1\|`), so texts made by CiNim's `kekd` open unchanged |
-| `plaintext` / `ciphertext` | `vault:v<N>:` + base64 of the sealed text (`ecies1.<fingerprint>...`); N is the key version |
+| `plaintext` / `ciphertext` | `vault:v<N>:` + base64 of the sealed text (`ecies2.<fingerprint>...`); N is the key version |
 | key versions | one version per physical key/public key; new key = new version; `min_decryption_version`, `latest_version` as Transit reports them |
 | `rewrap` | open under the version in the text, seal to the latest version, without the plaintext leaving the process |
 | `GET keys/<name>` | `type: "ecdh-es-p256"` (extension), `latest_version`, `keys` (public keys by version, base64 DER), `supports_*` flags; no token access |
@@ -39,7 +39,7 @@ Deny by default; every decision, including refusals, is audited (never a key, pl
 ## What CiNim changes (CiNim's task, tracked in its repository; listed here as the contract's consumer side)
 
 `core/kekclient.nim`: the calls become `PUT /v1/transit/encrypt/<key>` and `decrypt/<key>` with `context`; the key name comes from the tenant's KEK setting (shard default, or the tenant's own); `retryable` from the header.
-Stored `ecies1` texts remain readable: the Transit text wraps them, and a migration can wrap old `kekd` outputs without opening them (the service accepts a bare `ecies1.` text on `decrypt` for this, behind a flag).
+Texts of the earlier format (`ecies1`) are not read; re-seal them with the version that still reads them (0.3.x) before moving to 0.4.
 Old `kekd` (Nim) and its v1 API are removed after the move. The face's behaviour is specified by test vectors and by runs of the real clients (OpenBao seal, `vault-kubernetes-kms`), already done against the Nim `kekd` for OpenBao.
 
 ## Verified against OpenBao (2026-10-19)

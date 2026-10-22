@@ -8,7 +8,7 @@ import (
 	"github.com/zystem/hsmgate/internal/scheme/ecies"
 )
 
-// The blob that Encrypt gives and Decrypt takes (on every face): "HGK2", the length of the name, the name of the key, the version as two bytes, the ecies text (ecies1 or ecies2). The name and the version
+// The blob that Encrypt gives and Decrypt takes (on every face): "HGK2", the length of the name, the name of the key, the version as two bytes, the ecies2 text. The name and the version
 // are in the clear so that a Decrypt without a key id finds the key, and they are also authenticated: BindAAD puts them into the additional data of the AEAD, so a blob cannot be
 // relabelled to another key (even one with the same material and context) or to another version (the audit of 2026-10-21, CR-02).
 const blobMagic = "HGK2"
@@ -22,7 +22,7 @@ func BindAAD(name string, ver int, aad []byte) []byte {
 	return append(b, aad...)
 }
 
-// MakeBlob puts a name, a version and an ecies1 text into the blob.
+// MakeBlob puts a name, a version and an ecies2 text into the blob.
 func MakeBlob(name string, ver int, text string) []byte {
 	b := append([]byte(blobMagic), byte(len(name))) // #nosec G115 -- bounded by config.Validate
 	b = append(b, name...)
@@ -45,7 +45,7 @@ func ParseBlob(b []byte) (name string, ver int, text string, err error) {
 	name = string(rest[:n])
 	ver = int(binary.BigEndian.Uint16(rest[n : n+2]))
 	text = string(rest[n+2:])
-	if ver < 1 || !(strings.HasPrefix(text, ecies.FormatTag+".") || strings.HasPrefix(text, ecies.FormatTag2+".")) {
+	if ver < 1 || !strings.HasPrefix(text, ecies.FormatTag+".") {
 		return "", 0, "", errBlob
 	}
 	return name, ver, text, nil

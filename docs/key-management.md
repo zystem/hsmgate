@@ -7,7 +7,7 @@ hsmgate follows these two as guidance; nothing here is a certification. Part 1 o
 | Use | Algorithm | Security strength | State |
 |---|---|---|---|
 | Key establishment (sealing, `ecies`) | ECDH P-256 (SP 800-56A), HKDF-SHA-256 (SP 800-56C) | 128 bits | approved |
-| Data protection | AES-256-GCM (`ecies2`); XChaCha20-Poly1305 (`ecies1`, read only under `require_fips: false`) | 256 bits | `ecies2` approved; `ecies1` is not an approved algorithm, kept to read old data |
+| Data protection | AES-256-GCM (`ecies2`) | 256 bits | approved |
 | Signatures | ECDSA P-256 with SHA-256 (FIPS 186-5) | 128 bits | approved |
 | MAC | HMAC-SHA-256, key derived on the token | 128 bits or more | approved |
 | Authentication of clients | TLS 1.3, RSA ≥ 2048 for JWT assertions, secrets ≥ 32 bytes | 112 bits or more | approved; RSA 2048 is acceptable through 2030 |
@@ -25,7 +25,7 @@ Not used: SHA-1, 3DES, RSA below 2048, P-192, MD5. The service refuses a JWT wit
 | Use | every use is policy-checked and audited before the answer; a key has one usage; budgets per minute | the service |
 | Cryptoperiod | versions: a new version is added to the configuration and becomes the latest; the older ones stay for decryption and verification. A rule for the length of a period is the operator's: SP 800-57 suggests up to 2 years for an asymmetric key used for key establishment, and a shorter one for a key that signs | operator |
 | Backup | the card's DKEK scheme (shares, a spare card with the same keys: `replicas`); see [tokens/smartcard-hsm.md](tokens/smartcard-hsm.md) | operator |
-| Re-sealing | `rewrap` re-seals a text under the latest version; needed to move data from `ecies1` to `ecies2` and from an older version to the latest | client with the right |
+| Re-sealing | `rewrap` re-seals a text under the latest version; needed to move data from an older version to the latest | client with the right |
 | Destruction | removing a key from the card; texts sealed to it can no longer be opened (crypto-shredding) | operator |
 | Compromise | remove the client or the key from the configuration and reload (SIGHUP): effective for the next request; the audit log says what the client used | operator |
 
