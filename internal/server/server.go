@@ -23,6 +23,7 @@ import (
 	"github.com/zystem/hsmgate/internal/config"
 	"github.com/zystem/hsmgate/internal/face/kmsgrpc"
 	"github.com/zystem/hsmgate/internal/face/kmsjson"
+	"github.com/zystem/hsmgate/internal/face/kmsrest"
 	"github.com/zystem/hsmgate/internal/face/transit"
 	"github.com/zystem/hsmgate/internal/gate"
 	"github.com/zystem/hsmgate/internal/metrics"
@@ -36,6 +37,7 @@ const maxDrain = 10 * time.Minute
 type generation struct {
 	creds  map[string]kmsjson.Cred // the signing credentials of the second face, by access key id
 	gcreds map[string]kmsgrpc.Cred // the service accounts of the gRPC face, by issuer
+	rcreds map[string]kmsrest.Cred // the credentials of the REST face, by client id
 	cfg    *config.Config
 	tokens map[string]backend.Token
 	auth   *authn.Authenticator
@@ -51,6 +53,7 @@ type Server struct {
 	face     *transit.Face
 	kms      *kmsjson.Face // nil when the second face is off
 	grpc     *kmsgrpc.Face // nil when the gRPC face is off
+	rest     *kmsrest.Face // nil when the REST face is off
 	gate     *gate.Gate
 	maxConns int
 	stats    *metrics.Registry
@@ -121,6 +124,17 @@ func New(cfg *config.Config, auditOut io.Writer) (*Server, error) {
 			inner.ServeHTTP(w, r)
 		})
 	}
+	if cfg.KMSRest.Enabled {
+		s.rest = kmsrest.New(s.audit, s.gate, cfg.KMSRest.Tenant)
+		inner := handler
+		handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if s.rest.Handles(r) {
+				s.rest.ServeHTTP(w, r)
+				return
+			}
+			inner.ServeHTTP(w, r)
+		})
+	}
 	s.HTTP = &http.Server{Addr: cfg.Listen, Handler: handler, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, MaxHeaderBytes: 16 << 10, HTTP2: &http.HTTP2Config{MaxConcurrentStreams: 16}}
 	if cfg.InsecureLoopbackClient != "" {
 		if !loopback(cfg.Listen) {
@@ -135,6 +149,9 @@ func New(cfg *config.Config, auditOut io.Writer) (*Server, error) {
 		if s.grpc != nil {
 			s.grpc.Reload(cfg, gen.tokens, gen.pol, func(*http.Request) (string, bool) { return "", true }, gen.gcreds)
 		}
+		if s.rest != nil {
+			s.rest.Reload(cfg, gen.tokens, gen.pol, func(*http.Request) (string, bool) { return "", true }, gen.rcreds)
+		}
 		s.Insecure = true
 		return s, nil
 	}
@@ -144,6 +161,9 @@ func New(cfg *config.Config, auditOut io.Writer) (*Server, error) {
 	}
 	if s.grpc != nil {
 		s.grpc.Reload(cfg, gen.tokens, gen.pol, identifier(gen.auth), gen.gcreds)
+	}
+	if s.rest != nil {
+		s.rest.Reload(cfg, gen.tokens, gen.pol, identifier(gen.auth), gen.rcreds)
 	}
 	// the configuration of a connection is taken at its handshake, so a reload applies to the next connection (and requests are judged by the current CA anyway)
 	// (MinVersion and ClientAuth here are the floor if the function ever returned nothing: TLS 1.3 and a verified certificate, or a certificate that is not shown, never less)
@@ -217,6 +237,10 @@ func (s *Server) prepare(cfg *config.Config, old *generation) (gen *generation, 
 	if err != nil {
 		return nil, nil, fresh, err
 	}
+	rcreds, err := kmsrest.LoadCreds(cfg)
+	if err != nil {
+		return nil, nil, fresh, err
+	}
 	creds, err := loadCreds(cfg)
 	if err != nil {
 		return nil, nil, fresh, err
@@ -225,7 +249,7 @@ func (s *Server) prepare(cfg *config.Config, old *generation) (gen *generation, 
 	if old != nil {
 		counters = old.pol.Counters()
 	}
-	gen = &generation{creds: creds, gcreds: gcreds, cfg: cfg, tokens: tokens, auth: authn.New(cfg.Clients, roots), tlsCfg: tcfg, pol: policy.New(cfg, counters)}
+	gen = &generation{creds: creds, gcreds: gcreds, rcreds: rcreds, cfg: cfg, tokens: tokens, auth: authn.New(cfg.Clients, roots), tlsCfg: tcfg, pol: policy.New(cfg, counters)}
 	// a token is gone when no token of the new generation is the same physical token (by identity, not by name: a name can be given to another token)
 	removed = map[string]backend.Token{}
 	if old != nil {
@@ -265,7 +289,7 @@ func loadTLS(cfg *config.Config) (*tls.Config, error) {
 // names say (audit of 2026-10-21, CR-01; config.distinctKeys does the part that the configuration alone can tell). A holder that does not answer now is skipped here; a pinned
 // fingerprint covers it, and the next reload looks again.
 func VerifyDistinct(cfg *config.Config, tokens map[string]backend.Token) error {
-	inUse := cfg.KMSJSON.Enabled || cfg.KMSGRPC.Enabled
+	inUse := cfg.KMSJSON.Enabled || cfg.KMSGRPC.Enabled || cfg.KMSRest.Enabled
 	for _, k := range cfg.Keys {
 		inUse = inUse || k.OnAnyFace()
 	}
@@ -347,6 +371,9 @@ func (s *Server) Reload(cfg *config.Config) error {
 	if cfg.KMSGRPC.Enabled != oc.KMSGRPC.Enabled || cfg.KMSGRPC.TokenPath != oc.KMSGRPC.TokenPath {
 		return fmt.Errorf("kmsgrpc.enabled and kmsgrpc.token_path cannot change in a reload: restart")
 	}
+	if cfg.KMSRest.Enabled != oc.KMSRest.Enabled || cfg.KMSRest.Tenant != oc.KMSRest.Tenant {
+		return fmt.Errorf("kmsrest.enabled and kmsrest.tenant cannot change in a reload: restart")
+	}
 	if cfg.Listen != oc.Listen || cfg.AdminSocket != oc.AdminSocket || cfg.Audit.File != oc.Audit.File || cfg.Limits != oc.Limits || cfg.Transit.Mount != oc.Transit.Mount {
 		return fmt.Errorf("listen, admin_socket, audit.file, limits and transit.mount cannot change in a reload: restart")
 	}
@@ -368,6 +395,11 @@ func (s *Server) Reload(cfg *config.Config) error {
 		waitGRPC := s.grpc.Reload(cfg, gen.tokens, gen.pol, identifier(gen.auth), gen.gcreds)
 		waitFirst := waitOld
 		waitOld = func() { waitFirst(); waitGRPC() }
+	}
+	if s.rest != nil {
+		waitRest := s.rest.Reload(cfg, gen.tokens, gen.pol, identifier(gen.auth), gen.rcreds)
+		waitFirst := waitOld
+		waitOld = func() { waitFirst(); waitRest() }
 	}
 	// tokens the new configuration no longer uses are logged out when the requests that began with the old generation are done
 	go func() {

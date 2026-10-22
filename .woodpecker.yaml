@@ -69,6 +69,32 @@ steps:
       - event: pull_request
       - event: tag
 
+  kmsgrpc_sdk:
+    # the gRPC face against the vendor's official Go client library (a module of its own: test/kmsgrpc-sdk)
+    image: golang:1.26.10-bookworm
+    commands:
+      - git config --global --add safe.directory "$CI_WORKSPACE"
+      - cd test/kmsgrpc-sdk && go test -count=1 ./...
+    depends_on:
+      - test
+    when:
+      - event: push
+      - event: pull_request
+      - event: tag
+
+  kmsrest_sdk:
+    # the REST face against the vendor's official Go SDK (a module of its own: test/kmsrest-sdk)
+    image: golang:1.26.10-bookworm
+    commands:
+      - git config --global --add safe.directory "$CI_WORKSPACE"
+      - cd test/kmsrest-sdk && go test -count=1 ./...
+    depends_on:
+      - test
+    when:
+      - event: push
+      - event: pull_request
+      - event: tag
+
   build:
     # cgo (the PKCS#11 binding): the binary is dynamic, so it is built where it will run: Debian bookworm
     image: golang:1.26.10-bookworm

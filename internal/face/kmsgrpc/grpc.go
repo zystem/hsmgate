@@ -28,6 +28,7 @@ import (
 	"github.com/zystem/hsmgate/internal/gate"
 	"github.com/zystem/hsmgate/internal/generation"
 	"github.com/zystem/hsmgate/internal/kmsops"
+	"github.com/zystem/hsmgate/internal/oauth"
 	"github.com/zystem/hsmgate/internal/peer"
 	"github.com/zystem/hsmgate/internal/policy"
 )
@@ -85,12 +86,12 @@ type Face struct {
 	NoCertificate func(*http.Request) bool
 
 	gen    generation.Holder[*snap]
-	tokens *tokens
+	tokens *oauth.Tokens
 }
 
 // New makes a face; Reload gives it its first generation.
 func New(a *audit.Log, g *gate.Gate, tokenPath string) *Face {
-	return &Face{Audit: a, Gate: g, Macs: kmsops.NewMacCache(), Fails: peer.NewFailures(), Created: time.Now(), TokenPath: tokenPath, tokens: newTokens()}
+	return &Face{Audit: a, Gate: g, Macs: kmsops.NewMacCache(), Fails: peer.NewFailures(), Created: time.Now(), TokenPath: tokenPath, tokens: oauth.NewTokens()}
 }
 
 // Reload replaces the generation for the requests that come after; the returned function waits for the requests of the previous one. The access tokens stay valid, but every request
@@ -220,7 +221,7 @@ func (f *Face) token(w http.ResponseWriter, r *http.Request, s *snap, rid string
 		return
 	}
 	assertion := r.PostForm.Get("assertion")
-	issuer, ok := peekIssuer(assertion)
+	issuer, ok := oauth.PeekIssuer(assertion)
 	if !ok {
 		f.failed(l)
 		refuse(400, "invalid_grant", "the assertion is not valid", "bad_token")
@@ -232,7 +233,7 @@ func (f *Face) token(w http.ResponseWriter, r *http.Request, s *snap, rid string
 		refuse(400, "invalid_grant", "the assertion is not valid", why)
 		return
 	}
-	if _, err := verifyJWT(assertion, cred.Key, f.now()); err != nil {
+	if _, err := oauth.VerifyJWT(assertion, cred.Key, f.now()); err != nil {
 		f.failed(l)
 		refuse(400, "invalid_grant", "the assertion is not valid", "bad_token")
 		return
@@ -242,7 +243,7 @@ func (f *Face) token(w http.ResponseWriter, r *http.Request, s *snap, rid string
 		oauthError(w, 503, "temporarily_unavailable", "audit log unavailable")
 		return
 	}
-	tok, exp := f.tokens.issue(issuer, f.now())
+	tok, exp := f.tokens.Issue(issuer, f.now())
 	ev.Result = "ok"
 	if err := f.Audit.Write(ev); err != nil {
 		oauthError(w, 503, "temporarily_unavailable", "audit log unavailable")
@@ -405,9 +406,9 @@ func (f *Face) call(w http.ResponseWriter, r *http.Request, s *snap, rid string)
 // without the token exchange).
 func (f *Face) issuerOf(tok string, s *snap) (string, bool) {
 	if strings.HasPrefix(tok, "hg.") {
-		return f.tokens.lookup(tok, f.now())
+		return f.tokens.Lookup(tok, f.now())
 	}
-	issuer, ok := peekIssuer(tok)
+	issuer, ok := oauth.PeekIssuer(tok)
 	if !ok {
 		return "", false
 	}
@@ -415,7 +416,7 @@ func (f *Face) issuerOf(tok string, s *snap) (string, bool) {
 	if !ok {
 		return "", false
 	}
-	if _, err := verifyJWT(tok, c.Key, f.now()); err != nil {
+	if _, err := oauth.VerifyJWT(tok, c.Key, f.now()); err != nil {
 		return "", false
 	}
 	return issuer, true

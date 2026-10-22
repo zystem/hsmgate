@@ -49,6 +49,13 @@ type Config struct {
 		KeyRing   string `yaml:"key_ring"`
 		TokenPath string `yaml:"token_path"` // where clients ask for a token; default /oauth2/token
 	} `yaml:"kmsgrpc"`
+	// KMSRest turns on the REST face: the API of a cloud key vault as its client libraries speak it (JSON over HTTPS, authenticated by a bearer token that a client gets by
+	// proving its client secret or the private key of its credential at the token endpoint). It shares the listener with the other faces. Tenant is the directory identifier that
+	// appears in the token path; the default is "hsmgate".
+	KMSRest struct {
+		Enabled bool   `yaml:"enabled"`
+		Tenant  string `yaml:"tenant"`
+	} `yaml:"kmsrest"`
 	// AdminSocket is a unix socket (mode 0600) for unlock and status; unset: no admin door.
 	AdminSocket string `yaml:"admin_socket"`
 	// Limits bound the work that reaches the tokens at once (a card serves one operation at a time). Changing them needs a restart.
@@ -174,6 +181,18 @@ type Client struct {
 	SigV4 *SigV4 `yaml:"sigv4"`
 	// JWT is the credential on the gRPC face: the client holds the private key of a service account and proves it with a signed token (RS256); the service holds the public key.
 	JWT *JWT `yaml:"jwt"`
+	// OAuth is the credential on the REST face: a client id with a secret (read from a file) or with the public key of a certificate whose private key the client holds.
+	OAuth *OAuth `yaml:"oauth"`
+}
+
+// OAuth is an application credential as the REST face knows it. Exactly one of SecretFile (32 bytes or more) and PublicKeyFile (RSA, 2048 bits or more) is set. AllowFrom and NoCert
+// mean what they mean for SigV4.
+type OAuth struct {
+	ClientID      string   `yaml:"client_id"`
+	SecretFile    string   `yaml:"secret_file"`
+	PublicKeyFile string   `yaml:"public_key_file"`
+	AllowFrom     []string `yaml:"allow_from"`
+	NoCert        bool     `yaml:"no_cert"`
 }
 
 // JWT is a service account as the gRPC face knows it. Issuer is the "client_email" of the service account file; PublicKeyFile is a PEM public key (RSA, at least 2048 bits) or a
@@ -187,7 +206,7 @@ type JWT struct {
 
 // NoCertCredential: some credential of the client lets it call without a client certificate.
 func (c Client) NoCertCredential() bool {
-	return (c.SigV4 != nil && c.SigV4.NoCert) || (c.JWT != nil && c.JWT.NoCert)
+	return (c.SigV4 != nil && c.SigV4.NoCert) || (c.JWT != nil && c.JWT.NoCert) || (c.OAuth != nil && c.OAuth.NoCert)
 }
 
 type SigV4 struct {
@@ -415,7 +434,10 @@ func (c *Config) Validate() error {
 	if err := c.validateKMSJSON(); err != nil {
 		return err
 	}
-	return c.validateKMSGRPC()
+	if err := c.validateKMSGRPC(); err != nil {
+		return err
+	}
+	return c.validateKMSRest()
 }
 
 var idChars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-"
@@ -484,6 +506,68 @@ func (c *Config) validateKMSGRPC() error {
 			for key, g := range cl.Keys {
 				if k := c.Keys[key]; !k.KMSGRPC || k.Usage() == UsageKeyAgreement {
 					return fmt.Errorf("client %s key %s: a client without a certificate may use only keys that are on the gRPC face", cl.Name, key)
+				}
+				for _, op := range g.Ops {
+					if op == "derive" || op == "rewrap" {
+						return fmt.Errorf("client %s key %s: a client without a certificate may not have the right %s", cl.Name, key, op)
+					}
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// validateKMSRest: the rules of the REST face.
+func (c *Config) validateKMSRest() error {
+	r := &c.KMSRest
+	if r.Tenant == "" {
+		r.Tenant = "hsmgate"
+	}
+	if len(r.Tenant) > 63 || strings.Trim(r.Tenant, idChars+".") != "" {
+		return fmt.Errorf("kmsrest.tenant must be 1 to 63 letters, digits, dots, dashes and underscores")
+	}
+	any := false
+	for name, k := range c.Keys {
+		if k.KMSRest {
+			any = true
+			if k.Usage() == UsageKeyAgreement {
+				return fmt.Errorf("key %s: kmsrest needs kmsjson_usage encrypt_decrypt, sign_verify or generate_verify_mac (that face has no key agreement)", name)
+			}
+		}
+	}
+	if r.Enabled && !any {
+		return fmt.Errorf("kmsrest.enabled but no key has kmsrest: true")
+	}
+	ids := map[string]string{}
+	for _, cl := range c.Clients {
+		o := cl.OAuth
+		if o == nil {
+			continue
+		}
+		if !r.Enabled {
+			return fmt.Errorf("client %s has an oauth credential but kmsrest.enabled is false", cl.Name)
+		}
+		if len(o.ClientID) < 3 || len(o.ClientID) > 100 || strings.Trim(o.ClientID, idChars+"@.") != "" {
+			return fmt.Errorf("client %s: oauth.client_id must be 3 to 100 letters, digits and @ . - _", cl.Name)
+		}
+		if (o.SecretFile == "") == (o.PublicKeyFile == "") {
+			return fmt.Errorf("client %s: oauth needs exactly one of secret_file and public_key_file", cl.Name)
+		}
+		if other, dup := ids[o.ClientID]; dup {
+			return fmt.Errorf("clients %s and %s have the same oauth.client_id", other, cl.Name)
+		}
+		ids[o.ClientID] = cl.Name
+		if _, err := (SigV4{AllowFrom: o.AllowFrom}).Prefixes(); err != nil {
+			return fmt.Errorf("client %s: oauth.%w", cl.Name, err)
+		}
+		if o.NoCert {
+			if len(o.AllowFrom) == 0 {
+				return fmt.Errorf("client %s: oauth.no_cert needs oauth.allow_from (a client without a certificate is held to listed addresses)", cl.Name)
+			}
+			for key, g := range cl.Keys {
+				if k := c.Keys[key]; !k.KMSRest || k.Usage() == UsageKeyAgreement {
+					return fmt.Errorf("client %s key %s: a client without a certificate may use only keys that are on the REST face", cl.Name, key)
 				}
 				for _, op := range g.Ops {
 					if op == "derive" || op == "rewrap" {
@@ -651,7 +735,7 @@ func (c *Config) distinctKeys() error {
 	for _, k := range c.Keys {
 		inUse = inUse || k.OnAnyFace()
 	}
-	if !c.KMSJSON.Enabled && !c.KMSGRPC.Enabled && !inUse {
+	if !c.KMSJSON.Enabled && !c.KMSGRPC.Enabled && !c.KMSRest.Enabled && !inUse {
 		return nil
 	}
 	owner := map[string]string{} // physical key or fingerprint -> name of the key
