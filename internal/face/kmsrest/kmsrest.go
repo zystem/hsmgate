@@ -43,7 +43,7 @@ const (
 	maxPlain    = 64 << 10
 	maxRandom   = 128
 	assertionTy = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer"
-	tokenSuffix = "/oauth2/v2.0/token"
+	tokenSuffix = "/oauth2/v2.0/token" // #nosec G101 -- a path, not a credential
 	resource    = "https://vault.azure.net"
 )
 

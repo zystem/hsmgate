@@ -170,14 +170,17 @@ func TestEndToEnd(t *testing.T) {
 	}
 	x, _ := dec(jwk["x"].(string))
 	y, _ := dec(jwk["y"].(string))
-	pub := ecdsa.PublicKey{Curve: elliptic.P256(), X: new(big.Int).SetBytes(x), Y: new(big.Int).SetBytes(y)}
+	pub, err := ecdsa.ParseUncompressedPublicKey(elliptic.P256(), append(append([]byte{4}, x...), y...))
+	if err != nil {
+		t.Fatal(err)
+	}
 	d := sha256.Sum256([]byte("m"))
 	st, out, _ = r.do("POST", "/keys/sig//sign", bearer, map[string]string{"alg": "ES256", "value": b64.EncodeToString(d[:])})
 	if st != 200 {
 		t.Fatalf("sign: %d %v", st, out)
 	}
 	sig, _ := dec(out["value"].(string))
-	if len(sig) != 64 || !ecdsa.Verify(&pub, d[:], new(big.Int).SetBytes(sig[:32]), new(big.Int).SetBytes(sig[32:])) {
+	if len(sig) != 64 || !ecdsa.Verify(pub, d[:], new(big.Int).SetBytes(sig[:32]), new(big.Int).SetBytes(sig[32:])) {
 		t.Fatalf("the signature does not verify")
 	}
 	st, out, _ = r.do("POST", "/keys/sig//verify", bearer, map[string]string{"alg": "ES256", "digest": b64.EncodeToString(d[:]), "value": b64.EncodeToString(sig)})

@@ -17,6 +17,7 @@ import (
 	"io"
 	"net/http"
 	"net/netip"
+	"strconv"
 	"strings"
 	"time"
 
@@ -294,7 +295,7 @@ func invalid(result, msg string) *kerr { return &kerr{cInvalid, msg, result} }
 func grpcFail(w http.ResponseWriter, code int, msg string) {
 	h := w.Header()
 	h.Set("Content-Type", "application/grpc")
-	h.Set("Grpc-Status", itoa(code))
+	h.Set("Grpc-Status", strconv.Itoa(code))
 	h.Set("Grpc-Message", msg)
 	w.WriteHeader(200)
 }
@@ -307,13 +308,6 @@ func grpcReply(w http.ResponseWriter, msg []byte) {
 	binary.BigEndian.PutUint32(frame[1:], uint32(len(msg))) // #nosec G115 -- a reply is small
 	w.Write(append(frame, msg...))
 	h.Set(http.TrailerPrefix+"Grpc-Status", "0")
-}
-
-func itoa(n int) string {
-	if n < 10 {
-		return string(rune('0' + n))
-	}
-	return itoa(n/10) + string(rune('0'+n%10))
 }
 
 // bearer takes the access token out of the Authorization header.
