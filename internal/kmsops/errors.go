@@ -1,4 +1,4 @@
-// Package kmsops is what the key-service faces share (the KMS-JSON face, the gRPC face, the Vault-style face): the judgement of a request (is the key on this face, is the client
+// Package kmsops is what the key-service faces share (the KMS-JSON face, the gRPC face, the REST face): the judgement of a request (is the key on this face, is the client
 // allowed, is the key used for what it is made for, is there budget), the additional data, the sealing and opening of a blob that names its key and version, signing, the derived
 // MAC key, the public key. A face parses its own protocol, asks this package, and puts the answer into its own words. Errors are typed, so that each face maps them to the
 // codes its clients know; nothing here knows HTTP or a protocol.

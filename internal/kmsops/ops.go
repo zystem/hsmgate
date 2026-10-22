@@ -34,7 +34,7 @@ const maxContext = 1024 // the additional data is written to the audit by some f
 
 // Service is the shared part of one generation of one face. Faces make a new Service at every reload.
 type Service struct {
-	Face   string // "kmsjson", "kmsgrpc" or "kmsvault": which flag of a key puts it on this face
+	Face   string // "kmsjson", "kmsgrpc" or "kmsrest": which flag of a key puts it on this face
 	Cfg    *config.Config
 	Tokens map[string]backend.Token
 	Policy *policy.Policy

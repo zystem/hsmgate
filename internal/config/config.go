@@ -86,9 +86,9 @@ type Key struct {
 	// KMSJSON lets clients with the "derive" right use the key through the KMS-JSON face: ECDH with a key that stays on the token. That face has no context, so whoever may derive
 	// can open anything sealed to the key: such a key must be in "fixed" mode (a key in context mode would lose the isolation of its contexts) and is best dedicated to this use.
 	KMSJSON bool `yaml:"kmsjson"`
-	// KMSGRPC and KMSVault expose the key on the other two key-service faces (the gRPC/REST one and the Vault-style one), with the same usage and the same rules as KMSJSON.
-	KMSGRPC  bool `yaml:"kmsgrpc"`
-	KMSVault bool `yaml:"kmsvault"`
+	// KMSGRPC and KMSRest expose the key on the other two key-service faces (the gRPC one and the REST one), with the same usage and the same rules as KMSJSON.
+	KMSGRPC bool `yaml:"kmsgrpc"`
+	KMSRest bool `yaml:"kmsrest"`
 	// KMSJSONUsage: "key_agreement" (the default: DeriveSharedSecret, the client seals and opens) or "encrypt_decrypt" (Encrypt, Decrypt, ReEncrypt, GenerateDataKey: the service seals
 	// and opens, as in the Transit face, and the request's EncryptionContext is the additional data) or "sign_verify" (Sign and Verify: ECDSA P-256 with SHA-256, the signature made on the
 	// token; the key label must be used by no other key) or "generate_verify_mac" (GenerateMac and VerifyMac: HMAC-SHA-256 with a key derived on the token by ECDH, see
@@ -104,17 +104,17 @@ const (
 )
 
 // OnAnyFace: the key is exposed on at least one of the key-service faces; the rules about names, usages and separate private keys hold for all of them.
-func (k Key) OnAnyFace() bool { return k.KMSJSON || k.KMSGRPC || k.KMSVault }
+func (k Key) OnAnyFace() bool { return k.KMSJSON || k.KMSGRPC || k.KMSRest }
 
-// OnFace: the key is exposed on the face of this name ("kmsjson", "kmsgrpc", "kmsvault").
+// OnFace: the key is exposed on the face of this name ("kmsjson", "kmsgrpc", "kmsrest").
 func (k Key) OnFace(face string) bool {
 	switch face {
 	case "kmsjson":
 		return k.KMSJSON
 	case "kmsgrpc":
 		return k.KMSGRPC
-	case "kmsvault":
-		return k.KMSVault
+	case "kmsrest":
+		return k.KMSRest
 	}
 	return false
 }
@@ -413,7 +413,7 @@ func (c *Config) validateKMSJSON() error {
 			}
 		}
 		if k.KMSJSONUsage != "" && !k.OnAnyFace() {
-			return fmt.Errorf("key %s: kmsjson_usage needs kmsjson: true (or kmsgrpc, kmsvault)", name)
+			return fmt.Errorf("key %s: kmsjson_usage needs kmsjson: true (or kmsgrpc, kmsrest)", name)
 		}
 		switch k.KMSJSONUsage {
 		case "", UsageKeyAgreement:
