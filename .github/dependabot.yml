@@ -1,0 +1,32 @@
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directories:
+      - "/"
+      - "/test/kmsjson-sdk"
+      - "/test/kmsgrpc-sdk"
+      - "/test/kmsrest-sdk"
+    schedule:
+      interval: weekly
+    groups:
+      go-modules:
+        patterns: ["*"]
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+  - package-ecosystem: docker
+    directory: "/"
+    schedule:
+      interval: weekly
+  - package-ecosystem: docker-compose
+    directory: "/deploy/docker"
+    schedule:
+      interval: weekly
+  - package-ecosystem: pip
+    directory: "/test/kmsjson-boto3"
+    schedule:
+      interval: weekly

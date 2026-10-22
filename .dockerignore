@@ -1,6 +1,5 @@
 .git
 .github
-renovate.json
 docs
 deploy
 tools

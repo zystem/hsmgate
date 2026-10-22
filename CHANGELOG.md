@@ -3,7 +3,7 @@
 ## 0.3.0 — 2026-10-23
 
 ### Changed
-- CI and releases moved from Woodpecker to **GitHub Actions** (`.github/workflows/`). A release now signs the binary, the archive, the SBOM and the image (cosign, keyless), issues build provenance attestations and publishes an SPDX SBOM. Actions are pinned by commit. The weekly fuzz run replaces the Woodpecker cron.
+- CI and releases moved from Woodpecker to **GitHub Actions** (`.github/workflows/`). A release now signs the binary, the archive, the SBOM and the image (cosign, keyless), issues build provenance attestations and publishes an SPDX SBOM. Actions are pinned by commit. The weekly fuzz run replaces the Woodpecker cron. Dependency updates: Dependabot (`.github/dependabot.yml`) in place of Renovate; the versions in `go run tool@version` lines of the workflows are updated by hand.
 
 ### Added
 - **gRPC face** (optional, `kmsgrpc.enabled`): a subset of the gRPC API of a cloud key service, for its client libraries (`GetPublicKey`, `AsymmetricSign`, `Encrypt`, `Decrypt`, `MacSign`, `MacVerify`, metadata calls, `GenerateRandomBytes`), authenticated by a service account (`jwt` on a client: token endpoint and self-signed bearers). See [docs/specs/kms-grpc.md](docs/specs/kms-grpc.md). Tried with the official Go client library (`test/kmsgrpc-sdk`).
