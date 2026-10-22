@@ -26,7 +26,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends opensc-pkcs11 l
     done \
  && test -s /rootfs/usr/lib/x86_64-linux-gnu/opensc-pkcs11.so && test -s /rootfs/usr/lib/x86_64-linux-gnu/libpcsclite.so.1 && test -n "$(find /rootfs -name 'libopensc.so*' -print -quit)" && test -n "$(find /rootfs -name 'libcrypto.so*' -print -quit)"
 
-FROM gcr.io/distroless/base-debian12@sha256:7f0c72cd138b442ae0deeb69c08b1acf5525439ba251a49ad93c320a061567e5
+FROM gcr.io/distroless/base-debian12@sha256:fabbf1c0c357a3d42550111351daed089b20a2c954df13ee2fcff60602515e84
 COPY --from=libs /rootfs/ /
 COPY --from=build /out/hsmgate /usr/local/bin/hsmgate
 LABEL org.opencontainers.image.source="https://github.com/zystem/hsmgate" \
