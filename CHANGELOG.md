@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 — 2026-10-23
 
 ### Removed
 - **`ecies1`** (XChaCha20-Poly1305) and the `seal_format` option: the service seals and opens `ecies2` only. Texts of the earlier format are no longer read; re-seal them with 0.3.x first. The dependency on `golang.org/x/crypto` is gone. `require_fips` now only checks that the Go cryptographic module is in FIPS 140-3 mode. The ciphertext of a 32-byte data key is 441 characters in Transit form (473 before); the largest plaintext that keeps a Kubernetes KMS v2 ciphertext under 1 kB is 250 bytes (238 before). The test vectors are `testdata/vectors/ecies2.json`.
