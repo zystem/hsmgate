@@ -271,7 +271,7 @@ func parseBlob(b []byte) (name string, ver int, text string, err error) {
 	name = string(rest[:n])
 	ver = int(binary.BigEndian.Uint16(rest[n : n+2]))
 	text = string(rest[n+2:])
-	if ver < 1 || !strings.HasPrefix(text, ecies.FormatTag+".") {
+	if ver < 1 || !(strings.HasPrefix(text, ecies.FormatTag+".") || strings.HasPrefix(text, ecies.FormatTag2+".")) {
 		return "", 0, "", errBlob
 	}
 	return name, ver, text, nil

@@ -57,4 +57,4 @@ For a deployment that must use only algorithms approved in a FIPS 140-3 module (
 - `K = HKDF-SHA256(ikm = Z, salt = "hsmgate/ecies2", info = fp ‖ "|" ‖ hex(eph), length 32)`;
 - `body = nonce ‖ AES-256-GCM(K, nonce, plaintext, aad)` with a random 12-byte nonce and a 16-byte tag; at least 28 bytes. A key is made for this one text (a fresh ephemeral key), so a random nonce cannot repeat under it.
 
-Choice: `seal_format` (`ecies1`, the default, or `ecies2`; `require_fips` makes it `ecies2`). Both formats are always read, except that `require_fips` refuses `ecies1`. The card plays the same part in both: one ECDH; the AEAD runs on the host.
+Choice: `seal_format` (`ecies2`, the default, or `ecies1` for a service whose data an older version must still open; `require_fips` allows only `ecies2`). Both formats are always read, except that `require_fips` refuses `ecies1`. The card plays the same part in both: one ECDH; the AEAD runs on the host.

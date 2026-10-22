@@ -17,8 +17,8 @@ import (
 type Config struct {
 	Listen string `yaml:"listen"`
 	TLS    TLS    `yaml:"tls"`
-	// SealFormat is the format of what the service seals: "ecies1" (the default: ChaCha20-Poly1305, what every earlier version wrote) or "ecies2" (AES-256-GCM: all algorithms approved in
-	// a FIPS 140-3 module; an older version of the service cannot open it). Both are always read, unless RequireFIPS.
+	// SealFormat is the format of what the service seals: "ecies2" (the default: AES-256-GCM, all algorithms approved in a FIPS 140-3 module; an older version of the service
+	// cannot open it) or "ecies1" (ChaCha20-Poly1305, what every version before 0.3 wrote). Both are always read, unless RequireFIPS.
 	SealFormat string `yaml:"seal_format"`
 	// RequireFIPS: refuse to start unless the process runs with the Go cryptographic module in FIPS 140-3 mode (GODEBUG=fips140=on, or a binary built with GOFIPS140), seal in ecies2
 	// and refuse to open ecies1 (docs/compliance.md). It says nothing about the token.
@@ -442,10 +442,7 @@ func (c *Config) Validate() error {
 	}
 	switch c.SealFormat {
 	case "":
-		c.SealFormat = "ecies1"
-		if c.RequireFIPS {
-			c.SealFormat = "ecies2"
-		}
+		c.SealFormat = "ecies2"
 	case "ecies1":
 		if c.RequireFIPS {
 			return fmt.Errorf("require_fips needs seal_format ecies2")
