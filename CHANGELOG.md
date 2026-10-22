@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 — 2026-10-23
 
 ### Changed
 - CI and releases moved from Woodpecker to **GitHub Actions** (`.github/workflows/`). A release now signs the binary, the archive, the SBOM and the image (cosign, keyless), issues build provenance attestations and publishes an SPDX SBOM. Actions are pinned by commit. The weekly fuzz run replaces the Woodpecker cron.
