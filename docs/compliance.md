@@ -54,9 +54,26 @@ PCI HSM (v3) is a standard for **payment hardware security modules** and is sati
 - Approved algorithms and key sizes (see section 1); keys have versions and a rotation path.
 - Not provided: dual control and split knowledge for loading keys (the card's DKEK scheme, with its shares, can give it for backups; see [tokens/smartcard-hsm.md](tokens/smartcard-hsm.md)).
 
-## 4. Others that were considered
+## 4. The others
 
-- **ISO/IEC 19790**: the international twin of FIPS 140, the same limits.
-- **Common Criteria, EN 419 221-5**: certify devices and modules; the card has its own certificates, which we do not claim.
-- **NIST SP 800-57, 800-131A**: followed as guidance (key sizes, algorithm transitions), not certified.
-- **OpenSSF Best Practices badge, SLSA**: realistic for the project; the badge needs the owner's account. Open: signed releases (cosign), provenance.
+| Standard | Can the project meet it? | Why, and what is done |
+|---|---|---|
+| ISO/IEC 19790 | No | the international twin of FIPS 140: it certifies a module, in a lab, under a national scheme; the same limits as section 1 |
+| Common Criteria, EN 419 221-5 | No | certify a device or module against a protection profile; the SmartCard-HSM has its own certificates (not claimed here); a gateway is not a profiled product |
+| PCI HSM | No | section 3 |
+| NIST SP 800-57, SP 800-131A | Yes, as guidance | [key-management.md](key-management.md) |
+| OWASP ASVS | In part | section 2 |
+| OpenSSF Best Practices (passing) | Almost; the badge is the owner's to claim | see below |
+| SLSA | Level 1 in effect; level 2 needs signed provenance | see below |
+
+### OpenSSF Best Practices, level "passing": where the project stands
+
+Met: a free license (MIT); documentation (README, `docs/`); a public repository over HTTPS; a way to report vulnerabilities privately ([SECURITY.md](../SECURITY.md)); a working build and an automatic test suite (`go test`, black-box tests, fuzz tests, CI on every push); tests for new functionality ([CONTRIBUTING.md](../CONTRIBUTING.md)); warnings and static analysis (`go vet`, staticcheck, gosec) with the findings fixed; no known unpatched vulnerabilities (`govulncheck` in CI and in the release); no cryptographic primitives of our own, only the standard library; no secrets in the repository (gitleaks configuration); a changelog.
+
+Open: the badge itself (a project page on bestpractices.dev, created by the owner of the repository: the answers above are the material); the release carries a SHA-256 file but no signature (see below).
+
+### SLSA
+
+- **Build L1** (provenance exists): the build is a script (`.woodpecker.yaml`) and the release is built by it, not by hand; a SHA-256 file is published with the binary. There is no machine-readable provenance document.
+- **Build L2** (signed provenance from the build service): not met. Woodpecker does not issue attestations. The way to L2 is to build and sign the release in a GitHub Actions workflow (`slsa-github-generator`, or `cosign` keyless with the OIDC identity of the workflow). That changes where releases are made and needs a workflow, permissions and a decision of the owner; it is not done here.
+- The container image is pinned by digest at the base and built by the same script; the signing of the image (cosign) has the same dependency.
