@@ -25,6 +25,7 @@ import (
 	"github.com/zystem/hsmgate/internal/face/transit"
 	"github.com/zystem/hsmgate/internal/gate"
 	"github.com/zystem/hsmgate/internal/metrics"
+	"github.com/zystem/hsmgate/internal/peer"
 	"github.com/zystem/hsmgate/internal/policy"
 )
 
@@ -97,7 +98,7 @@ func New(cfg *config.Config, auditOut io.Writer) (*Server, error) {
 	s.face.Limit(s.gate)
 	var handler http.Handler = s.face
 	if cfg.KMSJSON.Enabled {
-		s.kms = &kmsjson.Face{Cfg: cfg, Tokens: gen.tokens, Policy: gen.pol, Audit: s.audit, Creds: gen.creds, Gate: s.gate, Created: time.Now(), Fails: kmsjson.NewFailures(), MacKeys: kmsjson.NewMacKeys()}
+		s.kms = &kmsjson.Face{Cfg: cfg, Tokens: gen.tokens, Policy: gen.pol, Audit: s.audit, Creds: gen.creds, Gate: s.gate, Created: time.Now(), Fails: peer.NewFailures(), MacKeys: kmsjson.NewMacKeys()}
 		handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if kmsjson.IsKMSJSON(r) {
 				s.kms.ServeHTTP(w, r)
@@ -240,7 +241,7 @@ func loadTLS(cfg *config.Config) (*tls.Config, error) {
 // names say (audit of 2026-10-21, CR-01; config.distinctKeys does the part that the configuration alone can tell). A holder that does not answer now is skipped here; a pinned
 // fingerprint covers it, and the next reload looks again.
 func VerifyDistinct(cfg *config.Config, tokens map[string]backend.Token) error {
-	inUse := cfg.KMSJSON.Enabled
+	inUse := cfg.KMSJSON.Enabled || cfg.KMSGRPC.Enabled
 	for _, k := range cfg.Keys {
 		inUse = inUse || k.OnAnyFace()
 	}

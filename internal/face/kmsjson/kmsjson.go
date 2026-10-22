@@ -20,7 +20,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"net"
 	"net/http"
 	"net/netip"
 	"sort"
@@ -34,6 +33,7 @@ import (
 	"github.com/zystem/hsmgate/internal/config"
 	"github.com/zystem/hsmgate/internal/gate"
 	"github.com/zystem/hsmgate/internal/keyops"
+	"github.com/zystem/hsmgate/internal/peer"
 	"github.com/zystem/hsmgate/internal/policy"
 	"github.com/zystem/hsmgate/internal/sigv4"
 )
@@ -72,7 +72,7 @@ type Face struct {
 	// MacKeys keeps derived MAC keys for kmsjson.mac_cache_seconds; shared by the generations.
 	MacKeys *macCache
 	// Fails counts the refused signatures by the address of the peer; created by the first request, shared by the generations.
-	Fails *Failures
+	Fails *peer.Failures
 
 	mu    sync.RWMutex
 	track *tracker
@@ -134,28 +134,6 @@ func (f *Face) noCertificate(r *http.Request) bool {
 	return r.TLS != nil && len(r.TLS.PeerCertificates) == 0
 }
 
-// peerAddr is the address of the TCP peer; a header is never believed.
-func peerAddr(r *http.Request) netip.Addr {
-	h, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		h = r.RemoteAddr
-	}
-	a, err := netip.ParseAddr(h)
-	if err != nil {
-		return netip.Addr{}
-	}
-	return a.Unmap().WithZone("") // a zone (fe80::1%eth0) would make a prefix never contain the address
-}
-
-func fromAllowed(from []netip.Prefix, a netip.Addr) bool {
-	for _, p := range from {
-		if p.Contains(a) {
-			return true
-		}
-	}
-	return false
-}
-
 func (f *Face) now() time.Time {
 	if f.Now != nil {
 		return f.Now()
@@ -188,7 +166,7 @@ func (f *Face) serve(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// who: the certificate, then the signature, and they must agree. A request with no certificate at all is judged after the signature: only a credential marked no_cert may be used so.
-	src := peerAddr(r)
+	src := peer.Addr(r)
 	client, ok := f.Identify(r)
 	certless := false
 	if !ok {
@@ -235,7 +213,7 @@ func (f *Face) serve(w http.ResponseWriter, r *http.Request) {
 		refuse(403, "AccessDeniedException", "the client is not known to the service", "unauthenticated", false)
 		return
 	}
-	if len(cred.From) > 0 && !fromAllowed(cred.From, src) {
+	if len(cred.From) > 0 && !peer.Allowed(cred.From, src) {
 		count()
 		refuse(403, "AccessDeniedException", "the credential may not be used from this address", "address_refused", false)
 		return
@@ -576,54 +554,4 @@ func fail(w http.ResponseWriter, status int, typ, msg string, retry bool) {
 	w.Header().Set("x-amzn-ErrorType", typ)
 	w.Header().Set("X-Hsmgate-Retryable", strconv.FormatBool(retry))
 	reply(w, status, map[string]string{"__type": typ, "message": msg})
-}
-
-// Failures counts the refused signatures and credentials by the address of the peer: from an address with too many in a minute nothing is judged for the next minute. It bounds the guessing
-// of a secret (which a secret of 20 bytes or more already makes pointless) and the cost of a noisy client.
-type Failures struct {
-	mu sync.Mutex
-	by map[netip.Addr][]time.Time
-}
-
-const (
-	failLimit  = 20
-	failWindow = time.Minute
-)
-
-func NewFailures() *Failures { return &Failures{by: map[netip.Addr][]time.Time{}} }
-
-func (x *Failures) recent(a netip.Addr, now time.Time) []time.Time {
-	keep := x.by[a][:0]
-	for _, t := range x.by[a] {
-		if now.Sub(t) < failWindow {
-			keep = append(keep, t)
-		}
-	}
-	if len(keep) == 0 {
-		delete(x.by, a)
-	} else {
-		x.by[a] = keep
-	}
-	return keep
-}
-
-func (x *Failures) Add(a netip.Addr, now time.Time) {
-	if x == nil || !a.IsValid() {
-		return
-	}
-	x.mu.Lock()
-	defer x.mu.Unlock()
-	if len(x.by) > 10000 { // a flood from many addresses must not grow the table without end
-		x.by = map[netip.Addr][]time.Time{}
-	}
-	x.by[a] = append(x.recent(a, now), now)
-}
-
-func (x *Failures) Blocked(a netip.Addr, now time.Time) bool {
-	if x == nil || !a.IsValid() {
-		return false
-	}
-	x.mu.Lock()
-	defer x.mu.Unlock()
-	return len(x.recent(a, now)) >= failLimit
 }

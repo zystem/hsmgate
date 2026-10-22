@@ -39,6 +39,16 @@ type Config struct {
 		Enabled bool   `yaml:"enabled"`
 		Detail  string `yaml:"detail"`
 	} `yaml:"metrics"`
+	// KMSGRPC turns on the gRPC face: the API of a cloud key service as its client libraries speak it (gRPC over HTTP/2, authenticated by a bearer token that a client gets by
+	// proving that it holds the private key of a service account). It shares the listener with the other faces. Project, Location and KeyRing make the resource names
+	// ("projects/P/locations/L/keyRings/R/cryptoKeys/KEY"); the defaults are "hsmgate", "global" and "main".
+	KMSGRPC struct {
+		Enabled   bool   `yaml:"enabled"`
+		Project   string `yaml:"project"`
+		Location  string `yaml:"location"`
+		KeyRing   string `yaml:"key_ring"`
+		TokenPath string `yaml:"token_path"` // where clients ask for a token; default /oauth2/token
+	} `yaml:"kmsgrpc"`
 	// AdminSocket is a unix socket (mode 0600) for unlock and status; unset: no admin door.
 	AdminSocket string `yaml:"admin_socket"`
 	// Limits bound the work that reaches the tokens at once (a card serves one operation at a time). Changing them needs a restart.
@@ -162,6 +172,22 @@ type Client struct {
 	Keys     map[string]Grant `yaml:"keys"`
 	// SigV4 is the credential that this client signs its requests with on the KMS-JSON face (inside the same mutual TLS). The secret is read from a file (mode 0600), never from this file.
 	SigV4 *SigV4 `yaml:"sigv4"`
+	// JWT is the credential on the gRPC face: the client holds the private key of a service account and proves it with a signed token (RS256); the service holds the public key.
+	JWT *JWT `yaml:"jwt"`
+}
+
+// JWT is a service account as the gRPC face knows it. Issuer is the "client_email" of the service account file; PublicKeyFile is a PEM public key (RSA, at least 2048 bits) or a
+// certificate. AllowFrom and NoCert mean what they mean for SigV4: addresses the credential may be used from (required for NoCert), and no client certificate needed.
+type JWT struct {
+	Issuer        string   `yaml:"issuer"`
+	PublicKeyFile string   `yaml:"public_key_file"`
+	AllowFrom     []string `yaml:"allow_from"`
+	NoCert        bool     `yaml:"no_cert"`
+}
+
+// NoCertCredential: some credential of the client lets it call without a client certificate.
+func (c Client) NoCertCredential() bool {
+	return (c.SigV4 != nil && c.SigV4.NoCert) || (c.JWT != nil && c.JWT.NoCert)
 }
 
 type SigV4 struct {
@@ -354,7 +380,7 @@ func (c *Config) Validate() error {
 			set++
 			ident = "cn:" + id.CN
 		}
-		certless := set == 0 && cl.SigV4 != nil && cl.SigV4.NoCert // identified by its signature alone
+		certless := set == 0 && cl.NoCertCredential() // identified by its signature or token alone
 		if set != 1 && !certless {
 			return fmt.Errorf("client %s: exactly one of identity.uri, identity.sha256, identity.cn is required (several would be an OR)", cl.Name)
 		}
@@ -386,7 +412,88 @@ func (c *Config) Validate() error {
 			}
 		}
 	}
-	return c.validateKMSJSON()
+	if err := c.validateKMSJSON(); err != nil {
+		return err
+	}
+	return c.validateKMSGRPC()
+}
+
+var idChars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-"
+
+// validateKMSGRPC: the rules of the gRPC face.
+func (c *Config) validateKMSGRPC() error {
+	g := &c.KMSGRPC
+	if g.Project == "" {
+		g.Project = "hsmgate"
+	}
+	if g.Location == "" {
+		g.Location = "global"
+	}
+	if g.KeyRing == "" {
+		g.KeyRing = "main"
+	}
+	if g.TokenPath == "" {
+		g.TokenPath = "/oauth2/token"
+	}
+	for what, v := range map[string]string{"project": g.Project, "location": g.Location, "key_ring": g.KeyRing} {
+		if len(v) > 63 || strings.Trim(v, idChars) != "" {
+			return fmt.Errorf("kmsgrpc.%s must be 1 to 63 letters, digits, dashes and underscores", what)
+		}
+	}
+	if !strings.HasPrefix(g.TokenPath, "/") || len(g.TokenPath) < 2 || len(g.TokenPath) > 100 || strings.ContainsAny(g.TokenPath, " ?#") || g.TokenPath == "/v1" || strings.HasPrefix(g.TokenPath, "/v1/") {
+		return fmt.Errorf("kmsgrpc.token_path must be a path such as /oauth2/token (not under /v1)")
+	}
+	any := false
+	for name, k := range c.Keys {
+		if k.KMSGRPC {
+			any = true
+			if k.Usage() == UsageKeyAgreement {
+				return fmt.Errorf("key %s: kmsgrpc needs kmsjson_usage encrypt_decrypt, sign_verify or generate_verify_mac (that face has no key agreement)", name)
+			}
+		}
+	}
+	if g.Enabled && !any {
+		return fmt.Errorf("kmsgrpc.enabled but no key has kmsgrpc: true")
+	}
+	issuers := map[string]string{}
+	for _, cl := range c.Clients {
+		if cl.JWT == nil {
+			continue
+		}
+		j := cl.JWT
+		if !g.Enabled {
+			return fmt.Errorf("client %s has a jwt credential but kmsgrpc.enabled is false", cl.Name)
+		}
+		if len(j.Issuer) < 3 || len(j.Issuer) > 200 || strings.Trim(j.Issuer, idChars+"@.") != "" {
+			return fmt.Errorf("client %s: jwt.issuer must be 3 to 200 letters, digits and @ . - _", cl.Name)
+		}
+		if j.PublicKeyFile == "" {
+			return fmt.Errorf("client %s: jwt.public_key_file is required", cl.Name)
+		}
+		if other, dup := issuers[j.Issuer]; dup {
+			return fmt.Errorf("clients %s and %s have the same jwt.issuer", other, cl.Name)
+		}
+		issuers[j.Issuer] = cl.Name
+		if _, err := (SigV4{AllowFrom: j.AllowFrom}).Prefixes(); err != nil {
+			return fmt.Errorf("client %s: jwt.%w", cl.Name, err)
+		}
+		if j.NoCert {
+			if len(j.AllowFrom) == 0 {
+				return fmt.Errorf("client %s: jwt.no_cert needs jwt.allow_from (a client without a certificate is held to listed addresses)", cl.Name)
+			}
+			for key, g := range cl.Keys {
+				if k := c.Keys[key]; !k.KMSGRPC || k.Usage() == UsageKeyAgreement {
+					return fmt.Errorf("client %s key %s: a client without a certificate may use only keys that are on the gRPC face", cl.Name, key)
+				}
+				for _, op := range g.Ops {
+					if op == "derive" || op == "rewrap" {
+						return fmt.Errorf("client %s key %s: a client without a certificate may not have the right %s", cl.Name, key, op)
+					}
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // validateKMSJSON: the second face has rules of its own.
@@ -512,7 +619,7 @@ func (c *Config) validateKMSJSON() error {
 // CertOptional: some client may call the KMS-JSON face without a client certificate, so the listener must let a connection without one through (the Transit face refuses it per request).
 func (c *Config) CertOptional() bool {
 	for _, cl := range c.Clients {
-		if cl.SigV4 != nil && cl.SigV4.NoCert {
+		if cl.NoCertCredential() {
 			return true
 		}
 	}
@@ -544,7 +651,7 @@ func (c *Config) distinctKeys() error {
 	for _, k := range c.Keys {
 		inUse = inUse || k.OnAnyFace()
 	}
-	if !c.KMSJSON.Enabled && !inUse {
+	if !c.KMSJSON.Enabled && !c.KMSGRPC.Enabled && !inUse {
 		return nil
 	}
 	owner := map[string]string{} // physical key or fingerprint -> name of the key

@@ -10,6 +10,7 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"github.com/zystem/hsmgate/internal/keyops"
+	"github.com/zystem/hsmgate/internal/peer"
 	"github.com/zystem/hsmgate/internal/scheme/ecies"
 	"github.com/zystem/hsmgate/internal/sigv4"
 	"net/http"
@@ -69,7 +70,7 @@ clients:
 		Identify: func(r *http.Request) (string, bool) { c := r.Header.Get("X-Test-Client"); return c, c != "-" },
 		Creds: map[string]Cred{akid: {Client: "app", Secret: secret}, "AKIDVIEWERVIEWER00": {Client: "reader", Secret: secret},
 			"AKIDBOTBOTBOTBOT00": {Client: "bot", Secret: secret, NoCert: true, From: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}}},
-		NoCertificate: func(r *http.Request) bool { return r.Header.Get("X-Test-NoCert") == "1" }, Fails: NewFailures(), MacKeys: NewMacKeys()}
+		NoCertificate: func(r *http.Request) bool { return r.Header.Get("X-Test-NoCert") == "1" }, Fails: peer.NewFailures(), MacKeys: NewMacKeys()}
 	srv := httptest.NewServer(f)
 	t.Cleanup(srv.Close)
 	return &rig{t, srv, f, buf, cfg, now, dir}
@@ -355,13 +356,13 @@ func TestRefusedSignaturesOfACertlessPeerAreCounted(t *testing.T) {
 			sigv4.Sign(req, b, akid, []byte("a-wrong-secret-a-wrong-secret-0000"), "local", "kms", r.now)
 		})
 	}
-	for i := 0; i < failLimit; i++ {
+	for i := 0; i < peer.Limit; i++ {
 		bad("AKIDBOTBOTBOTBOT00")
 	}
 	// from this address nothing without a certificate is judged any more, not even a good request
 	st, out := r.certless("AKIDBOTBOTBOTBOT00", "Encrypt", map[string]any{"KeyId": "seal", "Plaintext": pt})
 	if st != 400 || typ(out) != "ThrottlingException" {
-		t.Errorf("after %d refusals: %d %v", failLimit, st, out)
+		t.Errorf("after %d refusals: %d %v", peer.Limit, st, out)
 	}
 	// but a client that shows a certificate is not locked out by them (a node, a NAT)
 	if st, out := r.app("Encrypt", map[string]any{"KeyId": "seal", "Plaintext": pt}); st != 200 {
@@ -633,17 +634,6 @@ func TestReloadDropsDerivedMacKeys(t *testing.T) {
 	gen()
 	if n != 2 {
 		t.Errorf("after a reload the key is derived again: %d", n)
-	}
-}
-
-func TestPeerAddressWithAZone(t *testing.T) {
-	req := &http.Request{RemoteAddr: "[fe80::1%eth0]:5555"}
-	a := peerAddr(req)
-	if !a.IsValid() || a.Zone() != "" || !fromAllowed([]netip.Prefix{netip.MustParsePrefix("fe80::/10")}, a) {
-		t.Errorf("%v", a)
-	}
-	if a := peerAddr(&http.Request{RemoteAddr: "[::ffff:10.1.2.3]:1"}); !fromAllowed([]netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")}, a) {
-		t.Errorf("a mapped address: %v", a)
 	}
 }
 
