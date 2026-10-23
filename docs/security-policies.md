@@ -14,7 +14,7 @@ Threshold for remediation of a finding about a vulnerability:
 | Medium | within 30 days | recorded |
 | Low | at the next routine update | none |
 
-Licenses: dependencies must be under permissive licenses (MIT, BSD, Apache-2.0, ISC, MPL-2.0); a copyleft license (GPL, AGPL) is refused by Dependency Review.
+Licenses: dependencies must be under permissive licenses (MIT, BSD, Apache-2.0, ISC, MPL-2.0); Dependency Review accepts only an allowed list of such licenses (MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, MPL-2.0, 0BSD, Unlicense, CC0-1.0, Python-2.0, PSF-2.0, BlueOak-1.0.0) and refuses the rest, in particular copyleft (GPL, AGPL).
 
 **Before a release**: the CI of the tagged commit must be green, which includes `govulncheck` of the sources and of the program inside the image; a release is not made while a Critical or High finding with a fix is open. A finding that is accepted instead of fixed is written into the changelog or the audit response with the reason.
 
