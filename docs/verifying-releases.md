@@ -34,7 +34,26 @@ gh attestation verify hsmgate-linux-amd64 -R zystem/hsmgate
 
 `hsmgate-linux-amd64-fips` and the image tagged `-fips` are built with `GOFIPS140=v1.0.0`: the Go cryptographic module, frozen at the version validated under FIPS 140-3, runs with `fips140=on` by default and its self-tests run at start. Use it with `require_fips: true` ([compliance.md](compliance.md)). Take it only when you need that mode: the frozen module does not get the fixes of newer Go releases to the cryptographic code until a newer module version is validated, and the mode refuses algorithms that are not approved (for example client certificates with RSA keys under 2048 bits). Its signature, hash and provenance are checked as above.
 
+## The tag
+
+From v0.4.1 on, the tag `vX.Y.Z` is an annotated tag signed by the maintainer with an SSH key (earlier tags, up to v0.4.0, are not signed). The public key of the maintainer, `zystem`, is
+
+```
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHPp5WWSw0xFjlzPEtln90NY8dc7MUvkun/14yTINPM/
+```
+
+(fingerprint `SHA256:lW4afK66UsIcTD4xXiwz2vutEsLvEYqYk+pTx+MuPHo`). To check a tag:
+
+```bash
+echo "10708003+zystem@users.noreply.github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHPp5WWSw0xFjlzPEtln90NY8dc7MUvkun/14yTINPM/" > allowed_signers
+git -c gpg.ssh.allowedSignersFile=allowed_signers tag -v vX.Y.Z
+```
+
+The key is also published on https://github.com/zystem.keys. The release assets are verified as above, independently of the tag.
+
 ## The image
+
+Use `cosign` 3 or later for the images: since cosign 3 the signature is stored as an OCI referrer in the new bundle format, which cosign 2 does not find ("no signatures found"). The blob bundles above verify with cosign 2.5 and 3.
 
 ```bash
 cosign verify ghcr.io/zystem/hsmgate@sha256:<digest> \
