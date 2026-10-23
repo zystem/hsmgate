@@ -30,7 +30,7 @@ type module interface {
 	Sign(sh pkcs11.SessionHandle, message []byte) ([]byte, error)
 }
 
-// PKCS11Config: Keys maps a label (as the configuration names it) to the CKA_ID of the key pair, in hex.
+// PKCS11Config describes a PKCS#11 token; Keys maps a label (as the configuration names it) to the CKA_ID of the key pair, in hex.
 type PKCS11Config struct {
 	Module      string
 	TokenLabel  string // the first token when empty and TokenSerial is empty too
@@ -38,10 +38,10 @@ type PKCS11Config struct {
 	Keys        map[string]string
 }
 
-// ErrPINRefused: the token refused the PIN. It is not tried again by the service; an operator unlocks again, knowing the card blocks after a few wrong tries.
-// ErrAlreadyUnlocked: the token is logged in; its PIN is not asked again.
+// ErrAlreadyUnlocked says that the token is logged in; its PIN is not asked again.
 var ErrAlreadyUnlocked = errors.New("the token is already unlocked")
 
+// ErrPINRefused says that the token refused the PIN. It is not tried again by the service; an operator unlocks again, knowing the card blocks after a few wrong tries.
 var ErrPINRefused = errors.New("the token refused the PIN")
 
 // PKCS11 is a view of a token for one generation of the configuration: the label -> CKA_ID map is its own, the session, the login and the PIN are shared
@@ -94,7 +94,7 @@ func (p *PKCS11) View(keys map[string]string) *PKCS11 {
 	return &PKCS11{core: p.core, keys: keys, points: map[string][]byte{}}
 }
 
-// SameToken: does a configuration name the token this one was opened for? (module, label and serial cannot change in a reload)
+// SameToken reports whether a configuration names the token this one was opened for? (module, label and serial cannot change in a reload)
 func (p *PKCS11) SameToken(c PKCS11Config) bool {
 	return p.cfg.Module == c.Module && p.cfg.TokenLabel == c.TokenLabel && p.cfg.TokenSerial == c.TokenSerial
 }

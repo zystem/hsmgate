@@ -20,7 +20,7 @@ type Authenticator struct {
 	now     func() time.Time
 }
 
-// New: roots is the client CA of this generation (nil: the chain is not checked again, which is for tests that have no CA).
+// New makes an Authenticator; roots is the client CA of this generation (nil: the chain is not checked again, which is for tests that have no CA).
 func New(clients []config.Client, roots *x509.CertPool) *Authenticator {
 	return &Authenticator{clients: clients, roots: roots, now: time.Now}
 }

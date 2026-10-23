@@ -122,10 +122,10 @@ const (
 	UsageMAC            = "generate_verify_mac"
 )
 
-// OnAnyFace: the key is exposed on at least one of the key-service faces; the rules about names, usages and separate private keys hold for all of them.
+// OnAnyFace reports whether the key is exposed on at least one of the key-service faces; the rules about names, usages and separate private keys hold for all of them.
 func (k Key) OnAnyFace() bool { return k.KMSJSON || k.KMSGRPC || k.KMSRest }
 
-// OnFace: the key is exposed on the face of this name ("kmsjson", "kmsgrpc", "kmsrest").
+// OnFace reports whether the key is exposed on the face of this name ("kmsjson", "kmsgrpc", "kmsrest").
 func (k Key) OnFace(face string) bool {
 	switch face {
 	case "kmsjson":
@@ -206,7 +206,7 @@ type JWT struct {
 	NoCert        bool     `yaml:"no_cert"`
 }
 
-// NoCertCredential: some credential of the client lets it call without a client certificate.
+// NoCertCredential reports whether some credential of the client lets it call without a client certificate.
 func (c Client) NoCertCredential() bool {
 	return (c.SigV4 != nil && c.SigV4.NoCert) || (c.JWT != nil && c.JWT.NoCert) || (c.OAuth != nil && c.OAuth.NoCert)
 }
@@ -241,7 +241,7 @@ func (s SigV4) Prefixes() ([]netip.Prefix, error) {
 	return out, nil
 }
 
-// Identity: any one that is set must match. URI is a URI SAN, SHA256 the hex SHA-256 of the certificate, CN the last resort.
+// Identity says how a client is recognised: any one that is set must match. URI is a URI SAN, SHA256 the hex SHA-256 of the certificate, CN the last resort.
 type Identity struct {
 	URI    string `yaml:"uri"`
 	SHA256 string `yaml:"sha256"`
@@ -702,7 +702,7 @@ func (c *Config) validateKMSJSON() error {
 	return nil
 }
 
-// CertOptional: some client may call the KMS-JSON face without a client certificate, so the listener must let a connection without one through (the Transit face refuses it per request).
+// CertOptional reports whether some client may call the KMS-JSON face without a client certificate, so the listener must let a connection without one through (the Transit face refuses it per request).
 func (c *Config) CertOptional() bool {
 	for _, cl := range c.Clients {
 		if cl.NoCertCredential() {

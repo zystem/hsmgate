@@ -36,7 +36,7 @@ jobs:
       - run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
 
   static:
-    # staticcheck, and gosec without G104 (unchecked errors: closing files and the best-effort audit line of a refusal, on purpose); each exception in the code has its reason
+    # staticcheck with all its checks, and gosec without G104 (unchecked errors: closing files and the best-effort audit line of a refusal, on purpose); each exception in the code has its reason
     needs: test
     runs-on: ubuntu-latest
     container: golang:1.26.10-bookworm
@@ -45,7 +45,7 @@ jobs:
         with:
           persist-credentials: false
       - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
-      - run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./...
+      - run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 -checks all ./...
       - run: go run github.com/securego/gosec/v2/cmd/gosec@v2.29.0 -quiet -exclude=G104 -exclude-dir=test -exclude-dir=tools -exclude-generated ./...
 
   softhsm:

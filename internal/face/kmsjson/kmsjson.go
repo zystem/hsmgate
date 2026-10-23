@@ -114,7 +114,7 @@ func (f *Face) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	g.serve(w, r)
 }
 
-// IsKMSJSON: does the request look like a call of this face? The server uses it to choose between the faces.
+// IsKMSJSON reports whether the request looks like a call of this face. The server uses it to choose between the faces.
 func IsKMSJSON(r *http.Request) bool {
 	return r.Method == http.MethodPost && strings.HasPrefix(r.Header.Get("X-Amz-Target"), targetStart)
 }
