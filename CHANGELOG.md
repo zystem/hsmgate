@@ -2,8 +2,12 @@
 
 ## Unreleased
 
+### Security
+- The image of **v0.4.1** was built with Go 1.27.2 (a base-image update by Dependabot), which has GO-2026-6809 (CVE-2026-111943): `crypto/x509` distrusted too little when it verified a certificate chain. The binary asset of v0.4.1 (built with Go 1.26.10) is not affected. The Dockerfile now builds with Go 1.27.3, and CI checks the program inside the image with `govulncheck` so that a base-image update cannot bring a vulnerable toolchain in unnoticed. Upgrade the image.
+
 ### Added
 - A **FIPS variant** of every release: `hsmgate-linux-amd64-fips` and the image `ghcr.io/zystem/hsmgate:vX.Y.Z-fips`, built with the frozen Go cryptographic module (`GOFIPS140=v1.0.0`, `fips140=on` by default), signed and attested like the others. CI tests with `GODEBUG=fips140=on` and checks the `require_fips` behaviour of both binaries.
+- A VEX document, [`vex/hsmgate.openvex.json`](vex/hsmgate.openvex.json) (OpenVEX): the vulnerabilities found in shipped components that do or do not affect the project, with the reasons.
 
 ## 0.4.1 — 2026-10-23
 

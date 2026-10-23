@@ -167,7 +167,7 @@ jobs:
           /tmp/venv/bin/python test/kmsjson-boto3/test_boto3.py build/hsmgate
 
   image:
-    # the Dockerfile builds (nothing is pushed)
+    # the Dockerfile builds (nothing is pushed), and the program inside the image, built with the toolchain of the Dockerfile, is checked for known vulnerabilities
     needs: test
     runs-on: ubuntu-latest
     steps:
@@ -179,5 +179,14 @@ jobs:
         with:
           context: .
           push: false
+          load: true
+          tags: hsmgate:ci
           platforms: linux/amd64
           build-args: VERSION=${{ inputs.version || 'dev' }}
+      - name: Known vulnerabilities in the program of the image
+        run: |
+          id=$(docker create hsmgate:ci)
+          docker cp "$id:/usr/local/bin/hsmgate" /tmp/hsmgate-image
+          docker rm "$id" > /dev/null
+          go version -m /tmp/hsmgate-image | head -1
+          go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 -mode=binary /tmp/hsmgate-image

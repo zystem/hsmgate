@@ -1,7 +1,7 @@
 # hsmgate with the OpenSC PKCS#11 module (a SmartCard-HSM through the host's pcscd). cgo is needed by the PKCS#11 binding, so the binary is dynamic.
 # The final image is distroless: glibc, the CA certificates and nothing else (no shell, no package manager, none of the 97 packages of a Debian image that the service never uses);
 # the OpenSC module and the libraries it needs are copied into it from a Debian stage. Base images are pinned by digest (Dependabot updates them).
-FROM golang:1.27.2-bookworm@sha256:5cf287a799e6b94384bad13d16b14904c531f51ba65792237e122ce42b392f61 AS build
+FROM golang:1.27.3-bookworm@sha256:972b4110ba0f47539a975c31e52c64765e1ff19f2d74469ae4a595c6676e80a5 AS build
 ARG VERSION=dev
 # GOFIPS140=v1.0.0 builds with the frozen Go cryptographic module and runs with fips140=on by default (docs/compliance.md); empty: the usual build
 ARG GOFIPS140=
