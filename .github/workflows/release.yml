@@ -41,6 +41,7 @@ jobs:
           sha256sum dist/hsmgate-linux-amd64 > dist/hsmgate-linux-amd64.sha256
           sha256sum dist/hsmgate-linux-amd64-fips > dist/hsmgate-linux-amd64-fips.sha256
           tar -czf dist/hsmgate-deploy.tar.gz LICENSE README.md api deploy docs
+          cp vex/hsmgate.openvex.json dist/hsmgate.openvex.json
 
       - name: SBOM
         uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
@@ -53,7 +54,7 @@ jobs:
 
       - name: Sign the files
         run: |
-          for f in dist/hsmgate-linux-amd64 dist/hsmgate-linux-amd64-fips dist/hsmgate-deploy.tar.gz dist/hsmgate.spdx.json; do
+          for f in dist/hsmgate-linux-amd64 dist/hsmgate-linux-amd64-fips dist/hsmgate-deploy.tar.gz dist/hsmgate.spdx.json dist/hsmgate.openvex.json; do
             cosign sign-blob --yes --bundle "$f.sigstore.json" "$f"
           done
 
