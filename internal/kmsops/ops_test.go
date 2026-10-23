@@ -6,6 +6,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/sha256"
 	"crypto/x509"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -304,6 +305,25 @@ func TestBlobParsingIsStrict(t *testing.T) {
 	for _, b := range [][]byte{nil, []byte("HGK2"), []byte("HGK1\x01a\x00\x01ecies2.x"), []byte("HGK2\x00a\x00\x01ecies2.x"), []byte("HGK2\x01a\x00\x00ecies2.x"), []byte("HGK2\x01a\x00\x01nope")} {
 		if _, _, _, err := ParseBlob(b); err == nil {
 			t.Errorf("accepted %q", b)
+		}
+	}
+}
+
+func TestErrorsAndBlobKey(t *testing.T) {
+	e := fail(Denied, "forbidden", "no", false)
+	if e.Error() != "no (forbidden)" {
+		t.Errorf("%q", e.Error())
+	}
+	blob := MakeBlob("seal", 3, "ecies2.aa.bb.cc")
+	if n, v, err := BlobKey(blob); err != nil || n != "seal" || v != 3 {
+		t.Errorf("%s %d %v", n, v, err)
+	}
+	if _, _, err := BlobKey([]byte("junk")); kind(err) != BadCiphertext {
+		t.Errorf("junk: %v", err)
+	}
+	for in, want := range map[error]Kind{backend.ErrLocked: Locked, backend.ErrUnavailable: Unavailable, errors.New("x"): Internal} {
+		if got := tokenErr(in); got.Kind != want {
+			t.Errorf("%v: %v", in, got.Kind)
 		}
 	}
 }

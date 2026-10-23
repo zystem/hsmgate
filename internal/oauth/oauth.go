@@ -32,24 +32,10 @@ var (
 )
 
 type Claims struct {
-	Iss string          `json:"iss"`
-	Sub string          `json:"sub"`
-	Aud json.RawMessage `json:"aud"`
-	Iat int64           `json:"iat"`
-	Exp int64           `json:"exp"`
-}
-
-// aud reads the audience: a string, or a list of strings.
-func (c Claims) Audiences() []string {
-	var one string
-	if json.Unmarshal(c.Aud, &one) == nil {
-		return []string{one}
-	}
-	var many []string
-	if json.Unmarshal(c.Aud, &many) == nil {
-		return many
-	}
-	return nil
+	Iss string `json:"iss"`
+	Sub string `json:"sub"`
+	Iat int64  `json:"iat"`
+	Exp int64  `json:"exp"`
 }
 
 // PeekIssuer reads the issuer of a token without trusting it (to find the key to check it with).

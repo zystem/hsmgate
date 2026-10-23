@@ -1,5 +1,7 @@
 # hsmgate
 
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/15821/badge)](https://www.bestpractices.dev/projects/15821)
+
 A small network service that holds no key material of its own and lets authenticated clients seal and open short secrets
 (data keys, the root key of another vault) under a master key that lives on a PKCS#11 token (HSM, smart card, software token for tests).
 A door in front of the token: who may ask, for which key, with which context, how often, and what is written down.
@@ -26,5 +28,5 @@ cp deploy/hsmgate.example.yaml hsmgate.yaml    # edit: certificates, token, clie
 ./hsmgate unlock -config hsmgate.yaml -token card
 ```
 
-Docs: **[specifications](docs/specs/README.md)**, [secrets in pods without Vault](docs/guides/kubernetes-pod-secrets.md), ([Transit](docs/specs/transit.md), [sealed format](docs/specs/ecies2.md), [Kubernetes KMS v2](docs/specs/kubernetes-kms-v2.md), [KMS-JSON](docs/specs/kms-json.md) and [how to connect to it](docs/guides/kms-json-clients.md); [OpenAPI](api/openapi.yaml)), [transit-face.md](docs/transit-face.md) (design and what was tried), [operations.md](docs/operations.md) (unlock, rotation, spare card, lost card), [threat-model.md](docs/threat-model.md),
+Docs: **[specifications](docs/specs/README.md)**, [secrets in pods without Vault](docs/guides/kubernetes-pod-secrets.md), ([Transit](docs/specs/transit.md), [sealed format](docs/specs/ecies2.md), [Kubernetes KMS v2](docs/specs/kubernetes-kms-v2.md), [KMS-JSON](docs/specs/kms-json.md) and [how to connect to it](docs/guides/kms-json-clients.md); [OpenAPI](api/openapi.yaml)), [transit-face.md](docs/transit-face.md) (design and what was tried), [operations.md](docs/operations.md) (unlock, rotation, spare card, lost card), [threat-model.md](docs/threat-model.md), [architecture](docs/architecture.md), [security requirements](docs/security-requirements.md) and [assurance case](docs/assurance-case.md), [compliance](docs/compliance.md), [upgrading](docs/upgrading.md), [roadmap](docs/roadmap.md), [contributing](CONTRIBUTING.md), [governance](GOVERNANCE.md), [code of conduct](CODE_OF_CONDUCT.md),
 [tokens/smartcard-hsm.md](docs/tokens/smartcard-hsm.md), [project-plan.md](docs/project-plan.md). Deployment: [deploy/](deploy/) (systemd unit; Docker: `Dockerfile` in the root and [deploy/docker/compose.yaml](deploy/docker/compose.yaml), see [Running in Docker](docs/operations.md)). One card means one machine or VM with the reader, not a scheduler.

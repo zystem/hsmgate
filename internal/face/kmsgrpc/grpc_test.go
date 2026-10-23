@@ -299,3 +299,65 @@ func TestCertlessMustBeAllowed(t *testing.T) {
 		t.Errorf("a credential without no_cert, no certificate: %d", code)
 	}
 }
+
+func TestVersionsHandlesAndCertless(t *testing.T) {
+	r := newRig(t)
+	code, bearer := 0, r.jwt("app@example.test", r.rsaKey, time.Hour)
+	_ = code
+	st, _, rep := r.rpc("ListCryptoKeyVersions", bearer, (&writer{}).str(1, ring+"seal"))
+	if st != 0 || len(rep.bytes[1]) != 1 || rep.u64(3) != 1 {
+		t.Fatalf("versions: %d", st)
+	}
+	st, _, rep = r.rpc("GetCryptoKeyVersion", bearer, (&writer{}).str(1, ring+"seal/cryptoKeyVersions/1"))
+	if st != 0 || rep.u64(3) != stateEnabled || rep.u64(10) != algSymmetric {
+		t.Fatalf("version: %d", st)
+	}
+	for _, name := range []string{ring + "seal", ring + "seal/cryptoKeyVersions/9"} {
+		if st, _, _ := r.rpc("GetCryptoKeyVersion", bearer, (&writer{}).str(1, name)); st == 0 {
+			t.Errorf("%s was accepted", name)
+		}
+	}
+	if st, _, _ := r.rpc("GetCryptoKey", bearer, (&writer{}).str(1, ring+"seal/cryptoKeyVersions/1")); st == 0 {
+		t.Error("a version name for a key")
+	}
+	if st, _, _ := r.rpc("ListCryptoKeyVersions", bearer, (&writer{}).str(1, ring+"seal/cryptoKeyVersions/1")); st == 0 {
+		t.Error("a version name for a list")
+	}
+	if st, _, _ := r.rpc("GenerateRandomBytes", bearer, (&writer{}).str(1, "projects/hsmgate/locations/global").u64(2, 5000)); st != cInvalid {
+		t.Errorf("too many bytes: %d", st)
+	}
+	if st, _, _ := r.rpc("GenerateRandomBytes", bearer, (&writer{}).str(1, "projects/x/locations/global").u64(2, 5)); st != cDenied {
+		t.Errorf("another project: %d", st)
+	}
+	// Handles: a call of the service and the token endpoint, nothing else
+	mk := func(method, path, ct string) *http.Request {
+		q, _ := http.NewRequest(method, "https://x"+path, nil)
+		q.Header.Set("Content-Type", ct)
+		return q
+	}
+	if !r.f.Handles(mk("POST", servicePath+"Encrypt", "application/grpc")) || !r.f.Handles(mk("POST", r.f.TokenPath, "")) ||
+		r.f.Handles(mk("GET", r.f.TokenPath, "")) || r.f.Handles(mk("POST", "/v1/transit/x", "application/json")) {
+		t.Error("Handles")
+	}
+	// an h1 call, and a bearer on the wrong kind of request
+	if st, _, _ := r.rpc("Encrypt", "", (&writer{}).str(1, ring+"seal")); st != cUnauth {
+		t.Errorf("no bearer: %d", st)
+	}
+	// without a certificate: the credential is not marked no_cert, and a refused call is counted
+	r.f.NoCertificate = func(*http.Request) bool { return true }
+	r.f.Reload(r.cfg, nil, policy.New(r.cfg, nil), func(*http.Request) (string, bool) { return "", false }, mustCreds(t, r.cfg))
+	for i := 0; i < 25; i++ {
+		r.rpc("GenerateRandomBytes", bearer, (&writer{}).str(1, "projects/hsmgate/locations/global").u64(2, 8))
+	}
+	if st, _, _ := r.rpc("GenerateRandomBytes", bearer, (&writer{}).str(1, "projects/hsmgate/locations/global").u64(2, 8)); st != cExhausted {
+		t.Errorf("a blocked address: %d", st)
+	}
+}
+
+func mustCreds(t *testing.T, cfg *config.Config) map[string]Cred {
+	c, err := LoadCreds(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
