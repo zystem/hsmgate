@@ -12,7 +12,7 @@ The face is **not** that service, is **not affiliated with, endorsed by or spons
 
 Kubernetes KMS v2 and Transit only encrypt and decrypt; on a token that is used for ECDH only (a SmartCard-HSM through the OpenSC module, which exposes no AES) the service has to do the sealing and sees every data key. With `DeriveSharedSecret` the service is an ECDH oracle with a policy.
 
-- **Seal** (client side, no call): fetch the public key (`GetPublicKey`, DER SubjectPublicKeyInfo, pin its fingerprint), make an ephemeral key, ECDH, derive, seal as in [ecies1.md](ecies1.md).
+- **Seal** (client side, no call): fetch the public key (`GetPublicKey`, DER SubjectPublicKeyInfo, pin its fingerprint), make an ephemeral key, ECDH, derive, seal as in [ecies2.md](ecies2.md).
 - **Open**: send the ephemeral public key to `DeriveSharedSecret`; the token does ECDH; the client derives the key and opens locally.
 
 ## 2. Operations
@@ -38,7 +38,7 @@ Kubernetes KMS v2 and Transit only encrypt and decrypt; on a token that is used 
 
 ### 2a. Sealing by the service (`kmsjson_usage: encrypt_decrypt`)
 
-- `Encrypt` (plaintext 1 to 4096 bytes), `Decrypt` (the `KeyId` is optional: the ciphertext blob names the key and its version, as clients expect; the name and the version are in the clear in the blob and are also **authenticated** with the data (they are part of the additional data of the AEAD, format `HGK2`), so a blob cannot be relabelled to another key or version), `ReEncrypt` (needs `decrypt` on the source and `encrypt` on the destination), `GenerateDataKey` and `GenerateDataKeyWithoutPlaintext` (`KeySpec` `AES_128`/`AES_256` or `NumberOfBytes` 1 to 1024; the right is `encrypt`). The only algorithm is `SYMMETRIC_DEFAULT`; here it is `ecies1` ([ecies1.md](ecies1.md)), not AES-GCM, and the blob is ours and opaque. A blob sealed by this face is not readable by the cloud service or the reverse.
+- `Encrypt` (plaintext 1 to 4096 bytes), `Decrypt` (the `KeyId` is optional: the ciphertext blob names the key and its version, as clients expect; the name and the version are in the clear in the blob and are also **authenticated** with the data (they are part of the additional data of the AEAD, format `HGK2`), so a blob cannot be relabelled to another key or version), `ReEncrypt` (needs `decrypt` on the source and `encrypt` on the destination), `GenerateDataKey` and `GenerateDataKeyWithoutPlaintext` (`KeySpec` `AES_128`/`AES_256` or `NumberOfBytes` 1 to 1024; the right is `encrypt`). The only algorithm is `SYMMETRIC_DEFAULT`; here it is `ecies2` ([ecies2.md](ecies2.md)), and the blob is ours and opaque. A blob sealed by this face is not readable by the cloud service or the reverse.
 - `EncryptionContext` is the additional data. A key in `aad.mode: fixed` takes **none** (a request with one is refused). A key in `aad.mode: context` needs one: the pairs are made canonical (sorted `name=value` lines, at most 1024 bytes, no `\n` in a name or value, no `=` in a name), and the context is allowed when **one of its lines** begins with a prefix of the key's `aad.allow` (and of the client's `contexts`), such as `purpose=dek`. A context that does not match the one used for sealing gives `InvalidCiphertextException`.
 - A key for key agreement is refused by these calls and a sealing key by `DeriveSharedSecret`: `InvalidKeyUsageException`. `GetPublicKey` of a sealing key is `UnsupportedOperationException`, as for a symmetric key in the cloud service.
 - `GenerateRandom` uses the operating system's generator, not the token's.

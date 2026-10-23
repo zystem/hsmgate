@@ -1,6 +1,6 @@
 # Transit API (the contract of the service)
 
-**Status: implemented.** Code: `internal/face/transit`. Machine-readable form: [api/openapi.yaml](../../api/openapi.yaml) (a test keeps it equal to the handler). The ciphertext inside is described in [ecies1.md](ecies1.md).
+**Status: implemented.** Code: `internal/face/transit`. Machine-readable form: [api/openapi.yaml](../../api/openapi.yaml) (a test keeps it equal to the handler). The ciphertext inside is described in [ecies2.md](ecies2.md).
 
 hsmgate serves the part of the HashiCorp Vault / OpenBao **Transit** API that three programs use: OpenBao (`seal "transit"`), the etcd plug-in `vault-kubernetes-kms`, and CiNim. It is **not** a Vault: there are no tokens, no policies of Vault, no key creation through the API. Keys are named in the configuration of the service and live on the token; a client only uses them.
 
@@ -140,4 +140,4 @@ X-Hsmgate-Retryable: true
 
 ## 9. Conformance
 
-`TestOpenBaoSealRoundTrip`, `TestNimMadeOpenBaoCiphertextOpens`, `TestNimMadeCinimCiphertextOpensWithContext`, `TestDenyByDefault`, `TestRateLimit`, `TestLockedTokenIsRetryable`, `TestRotationWithReload`, `TestFirstFailedAuditWriteWithholdsThePlaintext`, `TestSizeLimits`, `TestAdmissionIsAFiniteLine`, `TestHandlerAnswersAreDocumented` (the OpenAPI file), `FuzzDecryptRequest`. A second implementation of this contract must open the vectors of [ecies1.md](ecies1.md) and answer the same way to these.
+`TestOpenBaoSealRoundTrip`, `TestNimMadeOpenBaoCiphertextOpens`, `TestNimMadeCinimCiphertextOpensWithContext`, `TestDenyByDefault`, `TestRateLimit`, `TestLockedTokenIsRetryable`, `TestRotationWithReload`, `TestFirstFailedAuditWriteWithholdsThePlaintext`, `TestSizeLimits`, `TestAdmissionIsAFiniteLine`, `TestHandlerAnswersAreDocumented` (the OpenAPI file), `FuzzDecryptRequest`. A second implementation of this contract must open the vectors of [ecies2.md](ecies2.md) and answer the same way to these.
