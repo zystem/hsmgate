@@ -44,7 +44,7 @@ func (l *Log) Write(e Event) error {
 	return err
 }
 
-// Healthy: the last write succeeded. A service that cannot write down what it does stops doing it.
+// Healthy reports whether the last write succeeded. A service that cannot write down what it does stops doing it.
 func (l *Log) Healthy() bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()

@@ -103,7 +103,7 @@ func (f *Face) Reload(cfg *config.Config, tokens map[string]backend.Token, pol *
 	return f.gen.Set(&snap{cfg: cfg, tokens: tokens, pol: pol, identify: id, creds: creds, names: names{project: g.Project, location: g.Location, keyRing: g.KeyRing}})
 }
 
-// Handles: is this request for the face (a call of the service, or the request of a token)?
+// Handles reports whether this request is for the face (a call of the service, or the request of a token).
 func (f *Face) Handles(r *http.Request) bool {
 	if r.Method != http.MethodPost {
 		return false

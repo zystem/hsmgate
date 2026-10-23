@@ -95,7 +95,7 @@ func (f *Face) Reload(cfg *config.Config, tokens map[string]backend.Token, pol *
 
 func (f *Face) tokenPath() string { return "/" + f.Tenant + tokenSuffix }
 
-// Handles: is this request for the face?
+// Handles reports whether this request is for the face.
 func (f *Face) Handles(r *http.Request) bool {
 	p := r.URL.Path
 	return p == "/keys" || strings.HasPrefix(p, "/keys/") || p == "/rng" || p == f.tokenPath() || p == f.discoveryPath()

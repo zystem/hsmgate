@@ -11,7 +11,7 @@ import (
 	"github.com/zystem/hsmgate/internal/scheme/ecies"
 )
 
-// Pinned: a version with a fingerprint is served only by holders of that key. A card that was swapped for another one is "unavailable", not trusted.
+// Pinned checks that a version with a fingerprint is served only by holders of that key. A card that was swapped for another one is "unavailable", not trusted.
 func Pinned(v config.Version, point []byte) error {
 	if v.Fingerprint != "" && !strings.EqualFold(v.Fingerprint, ecies.Fingerprint(point)) {
 		return fmt.Errorf("%w: the holder's key is not the pinned one", backend.ErrUnavailable)

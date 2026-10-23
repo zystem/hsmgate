@@ -103,7 +103,7 @@ func (p *Policy) spend(id string, perMinute, perDay int) Decision {
 	return Allow
 }
 
-// ContextAllowed: does the key accept this context? (Mode context only.)
+// ContextAllowed reports whether the key accepts this context. (Mode context only.)
 func ContextAllowed(k config.Key, ctx []byte) bool {
 	for _, a := range k.AAD.Allow {
 		if strings.HasPrefix(string(ctx), a) {
@@ -113,7 +113,7 @@ func ContextAllowed(k config.Key, ctx []byte) bool {
 	return false
 }
 
-// Names lists the keys a client may use.
+// Allowed reports whether the client has any grant on the key.
 func (p *Policy) Allowed(client, key string) bool {
 	for _, c := range p.cfg.Clients {
 		if c.Name == client {
@@ -124,7 +124,7 @@ func (p *Policy) Allowed(client, key string) bool {
 	return false
 }
 
-// ContextOK: is this context within what the grant of the client allows? Empty contexts in the grant mean no narrowing.
+// ContextOK reports whether this context is within what the grant of the client allows? Empty contexts in the grant mean no narrowing.
 func (p *Policy) ContextOK(client, key string, ctx []byte) bool {
 	for _, c := range p.cfg.Clients {
 		if c.Name != client {

@@ -297,7 +297,7 @@ func loadTLS(cfg *config.Config) (*tls.Config, error) {
 	return &tls.Config{MinVersion: tls.VersionTLS13, ClientAuth: auth, ClientCAs: pool, Certificates: []tls.Certificate{cert}, NextProtos: []string{"h2", "http/1.1"}}, nil
 }
 
-// VerifyDistinct: with the KMS-JSON face in use, two keys of the configuration must not hold the same public key (and so the same private key) whatever their labels, ids or token
+// VerifyDistinct checks that, with a key-service face in use, no two keys of the configuration hold the same public key (and so the same private key) whatever their labels, ids or token
 // names say (audit of 2026-10-21, CR-01; config.distinctKeys does the part that the configuration alone can tell). A holder that does not answer now is skipped here; a pinned
 // fingerprint covers it, and the next reload looks again.
 func VerifyDistinct(cfg *config.Config, tokens map[string]backend.Token) error {
@@ -336,7 +336,7 @@ func VerifyDistinct(cfg *config.Config, tokens map[string]backend.Token) error {
 	return nil
 }
 
-// VerifyReplicas: every holder of a key version that answers must have the same public key (and the pinned one, if the version has a fingerprint).
+// VerifyReplicas checks that every holder of a key version that answers must have the same public key (and the pinned one, if the version has a fingerprint).
 // A holder that cannot answer now (card out) is skipped here and judged again at every use.
 func VerifyReplicas(cfg *config.Config, tokens map[string]backend.Token) error {
 	for name, k := range cfg.Keys {

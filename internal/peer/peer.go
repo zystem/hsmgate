@@ -23,7 +23,7 @@ func Addr(r *http.Request) netip.Addr {
 	return a.Unmap().WithZone("") // a zone (fe80::1%eth0) would make a prefix never contain the address
 }
 
-// Allowed: is the address within one of the prefixes?
+// Allowed reports whether the address is within one of the prefixes.
 func Allowed(from []netip.Prefix, a netip.Addr) bool {
 	for _, p := range from {
 		if p.Contains(a) {
@@ -75,7 +75,7 @@ func (x *Failures) Add(a netip.Addr, now time.Time) {
 	x.by[a] = append(x.recent(a, now), now)
 }
 
-// Blocked: has the address had Limit refusals in the last Window?
+// Blocked reports whether the address has had Limit refusals in the last Window.
 func (x *Failures) Blocked(a netip.Addr, now time.Time) bool {
 	if x == nil || !a.IsValid() {
 		return false
