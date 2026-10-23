@@ -39,6 +39,9 @@ func main() {
 		}
 		os.Exit(run(os.Args[2:], os.Stdin, os.Stdout, os.Stderr))
 	}
+	if len(os.Args) >= 2 && os.Args[1] == "ca" {
+		os.Exit(runCA(os.Args[2:], os.Stdout, os.Stderr))
+	}
 	if len(os.Args) >= 2 && os.Args[1] == "ping" {
 		// a TCP connect to the listener: for a container health check (it must not touch the token or need a certificate)
 		fs := flag.NewFlagSet("ping", flag.ExitOnError)
@@ -56,7 +59,7 @@ func main() {
 		return
 	}
 	if len(os.Args) < 2 || (os.Args[1] != "serve" && os.Args[1] != "check" && os.Args[1] != "unlock") {
-		fmt.Fprintln(os.Stderr, "usage: hsmgate serve|check|unlock|version|ping|encrypt|decrypt -config hsmgate.yaml [-token NAME] [-pin-stdin]")
+		fmt.Fprintln(os.Stderr, "usage: hsmgate serve|check|unlock|version|ping|encrypt|decrypt|ca -config hsmgate.yaml [-token NAME] [-pin-stdin]")
 		os.Exit(2)
 	}
 	fs := flag.NewFlagSet(os.Args[1], flag.ExitOnError)
@@ -127,21 +130,9 @@ func unlock(cfg *config.Config, token string, fromStdin bool) error {
 	if cfg.AdminSocket == "" || token == "" {
 		return fmt.Errorf("unlock needs admin_socket in the configuration and -token NAME")
 	}
-	var pin string
-	if fromStdin {
-		line, err := bufio.NewReader(os.Stdin).ReadString('\n')
-		if err != nil && err != io.EOF {
-			return err
-		}
-		pin = strings.TrimRight(line, "\r\n")
-	} else {
-		fmt.Fprint(os.Stderr, "PIN for "+token+": ")
-		b, err := term.ReadPassword(int(os.Stdin.Fd()))
-		fmt.Fprintln(os.Stderr)
-		if err != nil {
-			return err
-		}
-		pin = string(b)
+	pin, err := readPIN(token, fromStdin)
+	if err != nil {
+		return err
 	}
 	cl := &http.Client{Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, "unix", cfg.AdminSocket)
@@ -158,4 +149,22 @@ func unlock(cfg *config.Config, token string, fromStdin bool) error {
 	}
 	fmt.Print(string(out))
 	return nil
+}
+
+// readPIN reads a PIN from the terminal without echo, or from standard input. It is never an argument.
+func readPIN(token string, fromStdin bool) (string, error) {
+	if fromStdin {
+		line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+		if err != nil && err != io.EOF {
+			return "", err
+		}
+		return strings.TrimRight(line, "\r\n"), nil
+	}
+	fmt.Fprint(os.Stderr, "PIN for "+token+": ")
+	b, err := term.ReadPassword(int(os.Stdin.Fd()))
+	fmt.Fprintln(os.Stderr)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
 }

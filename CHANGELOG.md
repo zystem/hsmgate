@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **`hsmgate ca`**: a small certificate authority built into the program (`init`, `server`, `client`, `list`), made of the Go standard library only, so that the certificates for mutual TLS need no openssl or other tool. The key of the authority is a file (`-mode file`), **sealed to the token** (`-mode sealed`: nothing secret is stored; the token opens the key for one command) or **a signing key of the token** (`-mode token`: the key never leaves the card). `hsmgate ca setup -config hsmgate.yaml -client NAME` does it all in one command: the authority, the server certificate at the paths of `tls:` with its names guessed from `listen:` and the interfaces, the owner of the key file guessed, and client certificates. See [docs/operations.md](docs/operations.md).
+
 ## 0.5.0 — 2026-10-23
 
 ### Security

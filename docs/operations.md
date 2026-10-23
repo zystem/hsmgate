@@ -2,6 +2,74 @@
 
 The card side (initialising the card, DKEK shares, making and backing up the key) is in CiNim's `docs/hardware-key.md` sections 2-5; this page is about the service.
 
+## Certificates without openssl: `hsmgate ca`
+
+The service needs a server certificate and, for each calling program, a client certificate from one authority (mutual TLS). `hsmgate ca` is a small authority built into the program (the Go standard library, ECDSA P-256 with SHA-256, no other tool and no new dependency).
+
+### In one command
+
+Put the paths of the files in `tls:` of `hsmgate.yaml` (and the address in `listen:`), then:
+
+```bash
+hsmgate ca setup -config /etc/hsmgate/hsmgate.yaml -client demo
+```
+
+It makes the authority (in `ca/` next to the configuration), the server certificate **at the paths `tls:` names**, the authority's certificate as `tls.client_ca`, and a client certificate `demo` in `clients/` next to the configuration (`demo.pem`, `demo.key`, `ca.pem`: what the client needs). Nothing else is to be given:
+
+- the **names** of the server certificate come from `listen:` (an address there is the one address; `0.0.0.0` or `:8443` means every address of the interfaces) and the host name, plus `127.0.0.1` and `localhost`; the command prints what it guessed (`-ip` and `-dns` say otherwise);
+- the **owner** of the key file is the user `hsmgate` when the command runs as root and that user exists (`-owner` says otherwise);
+- the **client** is named by `-client` (several: `-client a,b`); without it, only the server side is made, and the command shows how to add a client later.
+
+It prints the `identity:` lines for the client (`cn` and `sha256`) to put under `clients:`; then start or restart the service. It overwrites nothing and stops before it makes anything if a file exists.
+
+### Step by step
+
+```bash
+hsmgate ca init   -dir /root/hsmgate-ca                          # the authority: ca.key (PRIVATE, 0600) and ca.pem
+hsmgate ca server -dir /root/hsmgate-ca -config /etc/hsmgate/hsmgate.yaml    # names guessed, files where tls: says
+hsmgate ca server -dir /root/hsmgate-ca -out /etc/hsmgate -ip 192.0.2.10 -dns hsmgate.example -owner hsmgate   # or everything given
+hsmgate ca client -dir /root/hsmgate-ca -out ./demo -cn demo     # demo.pem, demo.key, ca.pem (-config: into clients/ next to it)
+hsmgate ca list   -dir /root/hsmgate-ca                          # what was issued, with the sha256 of each certificate
+```
+
+Certificates last 365 days by default (`-days`), never longer than the authority (10 years); keys are written with mode 0400 and nothing is overwritten.
+
+### Where the key of the authority lives
+
+The authority's key signs every certificate, so who holds it can make a client that the service accepts. `-mode` on `init` (or `setup`) chooses how it is kept:
+
+| `-mode` | The key | What is in the directory | After `init` |
+|---|---|---|---|
+| `file` (default) | a file, `ca.key` (0600) | **a secret**: keep it off the service host, back it up like a key | nothing else needed |
+| `sealed` | made in memory, written only **sealed** to the public key of an ECDH key of the token (`ca.key.sealed`, the `ecies2` format) | no secret: the sealed file opens only with that token | each `server` or `client` command needs the token and its PIN: the token opens the key for the time of one command |
+| `token` | a **signing key of the token** (`-label` names it); the token makes the signatures | no secret, and no key at all: it never leaves the token | each `server` or `client` command needs the token and its PIN |
+
+With `-mode sealed` or `token` the command needs the token: `-config` names the configuration, `-token` the token in it (the first time; it is recorded in `ca.json` and found again by itself), `-label` the key of the token. The PIN is read from the terminal without echo (or from standard input with `-pin-stdin`; never an argument), tried once, and the command logs out when it ends.
+
+**Sealed to the token** (no new key on the card: the ECDH key that already serves the service, here the label `master`):
+
+```bash
+# hsmgate.yaml:  tokens: [{name: card, type: pkcs11, module: /usr/lib/x86_64-linux-gnu/opensc-pkcs11.so, token_label: mytoken, keys: {master: "01"}}]
+hsmgate ca setup -config /etc/hsmgate/hsmgate.yaml -client demo -mode sealed -token card -label master      # asks for the PIN
+hsmgate ca client -dir /etc/hsmgate/ca -config /etc/hsmgate/hsmgate.yaml -cn another                        # later: the PIN again
+```
+
+Sealing the authority's key needs no PIN (only the public key of the token); every later issue does, because the token must open the key. The sealed file is bound to its purpose and opens only with its own context, so sealing to the master key is safe, though a key of its own is tidier.
+
+**On the token** (a signing key on the card, once; the best protection: no key outside the card at any time):
+
+```bash
+pkcs11-tool --module /usr/lib/x86_64-linux-gnu/opensc-pkcs11.so --login --keypairgen --key-type EC:prime256v1 --id 02 --label ca-sign --usage-sign
+# hsmgate.yaml:  tokens: [{name: card, ..., keys: {master: "01", ca-sign: "02"}}]
+hsmgate ca setup -config /etc/hsmgate/hsmgate.yaml -client demo -mode token -token card -label ca-sign      # asks for the PIN
+```
+
+The mode `token` needs a key that is only for signing (a key is used for signing or for ECDH, never both). With a card-bound authority nothing has to be stored safely except the card itself, and a stolen directory gives nobody a certificate. The card allows a few wrong PINs: the service and the command each log in on their own.
+
+### What it does not do
+
+There is no revocation list: to refuse a client, remove it from the configuration and reload (SIGHUP: effective at the next request); to replace a server certificate, issue a new one and restart. With the mode `file` keep `ca.key` off the service host (make the certificates elsewhere and copy the files) and back it up like a key. A deployment with its own PKI (a company CA, cert-manager, step-ca, Vault PKI) does not need this command.
+
 ## Start, unlock, reload
 
 - `hsmgate check -config hsmgate.yaml` loads the configuration, opens the tokens and prints every key version with its holders, their state and the fingerprint of the public key (no PIN needed). Compare the fingerprints with the ones you wrote down when the key was made.
