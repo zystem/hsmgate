@@ -23,7 +23,7 @@ go test ./...
 ```
 go build -o hsmgate ./cmd/hsmgate
 cp deploy/hsmgate.example.yaml hsmgate.yaml    # edit: certificates, token, clients
-./hsmgate ca init -dir ca && ./hsmgate ca server -dir ca -out . -ip 127.0.0.1   # certificates, no openssl needed (docs/operations.md)
+./hsmgate ca setup -config hsmgate.yaml -client demo   # the certificates at the paths of tls:, no openssl needed (docs/operations.md)
 ./hsmgate check -config hsmgate.yaml           # lists key versions, holders, fingerprints; needs no PIN
 ./hsmgate serve -config hsmgate.yaml &
 ./hsmgate unlock -config hsmgate.yaml -token card
