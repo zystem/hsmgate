@@ -3,6 +3,8 @@ package kmsgrpc
 import (
 	"strconv"
 	"strings"
+
+	"github.com/zystem/hsmgate/internal/config"
 )
 
 // The names of resources are those of the service: projects/P/locations/L/keyRings/R/cryptoKeys/KEY[/cryptoKeyVersions/N]. P, L and R are fixed by the configuration; KEY is the
@@ -37,7 +39,7 @@ func (n names) parseKey(name string) (key string, ver int, hasVer, ok bool) {
 		return "", 0, false, false
 	}
 	v, err := strconv.Atoi(num)
-	if err != nil || v < 1 || strconv.Itoa(v) != num {
+	if err != nil || v < 1 || v > config.MaxVersions || strconv.Itoa(v) != num {
 		return "", 0, false, false
 	}
 	return key, v, true, true

@@ -327,3 +327,24 @@ func TestErrorsAndBlobKey(t *testing.T) {
 		}
 	}
 }
+
+func TestBlobConversionsRefuseWhatDoesNotFit(t *testing.T) {
+	for name, f := range map[string]func(){
+		"a version over two bytes": func() { MakeBlob("seal", 70000, "ecies2.a.b.c") },
+		"a negative version":       func() { BindAAD("seal", -1, nil) },
+		"a name over one byte":     func() { MakeBlob(strings.Repeat("a", 300), 1, "ecies2.a.b.c") },
+	} {
+		func() {
+			defer func() {
+				if recover() == nil {
+					t.Errorf("%s was written into a blob", name)
+				}
+			}()
+			f()
+		}()
+	}
+	// what the configuration allows fits
+	if _, v, _, err := ParseBlob(MakeBlob("seal", config.MaxVersions, "ecies2.a.b.c")); err != nil || v != config.MaxVersions {
+		t.Errorf("%d %v", v, err)
+	}
+}

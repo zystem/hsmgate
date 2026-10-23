@@ -413,7 +413,7 @@ func (f *Face) resolve(id string) (name string, version int, found bool) {
 	s = strings.TrimPrefix(s, "alias/")
 	if i := strings.LastIndex(s, "@"); i >= 0 {
 		n, err := strconv.Atoi(s[i+1:])
-		if err != nil || n < 1 {
+		if err != nil || n < 1 || n > config.MaxVersions {
 			return "", 0, false
 		}
 		version, s = n, s[:i]

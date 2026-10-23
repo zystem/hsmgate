@@ -13,7 +13,6 @@ import (
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
-	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -26,12 +25,12 @@ import (
 	"github.com/zystem/hsmgate/internal/audit"
 	"github.com/zystem/hsmgate/internal/config"
 	"github.com/zystem/hsmgate/internal/keyops"
+	"github.com/zystem/hsmgate/internal/kmsops"
 	"github.com/zystem/hsmgate/internal/policy"
 	"github.com/zystem/hsmgate/internal/scheme/ecies"
 )
 
 const (
-	blobMagic    = "HGK2"
 	algorithm    = "SYMMETRIC_DEFAULT"
 	maxPlaintext = 4096 // the limit of the cloud service for Encrypt
 	maxRandom    = 1024
@@ -242,39 +241,12 @@ func anyLine(ctx []byte, ok func([]byte) bool) bool {
 // bindAAD is what the AEAD authenticates for a blob: the domain, the name of the key, its version and the additional data of the request. The name and the version are also in the
 // clear in the blob, so that Decrypt can find the key; because they are authenticated here, a blob cannot be relabelled to another key (even one with the same key material and
 // context) or to another version (audit 2026-10-21, CR-02). The blob format is "HGK2"; "HGK1" blobs (which bound nothing) were never in a release and are not read.
-func bindAAD(name string, ver int, aad []byte) []byte {
-	// the name has at most 128 characters and a key at most 1000 versions (config.Validate): the conversions below cannot lose anything
-	b := append([]byte("hsmgate/kmsjson/blob/v2\x00"), byte(len(name))) // #nosec G115
-	b = append(b, name...)
-	b = binary.BigEndian.AppendUint16(b, uint16(ver)) // #nosec G115
-	return append(b, aad...)
-}
+func bindAAD(name string, ver int, aad []byte) []byte { return kmsops.BindAAD(name, ver, aad) }
 
-func makeBlob(name string, ver int, text string) []byte {
-	b := append([]byte(blobMagic), byte(len(name))) // #nosec G115 -- bounded by config.Validate
-	b = append(b, name...)
-	b = binary.BigEndian.AppendUint16(b, uint16(ver)) // #nosec G115 -- bounded by config.Validate
-	return append(b, text...)
-}
-
-var errBlob = errors.New("the ciphertext is not valid")
+func makeBlob(name string, ver int, text string) []byte { return kmsops.MakeBlob(name, ver, text) }
 
 func parseBlob(b []byte) (name string, ver int, text string, err error) {
-	if len(b) < len(blobMagic)+1+1+2+1 || string(b[:len(blobMagic)]) != blobMagic {
-		return "", 0, "", errBlob
-	}
-	n := int(b[len(blobMagic)])
-	rest := b[len(blobMagic)+1:]
-	if n == 0 || len(rest) < n+2+1 {
-		return "", 0, "", errBlob
-	}
-	name = string(rest[:n])
-	ver = int(binary.BigEndian.Uint16(rest[n : n+2]))
-	text = string(rest[n+2:])
-	if ver < 1 || !strings.HasPrefix(text, ecies.FormatTag+".") {
-		return "", 0, "", errBlob
-	}
-	return name, ver, text, nil
+	return kmsops.ParseBlob(b)
 }
 
 func (c *call) seal(name string, ver int, key config.Key, plain, aad []byte) ([]byte, bool) {
@@ -463,7 +435,7 @@ func (c *call) dataKey(op string, req cryptoReq) {
 	case req.KeySpec == "AES_128":
 		n = 16
 	case req.KeySpec == "" && req.NumberOfBytes != nil && *req.NumberOfBytes >= 1 && *req.NumberOfBytes <= maxRandom:
-		n = *req.NumberOfBytes
+		n = min(*req.NumberOfBytes, maxRandom)
 	default:
 		c.refuse(400, "ValidationException", "KeySpec must be AES_128 or AES_256, or NumberOfBytes 1 to "+itoa(maxRandom), "bad_request", false)
 		return
@@ -495,7 +467,12 @@ func (c *call) dataKey(op string, req cryptoReq) {
 
 // random: bytes of the operating system's generator, not of the token (a card's generator is slow and a single session; the bytes are not secret keys of the service).
 func (c *call) random(req cryptoReq) {
-	if req.NumberOfBytes == nil || *req.NumberOfBytes < 1 || *req.NumberOfBytes > maxRandom {
+	if req.NumberOfBytes == nil {
+		c.refuse(400, "ValidationException", "NumberOfBytes must be 1 to "+itoa(maxRandom), "bad_request", false)
+		return
+	}
+	n := *req.NumberOfBytes
+	if n < 1 || n > maxRandom {
 		c.refuse(400, "ValidationException", "NumberOfBytes must be 1 to "+itoa(maxRandom), "bad_request", false)
 		return
 	}
@@ -503,7 +480,7 @@ func (c *call) random(req cryptoReq) {
 		c.refuse(400, "ThrottlingException", "rate limit exceeded", "throttled", true)
 		return
 	}
-	b := make([]byte, *req.NumberOfBytes)
+	b := make([]byte, n)
 	if _, err := rand.Read(b); err != nil {
 		c.refuse(500, "KMSInternalException", "internal error", "internal_error", true)
 		return
