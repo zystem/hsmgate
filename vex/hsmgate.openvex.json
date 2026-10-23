@@ -3,20 +3,42 @@
   "@id": "https://github.com/zystem/hsmgate/blob/main/vex/hsmgate.openvex.json",
   "author": "zystem (the maintainer of hsmgate)",
   "role": "Maintainer",
-  "timestamp": "2026-10-23T00:00:00Z",
-  "version": 1,
+  "timestamp": "2026-10-23T12:00:00Z",
+  "version": 2,
   "statements": [
     {
       "vulnerability": {
         "name": "GO-2026-6809",
-        "aliases": ["CVE-2026-111943"],
+        "aliases": [
+          "CVE-2026-111943"
+        ],
         "description": "crypto/x509 of the Go standard library distrusted too little when it verified a certificate chain (fixed in Go 1.26.10 and 1.27.3)."
       },
       "products": [
-        {"@id": "pkg:oci/hsmgate?repository_url=ghcr.io/zystem/hsmgate&tag=v0.4.1"}
+        {
+          "@id": "pkg:oci/hsmgate?repository_url=ghcr.io/zystem/hsmgate&tag=v0.4.1"
+        }
       ],
       "status": "affected",
-      "action_statement": "The image of v0.4.1 was built with Go 1.27.2. Upgrade to the next release (see CHANGELOG.md). The binary asset of v0.4.1 was built with Go 1.26.10 and is not affected."
+      "action_statement": "The image of v0.4.1 was built with Go 1.27.2. Upgrade to v0.5.0 or later. The binary asset of v0.4.1 was built with Go 1.26.10 and is not affected."
+    },
+    {
+      "vulnerability": {
+        "name": "GO-2026-6809",
+        "aliases": [
+          "CVE-2026-111943"
+        ]
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/hsmgate?repository_url=ghcr.io/zystem/hsmgate&tag=v0.5.0"
+        },
+        {
+          "@id": "pkg:oci/hsmgate?repository_url=ghcr.io/zystem/hsmgate&tag=v0.5.0-fips"
+        }
+      ],
+      "status": "fixed",
+      "status_notes": "Built with Go 1.27.3 (the FIPS image with the frozen module of Go 1.26.10 or later); CI checks the program inside the image with govulncheck."
     },
     {
       "vulnerability": {
@@ -24,9 +46,21 @@
         "description": "OpenSSL: DTLS retransmission reads past a message buffer (in libssl, reported by image scanners as the Debian package libssl3; no fix from Debian at the time of writing)."
       },
       "products": [
-        {"@id": "pkg:oci/hsmgate?repository_url=ghcr.io/zystem/hsmgate&tag=v0.4.1"},
-        {"@id": "pkg:oci/hsmgate?repository_url=ghcr.io/zystem/hsmgate&tag=v0.4.0"},
-        {"@id": "pkg:oci/hsmgate?repository_url=ghcr.io/zystem/hsmgate&tag=v0.3.0"}
+        {
+          "@id": "pkg:oci/hsmgate?repository_url=ghcr.io/zystem/hsmgate&tag=v0.4.1"
+        },
+        {
+          "@id": "pkg:oci/hsmgate?repository_url=ghcr.io/zystem/hsmgate&tag=v0.4.0"
+        },
+        {
+          "@id": "pkg:oci/hsmgate?repository_url=ghcr.io/zystem/hsmgate&tag=v0.3.0"
+        },
+        {
+          "@id": "pkg:oci/hsmgate?repository_url=ghcr.io/zystem/hsmgate&tag=v0.5.0"
+        },
+        {
+          "@id": "pkg:oci/hsmgate?repository_url=ghcr.io/zystem/hsmgate&tag=v0.5.0-fips"
+        }
       ],
       "status": "not_affected",
       "justification": "vulnerable_code_not_in_execute_path",
