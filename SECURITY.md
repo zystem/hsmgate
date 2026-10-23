@@ -24,6 +24,10 @@ hsmgate stands in front of a key token, so a report of a weakness is welcome and
 
 The threat model is in [docs/threat-model.md](docs/threat-model.md) and the audits and responses are in `docs/security-audit-*` and `docs/audit-response-*`.
 
+## Vulnerabilities in components that do not affect the project
+
+They are published as a VEX document (OpenVEX): [vex/hsmgate.openvex.json](vex/hsmgate.openvex.json), also attached to each release; see [docs/security-policies.md](docs/security-policies.md).
+
 ## What helps a reviewer
 
 - `docs/threat-model.md`, `docs/specs/` (the formats and the faces), `docs/operations.md`.

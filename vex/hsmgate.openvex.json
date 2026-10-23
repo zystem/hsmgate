@@ -1,0 +1,36 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://github.com/zystem/hsmgate/blob/main/vex/hsmgate.openvex.json",
+  "author": "zystem (the maintainer of hsmgate)",
+  "role": "Maintainer",
+  "timestamp": "2026-10-23T00:00:00Z",
+  "version": 1,
+  "statements": [
+    {
+      "vulnerability": {
+        "name": "GO-2026-6809",
+        "aliases": ["CVE-2026-111943"],
+        "description": "crypto/x509 of the Go standard library distrusted too little when it verified a certificate chain (fixed in Go 1.26.10 and 1.27.3)."
+      },
+      "products": [
+        {"@id": "pkg:oci/hsmgate?repository_url=ghcr.io/zystem/hsmgate&tag=v0.4.1"}
+      ],
+      "status": "affected",
+      "action_statement": "The image of v0.4.1 was built with Go 1.27.2. Upgrade to the next release (see CHANGELOG.md). The binary asset of v0.4.1 was built with Go 1.26.10 and is not affected."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-84782",
+        "description": "OpenSSL: DTLS retransmission reads past a message buffer (in libssl, reported by image scanners as the Debian package libssl3; no fix from Debian at the time of writing)."
+      },
+      "products": [
+        {"@id": "pkg:oci/hsmgate?repository_url=ghcr.io/zystem/hsmgate&tag=v0.4.1"},
+        {"@id": "pkg:oci/hsmgate?repository_url=ghcr.io/zystem/hsmgate&tag=v0.4.0"},
+        {"@id": "pkg:oci/hsmgate?repository_url=ghcr.io/zystem/hsmgate&tag=v0.3.0"}
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "The vulnerable code is the DTLS retransmission logic in libssl.so.3. The image carries that file only because the distroless base image does; nothing in the image loads it: the program hsmgate links only libc, and the PKCS#11 module (opensc-pkcs11.so, libopensc.so) links libcrypto.so.3, not libssl. hsmgate speaks TLS over TCP with the Go standard library (TLS 1.3 only) and no DTLS at all; OpenSC does no networking."
+    }
+  ]
+}

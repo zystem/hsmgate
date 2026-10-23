@@ -16,9 +16,13 @@ Threshold for remediation of a finding about a vulnerability:
 
 Licenses: dependencies must be under permissive licenses (MIT, BSD, Apache-2.0, ISC, MPL-2.0); a copyleft license (GPL, AGPL) is refused by Dependency Review.
 
-**Before a release**: the CI of the tagged commit must be green, which includes `govulncheck`; a release is not made while a Critical or High finding with a fix is open. A finding that is accepted instead of fixed is written into the changelog or the audit response with the reason.
+**Before a release**: the CI of the tagged commit must be green, which includes `govulncheck` of the sources and of the program inside the image; a release is not made while a Critical or High finding with a fix is open. A finding that is accepted instead of fixed is written into the changelog or the audit response with the reason.
 
 **Automatic gate**: Dependency Review runs on every pull request and fails it on a known vulnerability of High or Critical severity or on a denied license; `govulncheck` fails the CI. The malicious-package alerts of Dependabot are on.
+
+## Vulnerabilities that do not affect the project (VEX)
+
+A finding of a scanner in a component the project ships (a Go module, the Go standard library, a package of the image) is either fixed or **accounted for** in the VEX document [`vex/hsmgate.openvex.json`](../vex/hsmgate.openvex.json) (OpenVEX): for each such vulnerability, the products (releases and images) and a status: `not_affected` with a justification and an impact statement saying why the vulnerable code cannot be reached (for example, the library file is present but nothing loads it), `affected` with the action to take, `fixed`, or `under_investigation`. The document is reviewed with every release and whenever the scanners (`govulncheck`, Trivy, Dependabot, OSV) report something new; it is attached to the release, signed like the other assets ([verifying-releases.md](verifying-releases.md)). Today the findings of the Go modules are none (`osv-scanner` over all manifests, `govulncheck`), and the VEX covers the image: the standard library of one released image and the OpenSSL library of its base.
 
 ## Findings of static analysis (SAST)
 
