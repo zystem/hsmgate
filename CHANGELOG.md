@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.4.1 — 2026-10-23
+
+No change of behaviour; the project's documents, checks and tests.
+
+### Added
+- Documents for the OpenSSF Best Practices levels: [verifying a release](docs/verifying-releases.md) (including how to check the signed tag), [governance](GOVERNANCE.md), [security policies](docs/security-policies.md), [security requirements](docs/security-requirements.md), [assurance case](docs/assurance-case.md), [architecture](docs/architecture.md), [building and dependencies](docs/building.md), [roadmap](docs/roadmap.md), [upgrading](docs/upgrading.md), [code of conduct](CODE_OF_CONDUCT.md), and the support and disclosure terms in [SECURITY.md](SECURITY.md).
+- Sign-off of commits (DCO): [DCO.md](DCO.md) and a `DCO` check of pull requests.
+- CI: statement coverage must stay at 80% or more (81.8% now); `staticcheck` runs with all its checks; Dependency Review and Trivy workflows; Dependabot replaces Renovate.
+- More tests for the OAuth helpers, the configuration of the gRPC and REST faces, `kmsops` and the two faces.
+- The release tag is signed with an SSH key of the maintainer (first signed tag: this one).
+
+### Changed
+- The `main` branch is protected by a ruleset: changes come by pull request with the checks passing.
+- Doc comments reworded in the form `staticcheck` expects; an unused helper of `internal/oauth` is removed.
+
 ## 0.4.0 — 2026-10-23
 
 ### Removed
