@@ -442,6 +442,9 @@ func (c *Config) Validate() error {
 	return c.validateKMSRest()
 }
 
+// MaxVersions is the most versions a key may have on a key-service face; a version number is written into a ciphertext blob in two bytes.
+const MaxVersions = 1000
+
 var idChars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-"
 
 // validateKMSGRPC: the rules of the gRPC face.
@@ -601,8 +604,8 @@ func (c *Config) validateKMSJSON() error {
 			if len(name) == 0 || len(name) > 128 || strings.Trim(name, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.-") != "" {
 				return fmt.Errorf("key %s: a key exposed on a key-service face is named with 1 to 128 letters, digits, dots, dashes and underscores", name)
 			}
-			if len(k.Versions) > 1000 {
-				return fmt.Errorf("key %s: a key exposed on a key-service face has at most 1000 versions", name)
+			if len(k.Versions) > MaxVersions {
+				return fmt.Errorf("key %s: a key exposed on a key-service face has at most %d versions", name, MaxVersions)
 			}
 		}
 		if k.KMSJSONUsage != "" && !k.OnAnyFace() {

@@ -361,3 +361,15 @@ func mustCreds(t *testing.T, cfg *config.Config) map[string]Cred {
 	}
 	return c
 }
+
+func TestNamesRefuseVersionsOverTheLimit(t *testing.T) {
+	n := names{project: "p", location: "l", keyRing: "r"}
+	if _, v, has, ok := n.parseKey(n.version("k", 1000)); !ok || !has || v != 1000 {
+		t.Errorf("the largest version: %d %v %v", v, has, ok)
+	}
+	for _, name := range []string{n.version("k", 1001), n.version("k", 70000), n.key("k") + "/cryptoKeyVersions/0", n.key("k") + "/cryptoKeyVersions/-1", n.key("k") + "/cryptoKeyVersions/99999999999999999999"} {
+		if _, _, _, ok := n.parseKey(name); ok {
+			t.Errorf("%s was accepted", name)
+		}
+	}
+}

@@ -3,6 +3,7 @@ package kmsops
 import (
 	"encoding/binary"
 	"errors"
+	"math"
 	"strings"
 
 	"github.com/zystem/hsmgate/internal/scheme/ecies"
@@ -13,20 +14,36 @@ import (
 // relabelled to another key (even one with the same material and context) or to another version (the audit of 2026-10-21, CR-02).
 const blobMagic = "HGK2"
 
+// u8 and u16 convert a length and a version number that the configuration bounds (a key name has at most 128 characters, a key at most config.MaxVersions versions); a value out
+// of range is a bug of the caller, and writing it truncated into a blob would bind the wrong key or version, so it stops the request instead.
+func u8(n int) byte {
+	if n < 0 || n > math.MaxUint8 {
+		panic("kmsops: a length out of range")
+	}
+	return byte(n)
+}
+
+func u16(n int) uint16 {
+	if n < 0 || n > math.MaxUint16 {
+		panic("kmsops: a version out of range")
+	}
+	return uint16(n)
+}
+
 // BindAAD is what the AEAD authenticates for a blob: the domain, the name, the version and the additional data of the request. The name has at most 128 characters and a key at most
 // 1000 versions (config.Validate), so the conversions lose nothing.
 func BindAAD(name string, ver int, aad []byte) []byte {
-	b := append([]byte("hsmgate/kmsjson/blob/v2\x00"), byte(len(name))) // #nosec G115
+	b := append([]byte("hsmgate/kmsjson/blob/v2\x00"), u8(len(name)))
 	b = append(b, name...)
-	b = binary.BigEndian.AppendUint16(b, uint16(ver)) // #nosec G115
+	b = binary.BigEndian.AppendUint16(b, u16(ver))
 	return append(b, aad...)
 }
 
 // MakeBlob puts a name, a version and an ecies2 text into the blob.
 func MakeBlob(name string, ver int, text string) []byte {
-	b := append([]byte(blobMagic), byte(len(name))) // #nosec G115 -- bounded by config.Validate
+	b := append([]byte(blobMagic), u8(len(name)))
 	b = append(b, name...)
-	b = binary.BigEndian.AppendUint16(b, uint16(ver)) // #nosec G115 -- bounded by config.Validate
+	b = binary.BigEndian.AppendUint16(b, u16(ver))
 	return append(b, text...)
 }
 

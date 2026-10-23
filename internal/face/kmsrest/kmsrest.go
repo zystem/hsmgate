@@ -364,7 +364,7 @@ func parseVersion(v string) (int, bool) {
 		return 0, true
 	}
 	n, err := strconv.ParseInt(v, 16, 32)
-	if err != nil || n < 1 || versionID(int(n)) != strings.TrimLeft(v, "0") {
+	if err != nil || n < 1 || n > config.MaxVersions || versionID(int(n)) != strings.TrimLeft(v, "0") {
 		return 0, false
 	}
 	return int(n), true

@@ -357,7 +357,7 @@ func (f *Face) open(k config.Key, ct string, aad []byte) ([]byte, error) {
 		return nil, errBadCiphertext
 	}
 	n, err := strconv.Atoi(p[1][1:])
-	if err != nil || n < 1 || n > len(k.Versions) {
+	if err != nil || n < 1 || n > config.MaxVersions || n > len(k.Versions) {
 		return nil, errBadCiphertext
 	}
 	text, err := base64.StdEncoding.DecodeString(p[2])
