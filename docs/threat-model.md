@@ -23,5 +23,18 @@ Rule one: **a compromised client can do exactly what its policy allows and no mo
 | KMS-JSON face: MAC key | the MAC key is derived on the token and used by the service, so it is in memory while it works (and for `mac_cache_seconds`) | derived from the token's key with a point of unknown logarithm; not stored; the token key is dedicated to it; the cache is off by default | host memory reveals the MAC key (not the token key) for the time it is there |
 | KMS-JSON face: the service seals | sees the plaintext while it seals or opens (as the Transit face) | not logged; the audit holds the key, client and context only; plaintext wiped after use | memory of the host while the request runs |
 
+## Attack surface (reviewed for release 0.4.0)
+
+| Entry | Who can reach it | Parsers and checks | Notes |
+|---|---|---|---|
+| The listener (TLS 1.3, one port): the Transit face (`/v1/…`), the KMS-JSON face (`/` with a target header), the gRPC face (`application/grpc`, the token endpoint), the REST face (`/keys`, `/rng`, the token endpoint of the tenant) | any peer that completes a TLS handshake; the client certificate is checked per request, and a call without one needs a credential marked `no_cert` from a listed address | strict parsers with size limits, fuzzed (Transit request, KMS-JSON request, ecies text, SigV4, configuration); the key must exist, be on the face and be granted; one answer for "no such key" and "not allowed" | the faces share one policy, one gate to the token and one audit log |
+| The token endpoints (gRPC face, REST face) | any peer | form body limited to 16 KiB; RS256 JWT only; refused credentials counted by address | access tokens are random, in memory, one hour |
+| The admin socket (unix, mode 0600) | local users with the right to the socket | unlock the token, status, metrics | not on the network |
+| The PKCS#11 module and the token | the service only | ECDH point validated before the token sees it; a finite gate to the token | a malicious module is out of scope |
+| The configuration and the secret files | the operator | checked at start and at reload (all or nothing); owner and mode of secret files | a reload cannot change the listener or the enabled faces |
+| The supply chain | build and release | pinned actions and base images, Dependabot, Dependency Review, govulncheck, signed releases with provenance and SBOM ([verifying-releases.md](verifying-releases.md)) | the release is built by one workflow |
+
+Critical code paths: the policy check, the audit write before the answer, the opening of a sealed text (`internal/kmsops`, `internal/scheme/ecies`, `internal/keyops`), and the authentication of the faces (`internal/oauth`, `internal/sigv4`, `internal/authn`); each is covered by tests and, for parsers, by fuzz targets.
+
 Out of scope: availability of the token fleet, side channels inside the token, a malicious vendor PKCS#11 module.
 To do in P1: attacker "operator with admin socket", log-injection via context values, timing of the unwrap path (P8).

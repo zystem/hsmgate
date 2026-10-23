@@ -12,7 +12,12 @@ You will get an answer within a few days. A confirmed problem is fixed and teste
 
 ## What is supported
 
-Only the latest release and the head of `main`. The project is young (first released in October 2026); its threat model is in [docs/threat-model.md](docs/threat-model.md) and the audits and responses are in `docs/security-audit-*` and `docs/audit-response-*`.
+- **Scope**: the latest release (all fixes of security problems are made there) and the head of `main`. An earlier release does not get a fix: update to the latest.
+- **Duration**: a release is supported until the next release is made; in practice the previous minor release (for example 0.3.x when 0.4.0 is out) is supported for 30 days after the new one, for fixes of High and Critical problems only. The project is young (first released in October 2026) and has no long-term-support line.
+- **End of support**: when a release is no longer supported it is said in the release notes of the release that replaces it. A release that is more than one minor release behind, or older than 30 days after its successor, receives no security updates.
+- How a release is verified: [docs/verifying-releases.md](docs/verifying-releases.md). The policies for dependencies, analysis and secrets: [docs/security-policies.md](docs/security-policies.md). How the project is run: [GOVERNANCE.md](GOVERNANCE.md).
+
+The threat model is in [docs/threat-model.md](docs/threat-model.md) and the audits and responses are in `docs/security-audit-*` and `docs/audit-response-*`.
 
 ## What helps a reviewer
 
