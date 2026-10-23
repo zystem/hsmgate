@@ -6,7 +6,7 @@ Honest summary. hsmgate is a **software gateway** in front of a token. Standards
 
 **What a certificate covers.** A certificate is issued to a *module* as validated by a lab, and says nothing about the programs around it. hsmgate cannot be "FIPS certified". It can run on a validated module and use only approved algorithms.
 
-**What is done.**
+**What is done.** Releases carry a FIPS variant of the binary and of the image (`…-fips`, built with `GOFIPS140=v1.0.0`; [verifying-releases.md](verifying-releases.md)); CI runs the tests with `GODEBUG=fips140=on` and checks that the FIPS binary starts under `require_fips` and the usual one does not.
 - The cryptography of the process is the Go standard library; the Go Cryptographic Module (`crypto/internal/fips140`) is validated under CMVP. `require_fips: true` makes the service refuse to start unless that module is in FIPS 140-3 mode (`GODEBUG=fips140=on`, or a binary built with `GOFIPS140=v1.0.0`, which the Dockerfile does with `--build-arg GOFIPS140=v1.0.0`). The module's own self-tests run at start.
 - Algorithms in use: ECDSA and ECDH on P-256, SHA-256, HMAC-SHA-256, HKDF-SHA-256, AES-256-GCM (format `ecies2`), RSA ≥ 2048 for the verification of tokens, TLS 1.3. All are approved; the one that was not, ChaCha20-Poly1305 of the earlier format `ecies1`, is gone from the code ([specs/ecies2.md](specs/ecies2.md)). The test suite passes under `GODEBUG=fips140=on` and `fips140=only`.
 - The token does only ECDH and ECDSA; sealing runs on the host, so the lack of AES-GCM on the card does not matter.

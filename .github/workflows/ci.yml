@@ -94,11 +94,56 @@ jobs:
           CGO_ENABLED=1 go build -buildmode=pie -trimpath -buildvcs=false -ldflags "-s -w -linkmode=external -extldflags '-Wl,-z,relro,-z,now' -X main.version=${VERSION}" -o build/hsmgate ./cmd/hsmgate
           readelf -h build/hsmgate | grep -q "DYN" && readelf -d build/hsmgate | grep -q "BIND_NOW"
           build/hsmgate version
+      - name: Build the FIPS variant (the frozen Go cryptographic module, fips140=on by default)
+        env:
+          VERSION: ${{ inputs.version || 'dev' }}
+        run: |
+          CGO_ENABLED=1 GOFIPS140=v1.0.0 go build -buildmode=pie -trimpath -buildvcs=false -ldflags "-s -w -linkmode=external -extldflags '-Wl,-z,relro,-z,now' -X main.version=${VERSION}" -o build/hsmgate-fips ./cmd/hsmgate
+          readelf -h build/hsmgate-fips | grep -q "DYN" && readelf -d build/hsmgate-fips | grep -q "BIND_NOW"
+          go version -m build/hsmgate-fips | grep -q "DefaultGODEBUG=fips140=on"
+          go version -m build/hsmgate-fips | grep -q "GOFIPS140=v1.0.0"
+          build/hsmgate-fips version
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: hsmgate-linux-amd64
-          path: build/hsmgate
+          path: |
+            build/hsmgate
+            build/hsmgate-fips
           retention-days: 7
+
+  fips:
+    # the tests with the Go cryptographic module in FIPS 140-3 mode; the FIPS binary starts with require_fips and the usual one refuses to
+    needs: build
+    runs-on: ubuntu-latest
+    container: golang:1.26.10-bookworm
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - run: GODEBUG=fips140=on go test ./...
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: hsmgate-linux-amd64
+          path: build
+      - name: The binaries and require_fips
+        run: |
+          chmod +x build/hsmgate build/hsmgate-fips
+          printf '%s' "$(printf '07%.0s' $(seq 32))" > /tmp/k.hex && chmod 600 /tmp/k.hex
+          cat > /tmp/c.yaml <<'EOF'
+          listen: 127.0.0.1:18444
+          insecure_loopback_client: app
+          require_fips: true
+          tokens: [{name: soft, type: soft, keys: {m1: /tmp/k.hex}}]
+          keys:
+            seal: {versions: [{token: soft, label: m1}], aad: {mode: fixed}}
+          clients:
+            - {name: app, identity: {cn: app}, keys: {seal: {ops: [encrypt, decrypt]}}}
+          EOF
+          if build/hsmgate serve -config /tmp/c.yaml 2>/tmp/plain.err; then echo "the usual binary started under require_fips"; exit 1; fi
+          grep -q "not in FIPS 140-3 mode" /tmp/plain.err
+          timeout 3 build/hsmgate-fips serve -config /tmp/c.yaml 2>/tmp/fips.err || [ $? -eq 124 ]
+          ! grep -q "require_fips" /tmp/fips.err
 
   boto3:
     # the KMS-JSON face against the vendor's Python SDK, with the binary the build job made

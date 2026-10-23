@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- A **FIPS variant** of every release: `hsmgate-linux-amd64-fips` and the image `ghcr.io/zystem/hsmgate:vX.Y.Z-fips`, built with the frozen Go cryptographic module (`GOFIPS140=v1.0.0`, `fips140=on` by default), signed and attested like the others. CI tests with `GODEBUG=fips140=on` and checks the `require_fips` behaviour of both binaries.
+
 ## 0.4.1 — 2026-10-23
 
 No change of behaviour; the project's documents, checks and tests.
