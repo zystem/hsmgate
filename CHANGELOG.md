@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.0 — 2026-10-23
 
 ### Security
 - The image of **v0.4.1** was built with Go 1.27.2 (a base-image update by Dependabot), which has GO-2026-6809 (CVE-2026-111943): `crypto/x509` distrusted too little when it verified a certificate chain. The binary asset of v0.4.1 (built with Go 1.26.10) is not affected. The Dockerfile now builds with Go 1.27.3, and CI checks the program inside the image with `govulncheck` so that a base-image update cannot bring a vulnerable toolchain in unnoticed. Upgrade the image.
