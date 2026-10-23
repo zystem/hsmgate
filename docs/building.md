@@ -17,7 +17,7 @@ CGO_ENABLED=1 go build -buildmode=pie -trimpath -buildvcs=false \
   -ldflags "-s -w -linkmode=external -extldflags '-Wl,-z,relro,-z,now' -X main.version=dev" -o hsmgate ./cmd/hsmgate
 ```
 
-The binary is dynamic (libc, and the PKCS#11 module loaded at run time), so it is built on the system it runs on, Debian 12 for the image. The image: `docker build -t hsmgate .` (the `Dockerfile` pins its base images by digest; `--build-arg GOFIPS140=v1.0.0` builds with the frozen Go cryptographic module, see [compliance.md](compliance.md)).
+The binary is dynamic (libc, and the PKCS#11 module loaded at run time), so it is built on the system it runs on, Debian 12 for the image. The FIPS variant is the same build with `GOFIPS140=v1.0.0` in the environment (the release workflow publishes it as `hsmgate-linux-amd64-fips`). The image: `docker build -t hsmgate .` (the `Dockerfile` pins its base images by digest; `--build-arg GOFIPS140=v1.0.0` builds with the frozen Go cryptographic module, see [compliance.md](compliance.md)).
 
 Further tests: the PKCS#11 backend against SoftHSM2 (`apt install softhsm2 opensc`, then `tools/softhsm-test.sh`); the black-box tests with the official client libraries, each a module of its own (`cd test/kmsjson-sdk && go test ./...`, also `kmsgrpc-sdk` and `kmsrest-sdk`), and with boto3 (`test/kmsjson-boto3`); the fuzz targets (`go test -run '^$' -fuzz '^FuzzUnwrap$' ./internal/scheme/ecies`). What runs when: [CONTRIBUTING.md](../CONTRIBUTING.md).
 
