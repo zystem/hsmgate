@@ -334,3 +334,68 @@ func TestMaxConnectionsRange(t *testing.T) {
 		}
 	}
 }
+
+const faceBase = `
+tokens: [{name: t, type: soft, keys: {m: /x}}]
+`
+
+func TestKeyServiceFacesAreChecked(t *testing.T) {
+	okKey := "keys: {k: {kmsgrpc: true, kmsrest: true, kmsjson_usage: sign_verify, versions: [{token: t, label: m}], aad: {mode: fixed}}}\n"
+	for name, c := range map[string]struct {
+		extra string
+		ok    bool
+	}{
+		"grpc and rest on":              {"kmsgrpc: {enabled: true}\nkmsrest: {enabled: true}\n" + okKey, true},
+		"no key on the grpc face":       {"kmsgrpc: {enabled: true}\nkeys: {k: {kmsrest: true, kmsjson_usage: sign_verify, versions: [{token: t, label: m}], aad: {mode: fixed}}}\n", false},
+		"no key on the rest face":       {"kmsrest: {enabled: true}\nkeys: {k: {kmsgrpc: true, kmsjson_usage: sign_verify, versions: [{token: t, label: m}], aad: {mode: fixed}}}\n", false},
+		"key agreement on grpc":         {"keys: {k: {kmsgrpc: true, versions: [{token: t, label: m}], aad: {mode: fixed}}}\n", false},
+		"key agreement on rest":         {"keys: {k: {kmsrest: true, versions: [{token: t, label: m}], aad: {mode: fixed}}}\n", false},
+		"a bad project":                 {"kmsgrpc: {enabled: true, project: 'a b'}\n" + okKey, false},
+		"a bad token path":              {"kmsgrpc: {enabled: true, token_path: /v1/x}\n" + okKey, false},
+		"a bad tenant":                  {"kmsrest: {enabled: true, tenant: 'a/b'}\n" + okKey, false},
+		"jwt without the face":          {okKey + "clients: [{name: c, identity: {cn: c}, jwt: {issuer: me@x.test, public_key_file: /p}, keys: {k: {ops: [sign]}}}]\n", false},
+		"oauth without the face":        {okKey + "clients: [{name: c, identity: {cn: c}, oauth: {client_id: abc, secret_file: /p}, keys: {k: {ops: [sign]}}}]\n", false},
+		"jwt ok":                        {"kmsgrpc: {enabled: true}\n" + okKey + "clients: [{name: c, jwt: {issuer: me@x.test, public_key_file: /p, no_cert: true, allow_from: [10.0.0.0/8]}, keys: {k: {ops: [sign]}}}]\n", true},
+		"jwt bad issuer":                {"kmsgrpc: {enabled: true}\n" + okKey + "clients: [{name: c, identity: {cn: c}, jwt: {issuer: 'a b', public_key_file: /p}, keys: {k: {ops: [sign]}}}]\n", false},
+		"jwt no file":                   {"kmsgrpc: {enabled: true}\n" + okKey + "clients: [{name: c, identity: {cn: c}, jwt: {issuer: me@x.test}, keys: {k: {ops: [sign]}}}]\n", false},
+		"jwt no_cert without addresses": {"kmsgrpc: {enabled: true}\n" + okKey + "clients: [{name: c, jwt: {issuer: me@x.test, public_key_file: /p, no_cert: true}, keys: {k: {ops: [sign]}}}]\n", false},
+		"jwt bad address":               {"kmsgrpc: {enabled: true}\n" + okKey + "clients: [{name: c, identity: {cn: c}, jwt: {issuer: me@x.test, public_key_file: /p, allow_from: [nope]}, keys: {k: {ops: [sign]}}}]\n", false},
+		"oauth ok":                      {"kmsrest: {enabled: true}\n" + okKey + "clients: [{name: c, oauth: {client_id: abc, secret_file: /p, no_cert: true, allow_from: [10.0.0.1]}, keys: {k: {ops: [sign]}}}]\n", true},
+		"oauth both":                    {"kmsrest: {enabled: true}\n" + okKey + "clients: [{name: c, identity: {cn: c}, oauth: {client_id: abc, secret_file: /p, public_key_file: /q}, keys: {k: {ops: [sign]}}}]\n", false},
+		"oauth neither":                 {"kmsrest: {enabled: true}\n" + okKey + "clients: [{name: c, identity: {cn: c}, oauth: {client_id: abc}, keys: {k: {ops: [sign]}}}]\n", false},
+		"oauth bad id":                  {"kmsrest: {enabled: true}\n" + okKey + "clients: [{name: c, identity: {cn: c}, oauth: {client_id: 'a b', secret_file: /p}, keys: {k: {ops: [sign]}}}]\n", false},
+		"oauth no_cert derive":          {"kmsrest: {enabled: true}\n" + okKey + "clients: [{name: c, oauth: {client_id: abc, secret_file: /p, no_cert: true, allow_from: [10.0.0.1]}, keys: {k: {ops: [derive]}}}]\n", false},
+	} {
+		cfg, err := Parse([]byte(faceBase + c.extra))
+		if (err == nil) != c.ok {
+			t.Errorf("%s: %v", name, err)
+			continue
+		}
+		if err == nil && name == "grpc and rest on" {
+			if cfg.KMSGRPC.Project != "hsmgate" || cfg.KMSRest.Tenant != "hsmgate" || cfg.KMSGRPC.TokenPath != "/oauth2/token" {
+				t.Errorf("defaults: %+v %+v", cfg.KMSGRPC, cfg.KMSRest)
+			}
+			k := cfg.Keys["k"]
+			if !k.OnFace("kmsgrpc") || !k.OnFace("kmsrest") || k.OnFace("kmsjson") || k.OnFace("other") || !k.OnAnyFace() {
+				t.Error("OnFace")
+			}
+			if cfg.CertOptional() {
+				t.Error("no credential is without a certificate")
+			}
+		}
+		if err == nil && name == "oauth ok" && !cfg.CertOptional() {
+			t.Error("a no_cert credential must make the certificate optional")
+		}
+	}
+}
+
+func TestFixedAAD(t *testing.T) {
+	k := Key{AAD: AAD{Mode: "fixed"}}
+	if k.FixedAAD("a") == "" || k.FixedAAD("a") == k.FixedAAD("b") {
+		t.Error("the default constant must name the key")
+	}
+	k.AAD.Fixed = "x"
+	if k.FixedAAD("a") != "x" {
+		t.Error("an explicit constant")
+	}
+}

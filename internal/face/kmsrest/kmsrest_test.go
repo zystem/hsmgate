@@ -37,6 +37,7 @@ type rig struct {
 	srv    *httptest.Server
 	rsaKey *rsa.PrivateKey
 	log    *bytes.Buffer
+	cfg    *config.Config
 }
 
 func newRig(t *testing.T) *rig {
@@ -76,7 +77,7 @@ clients:
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := &rig{t: t, rsaKey: rk, log: &bytes.Buffer{}}
+	r := &rig{t: t, rsaKey: rk, log: &bytes.Buffer{}, cfg: cfg}
 	r.f = New(audit.New(r.log), gate.New(4, time.Second), cfg.KMSRest.Tenant)
 	creds, err := LoadCreds(cfg)
 	if err != nil {
@@ -252,5 +253,72 @@ func TestTokenEndpoint(t *testing.T) {
 		if code, tok := r.token(form); code == 200 || tok != "" {
 			t.Errorf("%s: %d", name, code)
 		}
+	}
+}
+
+func TestVersionsDiscoveryAndHandles(t *testing.T) {
+	r := newRig(t)
+	_, bearer := r.token(url.Values{"grant_type": {"client_credentials"}, "client_id": {"app-client"}, "client_secret": {secret}})
+	st, out, _ := r.do("GET", "/keys/seal/versions", bearer, nil)
+	if st != 200 || len(out["value"].([]any)) != 1 {
+		t.Fatalf("versions: %d %v", st, out)
+	}
+	st, out, _ = r.do("GET", "/keys/seal/00000000000000000000000000000001", bearer, nil)
+	if st != 200 || out["key"].(map[string]any)["kty"] != "oct-HSM" {
+		t.Errorf("key by version: %d %v", st, out)
+	}
+	st, out, _ = r.do("GET", "/keys/mac", bearer, nil)
+	if st != 200 || out["key"].(map[string]any)["key_ops"] == nil {
+		t.Errorf("mac key: %d %v", st, out)
+	}
+	if st, _, _ := r.do("GET", "/keys/seal/00000000000000000000000000000009", bearer, nil); st != 404 {
+		t.Errorf("a version that is not there: %d", st)
+	}
+	if st, _, _ := r.do("POST", "/rng", bearer, map[string]int{"count": 500}); st != 400 {
+		t.Errorf("too many bytes: %d", st)
+	}
+	if st, _, _ := r.do("POST", "/rng", bearer, map[string]string{"count": "x"}); st != 400 {
+		t.Errorf("a bad body: %d", st)
+	}
+	if st, _, _ := r.do("POST", "/keys/seal//encrypt", bearer, map[string]string{"alg": "RSA-OAEP", "value": "AQ"}); st != 400 {
+		t.Errorf("a bad algorithm: %d", st)
+	}
+	if st, _, _ := r.do("POST", "/keys/seal//decrypt", bearer, map[string]string{"alg": "A256GCM", "value": "AQ"}); st != 400 {
+		t.Errorf("a damaged ciphertext: %d", st)
+	}
+	if st, _, _ := r.do("POST", "/keys/sig//verify", bearer, map[string]string{"alg": "ES256", "digest": "AQ", "value": "AQ"}); st != 200 {
+		t.Errorf("a short signature simply does not verify: %d", st)
+	}
+	// the discovery document is public
+	resp, err := r.srv.Client().Get(r.srv.URL + r.f.discoveryPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var d map[string]any
+	json.NewDecoder(resp.Body).Decode(&d)
+	resp.Body.Close()
+	if resp.StatusCode != 200 || !strings.HasSuffix(d["token_endpoint"].(string), tokenSuffix) {
+		t.Errorf("discovery: %d %v", resp.StatusCode, d)
+	}
+	mk := func(method, path string) *http.Request {
+		q, _ := http.NewRequest(method, "https://x"+path, nil)
+		return q
+	}
+	if !r.f.Handles(mk("GET", "/keys")) || !r.f.Handles(mk("POST", "/rng")) || !r.f.Handles(mk("POST", r.f.tokenPath())) || r.f.Handles(mk("GET", "/v1/transit/keys")) || r.f.Handles(mk("GET", "/keysx")) {
+		t.Error("Handles")
+	}
+	// without a certificate: the credential is not marked no_cert; refused attempts are counted and the address is blocked
+	r.f.NoCertificate = func(*http.Request) bool { return true }
+	cfg := r.cfg
+	creds, _ := LoadCreds(cfg)
+	r.f.Reload(cfg, nil, policy.New(cfg, nil), func(*http.Request) (string, bool) { return "", false }, creds)
+	for i := 0; i < 25; i++ {
+		r.do("GET", "/keys", bearer, nil)
+	}
+	if st, _, _ := r.do("GET", "/keys", bearer, nil); st != 429 {
+		t.Errorf("a blocked address: %d", st)
+	}
+	if code, _ := r.token(url.Values{"grant_type": {"client_credentials"}, "client_id": {"app-client"}, "client_secret": {secret}}); code == 200 {
+		t.Error("a token was given to a blocked address")
 	}
 }

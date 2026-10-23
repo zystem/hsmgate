@@ -1,12 +1,21 @@
 package oauth
 
 import (
+	"bytes"
 	"crypto"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
+	"math/big"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -69,3 +78,41 @@ func TestTokens(t *testing.T) {
 		t.Error("an unknown token was found")
 	}
 }
+
+func TestReadRSAPublic(t *testing.T) {
+	dir := t.TempDir()
+	key, _ := rsa.GenerateKey(rand.Reader, 2048)
+	small, _ := rsa.GenerateKey(rand.Reader, 1024)
+	pkix, _ := x509.MarshalPKIXPublicKey(&key.PublicKey)
+	write := func(name string, b []byte) string {
+		p := filepath.Join(dir, name)
+		os.WriteFile(p, b, 0o644)
+		return p
+	}
+	smallDER, _ := x509.MarshalPKIXPublicKey(&small.PublicKey)
+	tpl := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix2("c"), NotBefore: time.Now(), NotAfter: time.Now().Add(time.Hour)}
+	certDER, _ := x509.CreateCertificate(rand.Reader, tpl, tpl, &key.PublicKey, key)
+	ecKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	ecDER, _ := x509.MarshalPKIXPublicKey(&ecKey.PublicKey)
+	for name, c := range map[string]struct {
+		file string
+		ok   bool
+	}{
+		"pkix":        {write("a.pub", pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pkix})), true},
+		"pkcs1":       {write("b.pub", pem.EncodeToMemory(&pem.Block{Type: "RSA PUBLIC KEY", Bytes: x509.MarshalPKCS1PublicKey(&key.PublicKey)})), true},
+		"certificate": {write("c.pem", pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})), true},
+		"too small":   {write("d.pub", pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: smallDER})), false},
+		"not rsa":     {write("e.pub", pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: ecDER})), false},
+		"unknown":     {write("f.pub", pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: pkix})), false},
+		"no pem":      {write("g.pub", []byte("junk")), false},
+		"garbage der": {write("h.pub", pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: []byte{1, 2}})), false},
+		"too large":   {write("i.pub", bytes.Repeat([]byte("a"), 20<<10)), false},
+		"missing":     {filepath.Join(dir, "none"), false},
+	} {
+		if _, err := ReadRSAPublic(c.file); (err == nil) != c.ok {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+}
+
+func pkix2(cn string) pkix.Name { return pkix.Name{CommonName: cn} }
