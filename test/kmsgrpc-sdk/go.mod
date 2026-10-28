@@ -3,8 +3,8 @@ module github.com/zystem/hsmgate/test/kmsgrpc-sdk
 go 1.26.10
 
 require (
-	cloud.google.com/go/kms v1.35.0
-	google.golang.org/api v0.307.0
+	cloud.google.com/go/kms v1.36.0
+	google.golang.org/api v0.308.0
 	google.golang.org/grpc v1.84.0
 	google.golang.org/protobuf v1.36.12
 )
