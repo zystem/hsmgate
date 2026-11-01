@@ -19,6 +19,9 @@ jobs:
     runs-on: ubuntu-latest
     container: golang:1.26.10-bookworm
     timeout-minutes: 340
+    defaults:
+      run:
+        shell: bash   # the image's default is sh, which has no pipefail
     permissions:
       contents: read
       issues: write   # a failed scheduled run opens an issue
