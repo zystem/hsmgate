@@ -399,3 +399,12 @@ func TestFixedAAD(t *testing.T) {
 		t.Error("an explicit constant")
 	}
 }
+
+func TestPprofNeedsTheAdminSocket(t *testing.T) {
+	if _, err := Parse([]byte("debug: {pprof: true}\n")); err == nil {
+		t.Error("pprof without an admin socket was accepted")
+	}
+	if _, err := Parse([]byte("admin_socket: /run/hsmgate/admin.sock\ndebug: {pprof: true}\n")); err != nil {
+		t.Errorf("pprof with an admin socket: %v", err)
+	}
+}

@@ -101,6 +101,13 @@ func (s *Server) ServeAdmin(path string) error {
 		l.Close()
 		return err
 	}
-	srv := &http.Server{Handler: adminHandler(s.Tokens, s.audit, s.metricsHandler()), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 20 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 8 << 10}
+	var h http.Handler = adminHandler(s.Tokens, s.audit, s.metricsHandler())
+	s.mu.RLock()
+	pprofOn := s.gen.cfg.Debug.Pprof
+	s.mu.RUnlock()
+	if pprofOn {
+		h = withPprof(h)
+	}
+	srv := &http.Server{Handler: h, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 20 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 8 << 10}
 	return srv.Serve(l)
 }

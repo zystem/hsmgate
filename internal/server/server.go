@@ -565,6 +565,7 @@ func (s *Server) metricsHandler() http.Handler {
 		g = append(g,
 			metrics.Gauge{Name: "hsmgate_gate_running", Help: "Operations at the tokens now.", Value: float64(s.gate.Running())},
 			metrics.Gauge{Name: "hsmgate_gate_waiting", Help: "Operations waiting for their turn at the tokens.", Value: float64(s.gate.InLine())})
+		g = append(g, metrics.RuntimeGauges()...)
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 		s.stats.Write(w, g)
 	})

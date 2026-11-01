@@ -1,0 +1,23 @@
+name: Nightly
+
+# the tests again and again with the race detector, in another order and on fewer or more processors: what a single run does not show (a rare race, a test that depends on the one before)
+on:
+  schedule:
+    - cron: "30 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  race-repeat:
+    runs-on: ubuntu-latest
+    container: golang:1.26.10-bookworm
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - run: go test -race -count=12 -shuffle=on ./...
+      - run: go test -race -count=3 -cpu=1,2,8 -shuffle=on ./internal/...

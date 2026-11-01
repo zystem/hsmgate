@@ -373,3 +373,34 @@ func TestNamesRefuseVersionsOverTheLimit(t *testing.T) {
 		}
 	}
 }
+
+// Fuzzing: whatever bytes arrive as a message or a resource name, the parsers neither panic nor accept what is not theirs.
+func FuzzParseMessage(f *testing.F) {
+	f.Add([]byte{})
+	f.Add((&writer{}).str(1, ring+"seal").bytes(2, []byte("x")).int64Value(7, 5).b)
+	f.Add([]byte{0x0a, 0xff, 0xff, 0xff, 0xff, 0x0f})
+	f.Fuzz(func(t *testing.T, b []byte) {
+		r, ok := parse(b)
+		if !ok {
+			return
+		}
+		r.str(1)
+		r.raw(2)
+		r.u64(3)
+		r.int64Value(7)
+		r.msg(3)
+	})
+}
+
+func FuzzParseKeyName(f *testing.F) {
+	n := names{project: "hsmgate", location: "global", keyRing: "main"}
+	f.Add(n.version("seal", 1))
+	f.Add(n.key("seal"))
+	f.Add("projects/hsmgate/locations/global/keyRings/main/cryptoKeys//cryptoKeyVersions/")
+	f.Fuzz(func(t *testing.T, name string) {
+		key, ver, hasVer, ok := n.parseKey(name)
+		if ok && (key == "" || strings.Contains(key, "/") || (hasVer && (ver < 1 || ver > config.MaxVersions)) || (!hasVer && ver != 0)) {
+			t.Fatalf("%q parsed as %q %d %v", name, key, ver, hasVer)
+		}
+	})
+}

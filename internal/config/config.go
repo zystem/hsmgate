@@ -41,6 +41,11 @@ type Config struct {
 		Enabled bool   `yaml:"enabled"`
 		Detail  string `yaml:"detail"`
 	} `yaml:"metrics"`
+	// Debug: tools for finding what is wrong inside a running process, off unless turned on; they are served on the admin socket (mode 0600) only. Pprof serves the profiles of the
+	// process (CPU, heap, goroutines): a heap profile holds memory that may hold secrets, so it is for the operator who holds the socket, never for a network.
+	Debug struct {
+		Pprof bool `yaml:"pprof"`
+	} `yaml:"debug"`
 	// KMSGRPC turns on the gRPC face: the API of a cloud key service as its client libraries speak it (gRPC over HTTP/2, authenticated by a bearer token that a client gets by
 	// proving that it holds the private key of a service account). It shares the listener with the other faces. Project, Location and KeyRing make the resource names
 	// ("projects/P/locations/L/keyRings/R/cryptoKeys/KEY"); the defaults are "hsmgate", "global" and "main".
@@ -314,6 +319,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Metrics.Enabled && c.AdminSocket == "" {
 		return fmt.Errorf("metrics.enabled needs admin_socket (the metrics are served on it, not on the network)")
+	}
+	if c.Debug.Pprof && c.AdminSocket == "" {
+		return fmt.Errorf("debug.pprof needs admin_socket (the profiles are served on it, not on the network)")
 	}
 	tokens := map[string]Token{}
 	for _, t := range c.Tokens {

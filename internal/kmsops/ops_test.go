@@ -20,7 +20,7 @@ import (
 	"github.com/zystem/hsmgate/internal/policy"
 )
 
-func rig(t *testing.T) *Service {
+func rig(t testing.TB) *Service {
 	dir := t.TempDir()
 	files := map[string]string{}
 	for i, n := range []string{"m1", "m2", "m3", "m4", "m5", "m6", "m7"} {
