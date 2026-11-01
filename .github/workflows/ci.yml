@@ -27,7 +27,9 @@ jobs:
       - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - run: test -z "$(gofmt -l .)"
       - run: go vet ./...
-      - run: go test -race -coverprofile=cover.out ./...
+      # the coverage gate is for the program; the tools (tools/soak is a load generator) are tested but not counted
+      - run: go test -race -coverprofile=cover.out $(go list ./... | grep -v /tools/)
+      - run: go test -race ./tools/...
       - name: Statement coverage must stay at 80% or more
         run: |
           total=$(go tool cover -func=cover.out | awk '/^total:/ {gsub("%","",$3); print $3}')

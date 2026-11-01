@@ -70,3 +70,16 @@ func TestBasicLevelIsCoarse(t *testing.T) {
 		}
 	}
 }
+
+func TestRuntimeGauges(t *testing.T) {
+	var b strings.Builder
+	New(false).Write(&b, RuntimeGauges())
+	for _, want := range []string{"hsmgate_go_goroutines ", "hsmgate_go_heap_alloc_bytes ", "hsmgate_go_gc_cycles "} {
+		if !strings.Contains(b.String(), want) {
+			t.Errorf("no %q in\n%s", want, b.String())
+		}
+	}
+	if _, ok := residentBytes(); ok && !strings.Contains(b.String(), "hsmgate_process_resident_bytes ") {
+		t.Error("resident memory is readable but not reported")
+	}
+}

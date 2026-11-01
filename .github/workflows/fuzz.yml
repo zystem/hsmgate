@@ -1,10 +1,16 @@
 name: Fuzz
 
-# the parsers that face the network, a minute each, once a week (not on every push)
+# the parsers that face the network: a minute each once a week, a quarter of an hour each once a month (and when asked, for as long as asked); not on every push
 on:
   schedule:
     - cron: "17 3 * * 0"
+    - cron: "17 1 1 * *"
   workflow_dispatch:
+    inputs:
+      fuzztime:
+        description: "per target (a Go duration: 60s, 15m)"
+        default: "60s"
+        required: false
 
 permissions:
   contents: read
@@ -13,15 +19,22 @@ jobs:
   fuzz:
     runs-on: ubuntu-latest
     container: golang:1.26.10-bookworm
+    timeout-minutes: 240
+    env:
+      FUZZTIME: ${{ github.event.inputs.fuzztime || (github.event.schedule == '17 1 1 * *' && '15m' || '60s') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
-      - run: go test -run '^$' -fuzz '^FuzzDecryptRequest$' -fuzztime 60s ./internal/face/transit
-      - run: go test -run '^$' -fuzz '^FuzzUnwrap$' -fuzztime 60s ./internal/scheme/ecies
-      - run: go test -run '^$' -fuzz '^FuzzRoundTrip$' -fuzztime 30s ./internal/scheme/ecies
-      - run: go test -run '^$' -fuzz '^FuzzParse$' -fuzztime 60s ./internal/config
-      - run: go test -run '^$' -fuzz '^FuzzVerify$' -fuzztime 60s ./internal/sigv4
-      - run: go test -run '^$' -fuzz '^FuzzParseBlob$' -fuzztime 60s ./internal/face/kmsjson
-      - run: go test -run '^$' -fuzz '^FuzzRequestBody$' -fuzztime 60s ./internal/face/kmsjson
+      - run: go test -run '^$' -fuzz '^FuzzDecryptRequest$' -fuzztime "$FUZZTIME" ./internal/face/transit
+      - run: go test -run '^$' -fuzz '^FuzzUnwrap$' -fuzztime "$FUZZTIME" ./internal/scheme/ecies
+      - run: go test -run '^$' -fuzz '^FuzzRoundTrip$' -fuzztime "$FUZZTIME" ./internal/scheme/ecies
+      - run: go test -run '^$' -fuzz '^FuzzParse$' -fuzztime "$FUZZTIME" ./internal/config
+      - run: go test -run '^$' -fuzz '^FuzzVerify$' -fuzztime "$FUZZTIME" ./internal/sigv4
+      - run: go test -run '^$' -fuzz '^FuzzParseBlob$' -fuzztime "$FUZZTIME" ./internal/face/kmsjson
+      - run: go test -run '^$' -fuzz '^FuzzRequestBody$' -fuzztime "$FUZZTIME" ./internal/face/kmsjson
+      - run: go test -run '^$' -fuzz '^FuzzParseMessage$' -fuzztime "$FUZZTIME" ./internal/face/kmsgrpc
+      - run: go test -run '^$' -fuzz '^FuzzParseKeyName$' -fuzztime "$FUZZTIME" ./internal/face/kmsgrpc
+      - run: go test -run '^$' -fuzz '^FuzzVerifyJWT$' -fuzztime "$FUZZTIME" ./internal/oauth
+      - run: go test -run '^$' -fuzz '^FuzzRoute$' -fuzztime "$FUZZTIME" ./internal/face/kmsrest

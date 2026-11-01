@@ -1,0 +1,49 @@
+name: Benchmarks
+
+# what the service itself costs on a soft token (the card's ECDH is not here): each benchmark six times, kept as an artifact, compared with the last run on main with benchstat. The
+# comparison is for people to read (shared runners are noisy: a few percent is noise); nothing fails on it.
+on:
+  schedule:
+    - cron: "10 4 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    container: golang:1.26.10-bookworm
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Run
+        run: go test -run '^$' -bench . -benchmem -count=6 ./internal/... | tee new.txt
+      - name: Compare with the last run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          apt-get update -qq && apt-get install -y -qq --no-install-recommends gh >/dev/null 2>&1 || true
+          {
+            echo '### Benchmarks'
+            if command -v gh >/dev/null && id=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow Benchmarks --status success --limit 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null) && [ -n "$id" ] && gh run download "$id" --repo "$GITHUB_REPOSITORY" -n bench -D old >/dev/null 2>&1; then
+              echo "against run $id:"
+              echo '```'
+              go run golang.org/x/perf/cmd/benchstat@v0.0.0-20261009192801-be2c69fb417e old/new.txt new.txt 2>&1 | head -60
+              echo '```'
+            else
+              echo 'no earlier run to compare with; this one is the baseline.'
+              echo '```'
+              go run golang.org/x/perf/cmd/benchstat@v0.0.0-20261009192801-be2c69fb417e new.txt 2>&1 | head -60
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: bench
+          path: new.txt
+          retention-days: 90

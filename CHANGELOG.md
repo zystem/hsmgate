@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **Long-running checks** ([docs/long-running-checks.md](docs/long-running-checks.md)): a **soak** test (`tools/soak`, weekly in CI) that runs the real binary under load on all four faces with reloads and fails when goroutines, descriptors, heap, resident memory or latency keep growing; a nightly run of the tests with the race detector repeated and shuffled; fuzzing for a quarter of an hour per target monthly (and four new fuzz targets: gRPC messages and names, REST routes, JWTs); benchmarks kept and compared by `benchstat`.
+- **Profiling** (off by default): `debug.pprof` serves the profiles of the process (CPU, heap, goroutines) on the admin socket, and the metrics (`metrics.enabled`) now carry the gauges of the process itself: goroutines, heap, resident memory, open descriptors, garbage collections.
+
 ## 0.6.0 — 2026-10-23
 
 ### Added

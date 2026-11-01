@@ -1,0 +1,62 @@
+name: Soak
+
+# the real binary under load for a long time, all four faces, with reloads: it fails if goroutines, descriptors, memory or latency keep growing (tools/soak). Once a week, and when asked.
+on:
+  schedule:
+    - cron: "40 2 * * 6"
+  workflow_dispatch:
+    inputs:
+      duration:
+        description: "how long to run (a Go duration: 90s, 40m, 3h)"
+        default: "40m"
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  soak:
+    runs-on: ubuntu-latest
+    container: golang:1.26.10-bookworm
+    timeout-minutes: 340
+    permissions:
+      contents: read
+      issues: write   # a failed scheduled run opens an issue
+    env:
+      DURATION: ${{ github.event.inputs.duration || '40m' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Build
+        run: CGO_ENABLED=1 go build -o hsmgate ./cmd/hsmgate
+      - name: Soak
+        run: |
+          set -o pipefail
+          go run ./tools/soak -bin ./hsmgate -duration "$DURATION" -out soak-out 2>&1 | tee soak-out.log
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo '### Soak'
+            echo '```'
+            sed -n '/^[0-9]* rounds,/,$p' soak-out.log | head -40
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: soak
+          path: |
+            soak-out/
+            soak-out.log
+          retention-days: 30
+      - name: Open an issue when a scheduled run fails
+        if: failure() && github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          apt-get update -qq && apt-get install -y -qq --no-install-recommends gh >/dev/null 2>&1 || true
+          command -v gh >/dev/null && gh issue create --repo "$GITHUB_REPOSITORY" --title "Soak failed" --body "The weekly soak run failed: $RUN (the samples, the heap profiles and the report are in the artifact 'soak')." || echo "gh is not available in the image; see $RUN"

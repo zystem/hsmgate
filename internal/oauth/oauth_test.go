@@ -20,7 +20,7 @@ import (
 	"time"
 )
 
-func sign(t *testing.T, key *rsa.PrivateKey, alg string, c map[string]any) string {
+func sign(t testing.TB, key *rsa.PrivateKey, alg string, c map[string]any) string {
 	e := base64.RawURLEncoding
 	h, _ := json.Marshal(map[string]string{"alg": alg})
 	p, _ := json.Marshal(c)
@@ -116,3 +116,19 @@ func TestReadRSAPublic(t *testing.T) {
 }
 
 func pkix2(cn string) pkix.Name { return pkix.Name{CommonName: cn} }
+
+func FuzzVerifyJWT(f *testing.F) {
+	key, _ := rsa.GenerateKey(rand.Reader, 2048)
+	now := time.Now()
+	good := sign(f, key, "RS256", map[string]any{"iss": "me", "iat": now.Unix(), "exp": now.Add(time.Hour).Unix()})
+	f.Add(good)
+	f.Add("a.b.c")
+	f.Add("..")
+	f.Add(good[:len(good)-4] + "AAAA")
+	f.Fuzz(func(t *testing.T, tok string) {
+		PeekIssuer(tok)
+		if c, err := VerifyJWT(tok, &key.PublicKey, now); err == nil && tok != good && c.Iss != "me" {
+			t.Fatalf("a token that this key did not sign was accepted: %q", tok)
+		}
+	})
+}

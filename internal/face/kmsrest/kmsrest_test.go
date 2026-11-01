@@ -322,3 +322,26 @@ func TestVersionsDiscoveryAndHandles(t *testing.T) {
 		t.Error("a token was given to a blocked address")
 	}
 }
+
+func FuzzRoute(f *testing.F) {
+	for _, p := range []string{"/keys", "/keys/seal", "/keys/seal/versions", "/keys/seal//encrypt", "/keys/seal/00000000000000000000000000000001/sign", "/rng", "/keys//", "/keys/a/b/c/d"} {
+		f.Add(p)
+	}
+	f.Fuzz(func(t *testing.T, path string) {
+		if !strings.HasPrefix(path, "/") {
+			return
+		}
+		u, err := url.Parse("https://h" + path)
+		if err != nil {
+			return
+		}
+		r := &http.Request{URL: u}
+		name, ver, rt := routeOf(r)
+		if rt != nil {
+			if n, ok := parseVersion(ver); ok && (n < 0 || n > config.MaxVersions) {
+				t.Fatalf("%q: version %q is %d", path, ver, n)
+			}
+			_ = name
+		}
+	})
+}
