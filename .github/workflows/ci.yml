@@ -165,7 +165,7 @@ jobs:
       - run: chmod +x build/hsmgate
       - run: |
           python -m venv /tmp/venv
-          /tmp/venv/bin/pip install -q -r test/kmsjson-boto3/requirements.txt
+          /tmp/venv/bin/pip install -q --require-hashes -r test/kmsjson-boto3/requirements.txt
           /tmp/venv/bin/python test/kmsjson-boto3/test_boto3.py build/hsmgate
 
   image:

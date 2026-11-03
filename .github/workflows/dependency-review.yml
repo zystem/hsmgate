@@ -37,5 +37,5 @@ jobs:
         with:
           comment-summary-in-pr: always
           fail-on-severity: high
-          allow-licenses: MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, MPL-2.0, 0BSD, Unlicense, CC0-1.0, Python-2.0, PSF-2.0, BlueOak-1.0.0
+          allow-licenses: MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, MPL-2.0, 0BSD, Unlicense, CC0-1.0, Python-2.0, PSF-2.0, BlueOak-1.0.0, MIT-0, LicenseRef-scancode-google-patent-license-golang
         #   retry-on-snapshot-warnings: true
