@@ -2,6 +2,7 @@ package transit
 
 import (
 	"bytes"
+	"crypto/fips140"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -19,6 +20,7 @@ import (
 	"github.com/zystem/hsmgate/internal/config"
 	"github.com/zystem/hsmgate/internal/gate"
 	"github.com/zystem/hsmgate/internal/policy"
+	"github.com/zystem/hsmgate/internal/scheme/ecies"
 )
 
 type vec struct {
@@ -571,5 +573,35 @@ func TestClientContextPrefixes(t *testing.T) {
 	// the refusal is written down with its context
 	if !strings.Contains(r.audit.String(), `"result":"forbidden_context"`) || !strings.Contains(r.audit.String(), `org-2/db`) {
 		t.Errorf("audit: %s", r.audit.String())
+	}
+}
+
+// The suite of the sealed format is a choice of the configuration; every suite is read whatever is written (a switch leaves what exists openable).
+func TestSealSuiteIsChosenAndEverySuiteIsRead(t *testing.T) {
+	var texts []string
+	for _, suite := range []string{"ecies2", "ecies3", "ecies4"} {
+		suite := suite
+		if fips140.Enabled() && !ecies.Approved(suite) { // not written in FIPS 140-3 mode (the server does not start with it)
+			continue
+		}
+		r := newRig(t, func(c *config.Config, tk map[string]backend.Token) { c.SealSuite = suite })
+		st, out, _ := r.call("openbao", "PUT", "/v1/transit/encrypt/bao-seal", map[string]string{"plaintext": b64("a data key")})
+		ct, _ := data(out)["ciphertext"].(string)
+		if st != 200 {
+			t.Fatalf("%s: %d %v", suite, st, out)
+		}
+		raw, _ := base64.StdEncoding.DecodeString(strings.TrimPrefix(ct, "vault:v1:"))
+		if !strings.HasPrefix(string(raw), suite+".") {
+			t.Errorf("%s was written as %.10s", suite, raw)
+		}
+		texts = append(texts, ct)
+	}
+	// a service set to one suite opens what the others wrote (the key is the same in every rig)
+	r := newRig(t, func(c *config.Config, tk map[string]backend.Token) { c.SealSuite = "ecies3" })
+	for i, ct := range texts {
+		st, out, _ := r.call("openbao", "PUT", "/v1/transit/decrypt/bao-seal", map[string]string{"ciphertext": ct})
+		if st != 200 || data(out)["plaintext"] != b64("a data key") {
+			t.Errorf("text %d: %d %v", i, st, out)
+		}
 	}
 }

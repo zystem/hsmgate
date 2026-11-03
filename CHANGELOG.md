@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Added
+- **Algorithm agility** ([docs/key-management.md](docs/key-management.md)): the hash and the cipher of the sealed format can be replaced by configuration, and the hash of the HMAC per key. `seal_suite`: `ecies2` (HKDF-SHA-256, AES-256-GCM: the default), `ecies3` (HKDF-SHA-512, AES-256-GCM), `ecies4` (HKDF-SHA-256, XChaCha20-Poly1305, not FIPS-approved); every suite is always read, so a switch leaves what exists openable. `mac_hash` on a key with `generate_verify_mac`: `sha256` (the default), `sha384`, `sha512`, named by each face (`HMAC_SHA_384`, `HS384`, `HMAC_SHA384`). `golang.org/x/crypto` is a dependency again (for `ecies4` only).
+
 ### Changed
 - The project has a **second maintainer** (`Juliesergienko`, write access). [GOVERNANCE.md](GOVERNANCE.md) says what each of the two can do and how the project goes on if one cannot (create and close issues, accept changes, release within a week); [docs/releasing.md](docs/releasing.md) is the procedure of a release; [SECURITY.md](SECURITY.md) says what happens to a private report when the owner is away.
 

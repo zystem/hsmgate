@@ -9,6 +9,7 @@ import (
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
+	"fmt"
 	"github.com/zystem/hsmgate/internal/keyops"
 	"github.com/zystem/hsmgate/internal/peer"
 	"github.com/zystem/hsmgate/internal/scheme/ecies"
@@ -41,9 +42,11 @@ func cryptoRig(t *testing.T) *rig {
 	k6 := write("k6", strings.Repeat("06", 32))
 	k7 := write("k7", strings.Repeat("07", 32))
 	k8 := write("k8", strings.Repeat("08", 32))
+	k9 := write("k9", strings.Repeat("09", 32))
+	k10 := write("k10", strings.Repeat("0a", 32))
 	cfg, err := config.Parse([]byte(`
 kmsjson: {enabled: true, region: local}
-tokens: [{name: soft, type: soft, keys: {m1: ` + k1 + `, m2: ` + k2 + `, m3: ` + k3 + `, m4: ` + k4 + `, m5: ` + k5 + `, m6: ` + k6 + `, m7: ` + k7 + `, m8: ` + k8 + `}}]
+tokens: [{name: soft, type: soft, keys: {m1: ` + k1 + `, m2: ` + k2 + `, m3: ` + k3 + `, m4: ` + k4 + `, m5: ` + k5 + `, m6: ` + k6 + `, m7: ` + k7 + `, m8: ` + k8 + `, m9: ` + k9 + `, m10: ` + k10 + `}}]
 keys:
   seal:  {kmsjson: true, kmsjson_usage: encrypt_decrypt, versions: [{token: soft, label: m1}], aad: {mode: fixed}}
   seal2: {kmsjson: true, kmsjson_usage: encrypt_decrypt, versions: [{token: soft, label: m2}], aad: {mode: fixed}}
@@ -52,8 +55,10 @@ keys:
   mac:   {kmsjson: true, kmsjson_usage: generate_verify_mac, versions: [{token: soft, label: m4}], aad: {mode: fixed}}
   macrot: {kmsjson: true, kmsjson_usage: generate_verify_mac, versions: [{token: soft, label: m5}], aad: {mode: fixed}}
   ecdh:  {kmsjson: true, versions: [{token: soft, label: m8}], aad: {mode: fixed}}
+  mac384: {kmsjson: true, kmsjson_usage: generate_verify_mac, mac_hash: sha384, versions: [{token: soft, label: m9}], aad: {mode: fixed}}
+  mac512: {kmsjson: true, kmsjson_usage: generate_verify_mac, mac_hash: sha512, versions: [{token: soft, label: m10}], aad: {mode: fixed}}
 clients:
-  - {name: app, identity: {cn: app}, sigv4: {access_key_id: ` + akid + `, secret_file: /unused}, keys: {seal: {ops: [encrypt, decrypt]}, seal2: {ops: [encrypt]}, org: {ops: [encrypt, decrypt]}, ecdh: {ops: [derive, encrypt]}, sig: {ops: [sign, verify]}, mac: {ops: [generate_mac, verify_mac]}, macrot: {ops: [generate_mac, verify_mac]}}}
+  - {name: app, identity: {cn: app}, sigv4: {access_key_id: ` + akid + `, secret_file: /unused}, keys: {seal: {ops: [encrypt, decrypt]}, seal2: {ops: [encrypt]}, org: {ops: [encrypt, decrypt]}, ecdh: {ops: [derive, encrypt]}, sig: {ops: [sign, verify]}, mac: {ops: [generate_mac, verify_mac]}, macrot: {ops: [generate_mac, verify_mac]}, mac384: {ops: [generate_mac, verify_mac]}, mac512: {ops: [generate_mac, verify_mac]}}}
   - {name: bot, sigv4: {access_key_id: AKIDBOTBOTBOTBOT00, secret_file: /unused, no_cert: true, allow_from: [127.0.0.0/8]}, keys: {seal: {ops: [encrypt, decrypt]}, sig: {ops: [sign, verify]}, mac: {ops: [generate_mac, verify_mac]}}}
   - {name: reader, identity: {cn: reader}, sigv4: {access_key_id: AKIDVIEWERVIEWER00, secret_file: /unused}, keys: {seal: {ops: [decrypt]}}}
 `))
@@ -823,3 +828,40 @@ func TestDecryptHonoursMaxBytes(t *testing.T) {
 
 // policyReload rebuilds the policy from the (edited) configuration of the rig.
 func (r *rig) policyReload() { r.face.Policy = policy.New(r.cfg, nil) }
+
+// The hash of the HMAC is a choice of the key (mac_hash): the key makes that HMAC and no other, and says which.
+func TestMacHashIsChosenPerKey(t *testing.T) {
+	r := cryptoRig(t)
+	msg := []byte("message to authenticate")
+	macs := map[string][]byte{}
+	for key, c := range map[string]struct {
+		alg  string
+		size int
+	}{"mac": {"HMAC_SHA_256", 32}, "mac384": {"HMAC_SHA_384", 48}, "mac512": {"HMAC_SHA_512", 64}} {
+		st, g := r.app("GenerateMac", map[string]any{"KeyId": key, "Message": msg, "MacAlgorithm": c.alg})
+		if st != 200 || g["MacAlgorithm"] != c.alg {
+			t.Fatalf("%s: %d %v", key, st, g)
+		}
+		mac, _ := base64.StdEncoding.DecodeString(g["Mac"].(string))
+		if len(mac) != c.size {
+			t.Errorf("%s: a MAC of %d bytes", key, len(mac))
+		}
+		macs[key] = mac
+		if st, out := r.app("VerifyMac", map[string]any{"KeyId": key, "Message": msg, "Mac": mac, "MacAlgorithm": c.alg}); st != 200 || out["MacValid"] != true {
+			t.Errorf("%s verify: %d %v", key, st, out)
+		}
+		// the key says what it makes
+		if st, d := r.app("DescribeKey", map[string]any{"KeyId": key}); st != 200 || fmt.Sprint(d["KeyMetadata"].(map[string]any)["MacAlgorithms"]) != "["+c.alg+"]" {
+			t.Errorf("%s describe: %d %v", key, st, d)
+		}
+	}
+	// the other hashes are refused for a key, and a MAC of one key does not verify under another
+	for _, bad := range []struct{ key, alg string }{{"mac384", "HMAC_SHA_256"}, {"mac384", "HMAC_SHA_512"}, {"mac512", "HMAC_SHA_384"}, {"mac", "HMAC_SHA_384"}} {
+		if st, out := r.app("GenerateMac", map[string]any{"KeyId": bad.key, "Message": msg, "MacAlgorithm": bad.alg}); st != 400 {
+			t.Errorf("%s with %s: %d %v", bad.key, bad.alg, st, out)
+		}
+	}
+	if st, _ := r.app("VerifyMac", map[string]any{"KeyId": "mac512", "Message": msg, "Mac": macs["mac384"], "MacAlgorithm": "HMAC_SHA_512"}); st != 400 {
+		t.Errorf("a MAC of another key verified: %d", st)
+	}
+}

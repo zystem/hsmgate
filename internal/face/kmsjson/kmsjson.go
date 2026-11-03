@@ -459,7 +459,7 @@ func (f *Face) metadata(name string, ver int, k config.Key) map[string]any {
 	state := "Enabled"
 	if k.Usage() == config.UsageMAC {
 		return map[string]any{"KeyId": name, "Arn": f.arn(name), "CreationDate": created, "Enabled": true, "Description": "key " + name + " of the key service",
-			"KeyUsage": "GENERATE_VERIFY_MAC", "KeyState": state, "KeySpec": "HMAC_256", "CustomerMasterKeySpec": "HMAC_256", "MacAlgorithms": []string{"HMAC_SHA_256"},
+			"KeyUsage": "GENERATE_VERIFY_MAC", "KeyState": state, "KeySpec": "HMAC_" + itoa(k.MACBits()), "CustomerMasterKeySpec": "HMAC_" + itoa(k.MACBits()), "MacAlgorithms": []string{macAlgorithm(k)},
 			"KeyManager": "CUSTOMER", "MultiRegion": false, "HsmgateVersion": ver, "HsmgateLatestVersion": len(k.Versions)}
 	}
 	if k.Usage() == config.UsageSignVerify {

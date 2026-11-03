@@ -342,7 +342,7 @@ func (f *Face) seal(k config.Key, plain, aad []byte) (string, int, error) {
 	if err != nil {
 		return "", 0, err
 	}
-	text, err := ecies.Wrap(point, plain, aad)
+	text, err := ecies.WrapSuite(f.Cfg.SealSuite, point, plain, aad)
 	if err != nil {
 		return "", 0, err
 	}

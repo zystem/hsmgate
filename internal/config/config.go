@@ -8,15 +8,22 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/zystem/hsmgate/internal/scheme/ecies"
 )
 
 type Config struct {
 	Listen string `yaml:"listen"`
 	TLS    TLS    `yaml:"tls"`
+	// SealSuite is the suite of the sealed format that the service writes: "ecies2" (the default: HKDF-SHA-256 and AES-256-GCM), "ecies3" (HKDF-SHA-512 and AES-256-GCM) or "ecies4"
+	// (HKDF-SHA-256 and XChaCha20-Poly1305: another cipher family, not approved in a FIPS 140-3 module). Every suite is always read, so that changing this at a reload (or after a
+	// break of an algorithm) leaves the texts that exist openable; `rewrap` moves them to the new suite (docs/key-management.md).
+	SealSuite string `yaml:"seal_suite"`
 	// RequireFIPS: refuse to start unless the process runs with the Go cryptographic module in FIPS 140-3 mode (GODEBUG=fips140=on, or a binary built with GOFIPS140; docs/compliance.md). It says nothing about the token.
 	RequireFIPS bool `yaml:"require_fips"`
 	// InsecureLoopbackClient, when set, serves plain HTTP on a loopback address as this client: for tests and development only.
@@ -107,6 +114,9 @@ type Key struct {
 	Versions []Version `yaml:"versions"`
 	AAD      AAD       `yaml:"aad"`
 	MaxBytes int       `yaml:"max_bytes"`
+	// MACHash is the hash of the HMAC of a key with the usage generate_verify_mac: "sha256" (the default), "sha384" or "sha512". It is chosen per key, so that a key can be made with
+	// another hash if one is ever broken; the faces name the algorithm the key has (HMAC_SHA_256, HS384, ...) and refuse a request for another one.
+	MACHash string `yaml:"mac_hash"`
 	// KMSJSON lets clients with the "derive" right use the key through the KMS-JSON face: ECDH with a key that stays on the token. That face has no context, so whoever may derive
 	// can open anything sealed to the key: such a key must be in "fixed" mode (a key in context mode would lose the isolation of its contexts) and is best dedicated to this use.
 	KMSJSON bool `yaml:"kmsjson"`
@@ -126,6 +136,17 @@ const (
 	UsageSignVerify     = "sign_verify"
 	UsageMAC            = "generate_verify_mac"
 )
+
+// MACBits is the size in bits of the hash of the key's HMAC: 256, 384 or 512.
+func (k Key) MACBits() int {
+	switch k.MACHash {
+	case "sha384":
+		return 384
+	case "sha512":
+		return 512
+	}
+	return 256
+}
 
 // OnAnyFace reports whether the key is exposed on at least one of the key-service faces; the rules about names, usages and separate private keys hold for all of them.
 func (k Key) OnAnyFace() bool { return k.KMSJSON || k.KMSGRPC || k.KMSRest }
@@ -319,6 +340,15 @@ func (c *Config) Validate() error {
 	}
 	if c.Metrics.Enabled && c.AdminSocket == "" {
 		return fmt.Errorf("metrics.enabled needs admin_socket (the metrics are served on it, not on the network)")
+	}
+	if c.SealSuite == "" {
+		c.SealSuite = ecies.DefaultSuite
+	}
+	if !slices.Contains(ecies.Suites(), c.SealSuite) {
+		return fmt.Errorf("seal_suite must be one of %s", strings.Join(ecies.Suites(), ", "))
+	}
+	if c.RequireFIPS && !ecies.Approved(c.SealSuite) {
+		return fmt.Errorf("require_fips: seal_suite %s uses an algorithm that is not approved in a FIPS 140-3 module", c.SealSuite)
 	}
 	if c.Debug.Pprof && c.AdminSocket == "" {
 		return fmt.Errorf("debug.pprof needs admin_socket (the profiles are served on it, not on the network)")
@@ -630,6 +660,17 @@ func (c *Config) validateKMSJSON() error {
 		default:
 			return fmt.Errorf("key %s: kmsjson_usage must be key_agreement, encrypt_decrypt, sign_verify or generate_verify_mac", name)
 		}
+		switch k.MACHash {
+		case "":
+			k.MACHash = "sha256"
+		case "sha256", "sha384", "sha512":
+		default:
+			return fmt.Errorf("key %s: mac_hash must be sha256, sha384 or sha512", name)
+		}
+		if k.MACHash != "sha256" && k.Usage() != UsageMAC {
+			return fmt.Errorf("key %s: mac_hash is for a key with kmsjson_usage generate_verify_mac", name)
+		}
+		c.Keys[name] = k
 	}
 	if err := c.distinctKeys(); err != nil {
 		return err

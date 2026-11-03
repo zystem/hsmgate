@@ -262,7 +262,7 @@ func (c *call) seal(name string, ver int, key config.Key, plain, aad []byte) ([]
 		f.tokenFailure(c.refuse, err)
 		return nil, false
 	}
-	text, err := ecies.Wrap(point, plain, bindAAD(name, ver, aad))
+	text, err := ecies.WrapSuite(f.Cfg.SealSuite, point, plain, bindAAD(name, ver, aad))
 	if err != nil {
 		c.refuse(500, "KMSInternalException", "internal error", "internal_error", true)
 		return nil, false
@@ -705,11 +705,8 @@ func (c *call) macKey(name string, ver int, key config.Key) ([]byte, bool) {
 	return k, true
 }
 
-func hmacSum(key, msg []byte) []byte {
-	m := hmac.New(sha256.New, key)
-	m.Write(msg)
-	return m.Sum(nil)
-}
+// macAlgorithm is the name of the HMAC that a MAC key makes (its hash is mac_hash of the key): HMAC_SHA_256, HMAC_SHA_384 or HMAC_SHA_512.
+func macAlgorithm(k config.Key) string { return "HMAC_SHA_" + itoa(k.MACBits()) }
 
 func (c *call) mac(op string, req cryptoReq) {
 	generate := op == "GenerateMac"
@@ -717,14 +714,15 @@ func (c *call) mac(op string, req cryptoReq) {
 	if generate {
 		right = "generate_mac"
 	}
-	if req.MacAlgorithm != "HMAC_SHA_256" {
-		c.badAlgorithm("MacAlgorithm", req.MacAlgorithm)
-		return
-	}
 	// a version is asked for by "name@N"; else a MAC is made with the latest and checked against the latest and then the earlier ones (a MAC carries no version)
 	_, pinned, _ := c.f.resolve(req.KeyID)
 	name, ver, key, _, ok := c.target(req.KeyID, 0, right, nil)
 	if !ok {
+		return
+	}
+	alg := macAlgorithm(key)
+	if req.MacAlgorithm != alg { // the key makes one HMAC: the one its mac_hash says
+		c.badAlgorithm("MacAlgorithm", req.MacAlgorithm)
 		return
 	}
 	if len(req.Message) == 0 || len(req.Message) > maxMacMessage {
@@ -747,7 +745,7 @@ func (c *call) mac(op string, req cryptoReq) {
 			return
 		}
 		defer wipe(k)
-		c.succeed(map[string]any{"Mac": b64(hmacSum(k, req.Message)), "MacAlgorithm": "HMAC_SHA_256", "KeyId": c.f.arnFor(req.KeyID, name)})
+		c.succeed(map[string]any{"Mac": b64(kmsops.HMAC(key, k, req.Message)), "MacAlgorithm": alg, "KeyId": c.f.arnFor(req.KeyID, name)})
 		return
 	}
 	versions := []int{ver}
@@ -763,7 +761,7 @@ func (c *call) mac(op string, req cryptoReq) {
 		if !ok {
 			return
 		}
-		valid = hmac.Equal(hmacSum(k, req.Message), req.Mac) || valid
+		valid = hmac.Equal(kmsops.HMAC(key, k, req.Message), req.Mac) || valid
 		wipe(k)
 		if valid {
 			break
@@ -773,5 +771,5 @@ func (c *call) mac(op string, req cryptoReq) {
 		c.refuse(400, "KMSInvalidMacException", "the MAC is not valid for this message and key", "bad_mac", false)
 		return
 	}
-	c.succeed(map[string]any{"KeyId": c.f.arnFor(req.KeyID, name), "MacValid": true, "MacAlgorithm": "HMAC_SHA_256"})
+	c.succeed(map[string]any{"KeyId": c.f.arnFor(req.KeyID, name), "MacValid": true, "MacAlgorithm": alg})
 }

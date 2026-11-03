@@ -45,3 +45,17 @@ All parts are lowercase hexadecimal, separated by `.`; there are exactly four.
 - The text hides the data key; its **length** shows the length of the data key.
 - It does not authenticate who sealed it: anyone with the public key can seal. Who may *open* is decided by the token and by the policy of the service.
 - Growth: a data key of `n` bytes gives a text of `259 + 2n` characters (323 for 32 bytes).
+
+## Suites: the hash and the cipher can be replaced
+
+The sealed format has three suites, named by the tag at the start of the text. Everything above is `ecies2`; the others change one algorithm each, so that either can be replaced if it is ever broken. The text, the fingerprint, the point and the opening steps are the same; only step 3 and step 4 of sealing change.
+
+| Tag | HKDF hash | AEAD (nonce) | In a FIPS 140-3 module |
+|---|---|---|---|
+| `ecies2` (the default) | SHA-256 | AES-256-GCM (12 bytes) | all approved |
+| `ecies3` | SHA-512 | AES-256-GCM (12 bytes) | all approved |
+| `ecies4` | SHA-256 | XChaCha20-Poly1305 (24 bytes) | **not approved**: refused while `fips140` is on |
+
+`K = HKDF-<hash>(ikm = Z, salt = "hsmgate/" ‖ tag, info = fp ‖ "|" ‖ hex(eph), length 32)`: the tag is in the salt, so a text relabelled to another suite does not open. `body` is at least the length of the nonce plus 16.
+
+**What is written** is chosen by `seal_suite` in the configuration (default `ecies2`); **what is read** is whatever the tag says: every suite is always opened, so a switch (set `seal_suite`, reload or restart) leaves the texts that exist openable, and `rewrap` moves them to the new suite one by one. With `require_fips` only an approved suite can be set, and the server does not start in FIPS mode with `ecies4` in `seal_suite`; a text in `ecies4` is refused there (not opened) until the process is out of FIPS mode.

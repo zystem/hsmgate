@@ -30,6 +30,7 @@ import (
 	"github.com/zystem/hsmgate/internal/metrics"
 	"github.com/zystem/hsmgate/internal/peer"
 	"github.com/zystem/hsmgate/internal/policy"
+	"github.com/zystem/hsmgate/internal/scheme/ecies"
 )
 
 // maxDrain bounds the wait for requests of an old generation before the tokens a reload dropped are closed anyway (a stuck driver call cannot be cancelled).
@@ -183,6 +184,9 @@ func New(cfg *config.Config, auditOut io.Writer) (*Server, error) {
 func checkFIPS(cfg *config.Config) error {
 	if cfg.RequireFIPS && !fips140.Enabled() {
 		return fmt.Errorf("require_fips: the Go cryptographic module is not in FIPS 140-3 mode (start with GODEBUG=fips140=on, or use a binary built with GOFIPS140)")
+	}
+	if fips140.Enabled() && !ecies.Approved(cfg.SealSuite) {
+		return fmt.Errorf("seal_suite %s uses an algorithm that is not approved in the FIPS 140-3 mode this process runs in: use ecies2 or ecies3", cfg.SealSuite)
 	}
 	return nil
 }
