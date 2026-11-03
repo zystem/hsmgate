@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Changed
+- The project has a **second maintainer** (`Juliesergienko`, write access). [GOVERNANCE.md](GOVERNANCE.md) says what each of the two can do and how the project goes on if one cannot (create and close issues, accept changes, release within a week); [docs/releasing.md](docs/releasing.md) is the procedure of a release; [SECURITY.md](SECURITY.md) says what happens to a private report when the owner is away.
+
 ### Added
 - **Long-running checks** ([docs/long-running-checks.md](docs/long-running-checks.md)): a **soak** test (`tools/soak`, weekly in CI) that runs the real binary under load on all four faces with reloads and fails when goroutines, descriptors, heap, resident memory or latency keep growing; a nightly run of the tests with the race detector repeated and shuffled; fuzzing for a quarter of an hour per target monthly (and four new fuzz targets: gRPC messages and names, REST routes, JWTs); benchmarks kept and compared by `benchstat`.
 - **Profiling** (off by default): `debug.pprof` serves the profiles of the process (CPU, heap, goroutines) on the admin socket, and the metrics (`metrics.enabled`) now carry the gauges of the process itself: goroutines, heap, resident memory, open descriptors, garbage collections.
