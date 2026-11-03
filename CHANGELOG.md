@@ -1,16 +1,16 @@
 # Changelog
 
-## Unreleased
+## 0.7.0 — 2026-11-03
 
 ### Added
 - **Algorithm agility** ([docs/key-management.md](docs/key-management.md)): the hash and the cipher of the sealed format can be replaced by configuration, and the hash of the HMAC per key. `seal_suite`: `ecies2` (HKDF-SHA-256, AES-256-GCM: the default), `ecies3` (HKDF-SHA-512, AES-256-GCM), `ecies4` (HKDF-SHA-256, XChaCha20-Poly1305, not FIPS-approved); every suite is always read, so a switch leaves what exists openable. `mac_hash` on a key with `generate_verify_mac`: `sha256` (the default), `sha384`, `sha512`, named by each face (`HMAC_SHA_384`, `HS384`, `HMAC_SHA384`). `golang.org/x/crypto` is a dependency again (for `ecies4` only).
+- **Long-running checks** ([docs/long-running-checks.md](docs/long-running-checks.md)): a **soak** test (`tools/soak`, weekly in CI) that runs the real binary under load on all four faces with reloads and fails when goroutines, descriptors, heap, resident memory or latency keep growing; a nightly run of the tests with the race detector repeated and shuffled; fuzzing for a quarter of an hour per target monthly (and four new fuzz targets: gRPC messages and names, REST routes, JWTs); benchmarks kept and compared by `benchstat`.
+- **Profiling** (off by default): `debug.pprof` serves the profiles of the process (CPU, heap, goroutines) on the admin socket, and the metrics (`metrics.enabled`) now carry the gauges of the process itself: goroutines, heap, resident memory, open descriptors, garbage collections.
 
 ### Changed
 - The project has a **second maintainer** (`Juliesergienko`, write access). [GOVERNANCE.md](GOVERNANCE.md) says what each of the two can do and how the project goes on if one cannot (create and close issues, accept changes, release within a week); [docs/releasing.md](docs/releasing.md) is the procedure of a release; [SECURITY.md](SECURITY.md) says what happens to a private report when the owner is away.
-
-### Added
-- **Long-running checks** ([docs/long-running-checks.md](docs/long-running-checks.md)): a **soak** test (`tools/soak`, weekly in CI) that runs the real binary under load on all four faces with reloads and fails when goroutines, descriptors, heap, resident memory or latency keep growing; a nightly run of the tests with the race detector repeated and shuffled; fuzzing for a quarter of an hour per target monthly (and four new fuzz targets: gRPC messages and names, REST routes, JWTs); benchmarks kept and compared by `benchstat`.
-- **Profiling** (off by default): `debug.pprof` serves the profiles of the process (CPU, heap, goroutines) on the admin socket, and the metrics (`metrics.enabled`) now carry the gauges of the process itself: goroutines, heap, resident memory, open descriptors, garbage collections.
+- `golang.org/x/crypto` (a dependency again, for the `ecies4` suite only) is pinned to the commit that fixes GO-2026-5932 (the unmaintained `openpgp` package, which the program does not import); `govulncheck` is clean on the sources and on the binary.
+- CI: the coverage gate counts the program, not `tools/`; the `image` job checks the program inside the image with `govulncheck`; Dependency Review blocks high severity and takes an allow-list of licenses.
 
 ## 0.6.0 — 2026-10-23
 
