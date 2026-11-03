@@ -434,9 +434,14 @@ func (c *call) dataKey(op string, req cryptoReq) {
 		n = 32
 	case req.KeySpec == "AES_128":
 		n = 16
-	case req.KeySpec == "" && req.NumberOfBytes != nil && *req.NumberOfBytes >= 1 && *req.NumberOfBytes <= maxRandom:
-		n = min(*req.NumberOfBytes, maxRandom)
+	case req.KeySpec == "" && req.NumberOfBytes != nil:
+		n = *req.NumberOfBytes
 	default:
+		c.refuse(400, "ValidationException", "KeySpec must be AES_128 or AES_256, or NumberOfBytes 1 to "+itoa(maxRandom), "bad_request", false)
+		return
+	}
+	// the size comes from the request: it is bounded here, once, on the variable that is allocated
+	if n < 1 || n > maxRandom {
 		c.refuse(400, "ValidationException", "KeySpec must be AES_128 or AES_256, or NumberOfBytes 1 to "+itoa(maxRandom), "bad_request", false)
 		return
 	}

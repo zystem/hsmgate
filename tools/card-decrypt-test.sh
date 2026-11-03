@@ -28,7 +28,8 @@ sleep 2
 cat "$T/err.log"
 CTX=$(printf 'cinim/dek/v1|t1' | base64)
 PLAIN=$(printf '0123456789abcdef' | base64)
-CT=$(curl -s -X PUT "localhost:$PORT/v1/transit/encrypt/k" -d "{\"plaintext\":\"$PLAIN\",\"context\":\"$CTX\"}" | python3 -c "import sys,json;print(json.load(sys.stdin)['data']['ciphertext'])")
+ENC=$(curl -s -X PUT "localhost:$PORT/v1/transit/encrypt/k" -d "{\"plaintext\":\"$PLAIN\",\"context\":\"$CTX\"}")
+CT=$(printf '%s' "$ENC" | python3 -c "import sys,json;print(json.load(sys.stdin)['data']['ciphertext'])")
 echo "encrypt ok: ${CT:0:24}..."
 s=$(date +%s.%N)
 OUT=$(curl -s -X PUT "localhost:$PORT/v1/transit/decrypt/k" -d "{\"ciphertext\":\"$CT\",\"context\":\"$CTX\"}")

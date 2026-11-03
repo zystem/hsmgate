@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+- The test modules (`test/*-sdk`) use `golang.org/x/net` 0.62.0 and the fixed `golang.org/x/crypto` (the older ones have known findings; they are not shipped); the Python requirements of the boto3 test are pinned by hash; the size of a data key of the KMS-JSON face is checked once, on the variable that is allocated (a CodeQL finding; no change of behaviour).
+
 ## 0.7.0 — 2026-11-03
 
 ### Added
