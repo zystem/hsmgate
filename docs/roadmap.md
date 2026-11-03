@@ -9,7 +9,7 @@ What the project intends to do and not do in the next year. It is a plan of one 
 3. **Supply chain**: keep the releases signed with provenance and a bill of materials; add a VEX statement for findings that do not affect the program; keep CI green and the dependencies current (Dependabot).
 4. **Quality**: keep statement coverage at 80% or more and measured in CI; more fuzz targets for the new parsers; a regression test for every fixed bug.
 5. **Documentation**: keep the specifications, the guides and the upgrade notes in step with the code; a short guide per face.
-6. **A second maintainer and a second reviewer**, so that review by someone other than the author is possible (see [GOVERNANCE.md](../GOVERNANCE.md)).
+6. **A second maintainer** (done: November 2026, [GOVERNANCE.md](../GOVERNANCE.md)); next, **an organisation with two owners** that holds the repository and the package, so that the settings no longer rest on one account and an approval by a person other than the author can be enforced by the ruleset without stopping the project when one of the two is away. The move changes the address of the repository and of the images (`ghcr.io/zystem/hsmgate`) and the identity in the signatures, so it is done at a release boundary with the documents and the verification commands updated.
 7. **Badges**: the OpenSSF Best Practices badge at "passing", then "silver" as far as the project can honestly meet it.
 
 ## Considers (no date)

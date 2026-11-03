@@ -36,7 +36,7 @@ gh attestation verify hsmgate-linux-amd64 -R zystem/hsmgate
 
 ## The tag
 
-From v0.4.1 on, the tag `vX.Y.Z` is an annotated tag signed by the maintainer with an SSH key (earlier tags, up to v0.4.0, are not signed). The public key of the maintainer, `zystem`, is
+From v0.4.1 on, the tag `vX.Y.Z` is an annotated tag signed with an SSH key by the maintainer who made the release (earlier tags, up to v0.4.0, are not signed). The maintainers' public keys are listed here; a maintainer adds their own when they first make a release ([releasing.md](releasing.md)). The key of `zystem` is
 
 ```
 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHPp5WWSw0xFjlzPEtln90NY8dc7MUvkun/14yTINPM/

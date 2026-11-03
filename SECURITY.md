@@ -13,7 +13,7 @@ hsmgate stands in front of a key token, so a report of a weakness is welcome and
 - **Acknowledgement** within 7 days of a report; an assessment (confirmed, not reproducible, not a vulnerability) within 14 days.
 - **Fix**: a confirmed problem is fixed and tested first; for High and Critical severity the target is a release within 30 days, for the rest the next release. The reporter is told when the fix is ready.
 - **Disclosure**: after the fix is released, or after 90 days from the report if no fix is possible, whichever is first (earlier by agreement). The problem is then described in the changelog, in a GitHub security advisory and in a note under `docs/` (see `docs/audit-response-*`), with the people who reported it named if they wish. The data about found vulnerabilities is public there.
-- **Contact**: the private vulnerability reporting of this repository (above) is the security contact; there is no other channel to a person, to keep reports out of public places.
+- **Contact**: the private vulnerability reporting of this repository (above) is the security contact. GitHub shows those reports to the owner of a personal repository only, so there is a second way when the owner does not answer within 7 days: open a **public issue that holds no details** ("security contact request") or mention `@Juliesergienko` in it; the second maintainer then arranges a private channel with you (a private email or a call), takes the report and fixes it as described here, with the same timeframe. Details of an unfixed problem never go into a public issue.
 
 ## What is supported
 
