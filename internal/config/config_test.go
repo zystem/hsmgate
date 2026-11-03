@@ -408,3 +408,52 @@ func TestPprofNeedsTheAdminSocket(t *testing.T) {
 		t.Errorf("pprof with an admin socket: %v", err)
 	}
 }
+
+func TestSealSuite(t *testing.T) {
+	for suite, ok := range map[string]bool{"": true, "ecies2": true, "ecies3": true, "ecies4": true, "ecies1": false, "ecies9": false, "aes": false} {
+		c, err := Parse([]byte("seal_suite: \"" + suite + "\"\n"))
+		if (err == nil) != ok {
+			t.Errorf("%q: %v", suite, err)
+		}
+		if err == nil && suite == "" && c.SealSuite != "ecies2" {
+			t.Errorf("the default is %q", c.SealSuite)
+		}
+	}
+	// a suite that is not approved cannot be written in FIPS mode
+	if _, err := Parse([]byte("require_fips: true\nseal_suite: ecies4\n")); err == nil {
+		t.Error("require_fips with ecies4")
+	}
+	if _, err := Parse([]byte("require_fips: true\nseal_suite: ecies3\n")); err != nil {
+		t.Errorf("require_fips with ecies3: %v", err)
+	}
+}
+
+func TestMacHash(t *testing.T) {
+	base := "kmsjson: {enabled: true}\ntokens: [{name: t, type: soft, keys: {m: /x}}]\n"
+	for name, c := range map[string]struct {
+		key string
+		ok  bool
+	}{
+		"default":         {"{kmsjson: true, kmsjson_usage: generate_verify_mac, versions: [{token: t, label: m}], aad: {mode: fixed}}", true},
+		"sha384":          {"{kmsjson: true, kmsjson_usage: generate_verify_mac, mac_hash: sha384, versions: [{token: t, label: m}], aad: {mode: fixed}}", true},
+		"sha512":          {"{kmsjson: true, kmsjson_usage: generate_verify_mac, mac_hash: sha512, versions: [{token: t, label: m}], aad: {mode: fixed}}", true},
+		"md5":             {"{kmsjson: true, kmsjson_usage: generate_verify_mac, mac_hash: md5, versions: [{token: t, label: m}], aad: {mode: fixed}}", false},
+		"not a MAC key":   {"{kmsjson: true, kmsjson_usage: encrypt_decrypt, mac_hash: sha384, versions: [{token: t, label: m}], aad: {mode: fixed}}", false},
+		"sha256 anywhere": {"{kmsjson: true, kmsjson_usage: encrypt_decrypt, mac_hash: sha256, versions: [{token: t, label: m}], aad: {mode: fixed}}", true},
+	} {
+		cfg, err := Parse([]byte(base + "keys: {k: " + c.key + "}\n"))
+		if (err == nil) != c.ok {
+			t.Errorf("%s: %v", name, err)
+			continue
+		}
+		if err == nil && name == "sha384" && cfg.Keys["k"].MACBits() != 384 {
+			t.Error("MACBits of sha384")
+		}
+		if err == nil && name == "default" && (cfg.Keys["k"].MACBits() != 256 || cfg.Keys["k"].MACHash != "sha256") {
+			t.Errorf("the default: %q", cfg.Keys["k"].MACHash)
+		}
+		if err == nil && name == "sha512" && cfg.Keys["k"].MACBits() != 512 {
+			t.Error("MACBits of sha512")
+		}
+	}
+}

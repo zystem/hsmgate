@@ -6,8 +6,10 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/sha512"
 	"crypto/x509"
 	"errors"
+	"hash"
 	"strings"
 	"time"
 
@@ -187,7 +189,7 @@ func (s *Service) Seal(ctx context.Context, client, name string, ver int, plain,
 	if err != nil {
 		return nil, 0, tokenErr(err)
 	}
-	text, err := ecies.Wrap(point, plain, BindAAD(name, ver, aad))
+	text, err := ecies.WrapSuite(s.Cfg.SealSuite, point, plain, BindAAD(name, ver, aad))
 	if err != nil {
 		return nil, 0, fail(Internal, "internal_error", "internal error", true)
 	}
@@ -367,13 +369,23 @@ func (s *Service) macKey(ctx context.Context, name string, ver int, k config.Key
 	return key, nil
 }
 
-func hmacSum(key, msg []byte) []byte {
-	m := hmac.New(sha256.New, key)
+// HMAC is the MAC of msg under key with the hash that the configuration gives the MAC key k (SHA-256 unless mac_hash says another).
+func HMAC(k config.Key, key, msg []byte) []byte {
+	var h func() hash.Hash
+	switch k.MACBits() {
+	case 384:
+		h = sha512.New384
+	case 512:
+		h = sha512.New
+	default:
+		h = sha256.New
+	}
+	m := hmac.New(h, key)
 	m.Write(msg)
 	return m.Sum(nil)
 }
 
-// MacGenerate gives HMAC-SHA-256 of msg under the MAC key derived on the token for the latest (or the asked) version.
+// MacGenerate gives the HMAC (SHA-256, or the hash the key says: mac_hash) of msg under the MAC key derived on the token for the latest (or the asked) version.
 func (s *Service) MacGenerate(ctx context.Context, client, name string, ver int, msg []byte) ([]byte, int, *Error) {
 	k, e := s.check(client, name, "generate_mac", config.UsageMAC)
 	if e != nil {
@@ -388,7 +400,7 @@ func (s *Service) MacGenerate(ctx context.Context, client, name string, ver int,
 		return nil, 0, e
 	}
 	defer Wipe(key)
-	return hmacSum(key, msg), ver, nil
+	return HMAC(k, key, msg), ver, nil
 }
 
 // MacVerify checks a MAC; ver 0 tries the latest version and then the earlier ones.
@@ -413,7 +425,7 @@ func (s *Service) MacVerify(ctx context.Context, client, name string, ver int, m
 		if e != nil {
 			return false, e
 		}
-		valid = hmac.Equal(hmacSum(key, msg), mac) || valid
+		valid = hmac.Equal(HMAC(k, key, msg), mac) || valid
 		Wipe(key)
 		if valid {
 			break

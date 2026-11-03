@@ -41,6 +41,8 @@ The client functions are those of `go.step.sm/crypto/kms/cloudkms` (Apache-2.0) 
 
 Everything else answers `UNIMPLEMENTED`. Status codes: `UNAUTHENTICATED` (token), `PERMISSION_DENIED` (key not there, not on the face, or no right: one answer), `INVALID_ARGUMENT` (usage, size, checksum, damaged ciphertext), `RESOURCE_EXHAUSTED` (budget, busy), `UNAVAILABLE` (token locked or absent, audit), `INTERNAL`.
 
+- A MAC key with `mac_hash: sha384` or `sha512` reports the algorithm `HMAC_SHA384` or `HMAC_SHA512` (`HMAC_SHA256` otherwise); its MACs are of that hash.
+
 ## 4. What does not work
 
 - `go.step.sm/crypto/kms/cloudkms` has no option for an endpoint: it always dials the public address of the service. To use it with hsmgate the name `cloudkms.googleapis.com` has to resolve to hsmgate and the certificate has to be one that the client trusts for that name. The official client library takes `option.WithEndpoint` and works as it is (CI: `test/kmsgrpc-sdk`).

@@ -653,12 +653,21 @@ func derSig(raw []byte) ([]byte, bool) {
 	return der, err == nil
 }
 
+// macJOSE is the name of the HMAC that a MAC key makes (its hash is mac_hash of the key): HS256, HS384 or HS512. For a key that is not a MAC key it is a name no request has.
+func macJOSE(k config.Key) string {
+	if k.Usage() != config.UsageMAC {
+		return "-"
+	}
+	return "HS" + strconv.Itoa(k.MACBits())
+}
+
 func (c *call) sign(name string, ver int) (any, *kerr) {
 	q, e := c.req()
 	if e != nil {
 		return nil, e
 	}
-	if _, e := c.key(name); e != nil {
+	k, e := c.key(name)
+	if e != nil {
 		return nil, e
 	}
 	val, ok := dec(q.Value)
@@ -676,7 +685,7 @@ func (c *call) sign(name string, ver int) (any, *kerr) {
 			return nil, &kerr{500, "InternalServerError", "internal error", "internal_error"}
 		}
 		return map[string]any{"kid": c.kid(name, ver), "value": b64.EncodeToString(raw)}, nil
-	case "HS256":
+	case macJOSE(k): // the key makes one HMAC: the one its mac_hash says (HS256, HS384, HS512)
 		mac, ver, oe := c.svc.MacGenerate(c.r.Context(), c.client, name, ver, val)
 		if oe != nil {
 			return nil, fromOps(oe)
@@ -691,7 +700,8 @@ func (c *call) verify(name string, ver int) (any, *kerr) {
 	if e != nil {
 		return nil, e
 	}
-	if _, e := c.key(name); e != nil {
+	k, e := c.key(name)
+	if e != nil {
 		return nil, e
 	}
 	digest, ok1 := dec(q.Digest)
@@ -711,7 +721,7 @@ func (c *call) verify(name string, ver int) (any, *kerr) {
 		if valid, oe = c.svc.Verify(c.r.Context(), c.client, name, ver, digest, der); oe != nil {
 			return nil, fromOps(oe)
 		}
-	case "HS256":
+	case macJOSE(k):
 		var oe *kmsops.Error
 		if valid, oe = c.svc.MacVerify(c.r.Context(), c.client, name, ver, digest, val); oe != nil {
 			return nil, fromOps(oe)

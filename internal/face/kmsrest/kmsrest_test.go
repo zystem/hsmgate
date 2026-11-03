@@ -43,7 +43,7 @@ type rig struct {
 func newRig(t *testing.T) *rig {
 	dir := t.TempDir()
 	files := map[string]string{}
-	for i, n := range []string{"m1", "m2", "m3", "m4"} {
+	for i, n := range []string{"m1", "m2", "m3", "m4", "m5"} {
 		p := filepath.Join(dir, n)
 		os.WriteFile(p, []byte(strings.Repeat(string(rune('1'+i)), 64)), 0o600)
 		files[n] = p
@@ -54,17 +54,18 @@ func newRig(t *testing.T) *rig {
 	os.WriteFile(filepath.Join(dir, "cert.pub"), pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der}), 0o644)
 	cfg, err := config.Parse([]byte(`
 kmsrest: {enabled: true}
-tokens: [{name: soft, type: soft, keys: {m1: ` + files["m1"] + `, m2: ` + files["m2"] + `, m3: ` + files["m3"] + `, m4: ` + files["m4"] + `}}]
+tokens: [{name: soft, type: soft, keys: {m1: ` + files["m1"] + `, m2: ` + files["m2"] + `, m3: ` + files["m3"] + `, m4: ` + files["m4"] + `, m5: ` + files["m5"] + `}}]
 keys:
   seal: {kmsrest: true, kmsjson_usage: encrypt_decrypt, versions: [{token: soft, label: m1}], aad: {mode: fixed}}
   sig:  {kmsrest: true, kmsjson_usage: sign_verify, versions: [{token: soft, label: m2}], aad: {mode: fixed}}
   mac:  {kmsrest: true, kmsjson_usage: generate_verify_mac, versions: [{token: soft, label: m3}], aad: {mode: fixed}}
   other: {kmsjson: true, kmsjson_usage: encrypt_decrypt, versions: [{token: soft, label: m4}], aad: {mode: fixed}}
+  mac384: {kmsrest: true, kmsjson_usage: generate_verify_mac, mac_hash: sha384, versions: [{token: soft, label: m5}], aad: {mode: fixed}}
 clients:
   - name: app
     identity: {cn: app}
     oauth: {client_id: app-client, secret_file: ` + filepath.Join(dir, "secret") + `}
-    keys: {seal: {ops: [encrypt, decrypt]}, sig: {ops: [sign, verify]}, mac: {ops: [generate_mac, verify_mac]}}
+    keys: {seal: {ops: [encrypt, decrypt]}, sig: {ops: [sign, verify]}, mac: {ops: [generate_mac, verify_mac]}, mac384: {ops: [generate_mac, verify_mac]}}
   - name: cert
     identity: {cn: cert}
     oauth: {client_id: cert-client, public_key_file: ` + filepath.Join(dir, "cert.pub") + `}
@@ -204,7 +205,7 @@ func TestEndToEnd(t *testing.T) {
 	}
 	// lists and random
 	st, out, _ = r.do("GET", "/keys", bearer, nil)
-	if st != 200 || len(out["value"].([]any)) != 3 {
+	if st != 200 || len(out["value"].([]any)) != 4 {
 		t.Errorf("list: %d %v", st, out)
 	}
 	st, out, _ = r.do("POST", "/rng", bearer, map[string]int{"count": 16})
@@ -344,4 +345,33 @@ func FuzzRoute(f *testing.F) {
 			_ = name
 		}
 	})
+}
+
+// The hash of the HMAC is a choice of the key (mac_hash): HS384 for a key that says sha384, and no other name.
+func TestMacHashIsChosenPerKey(t *testing.T) {
+	r := newRig(t)
+	_, bearer := r.token(url.Values{"grant_type": {"client_credentials"}, "client_id": {"app-client"}, "client_secret": {secret}})
+	val := b64.EncodeToString([]byte("data"))
+	st, out, _ := r.do("POST", "/keys/mac384//sign", bearer, map[string]string{"alg": "HS384", "value": val})
+	if st != 200 {
+		t.Fatalf("HS384: %d %v", st, out)
+	}
+	if m, _ := dec(out["value"].(string)); len(m) != 48 {
+		t.Errorf("a MAC of %d bytes", len(m))
+	}
+	if st, v, _ := r.do("POST", "/keys/mac384//verify", bearer, map[string]string{"alg": "HS384", "digest": val, "value": out["value"].(string)}); st != 200 || v["value"] != true {
+		t.Errorf("verify: %d %v", st, v)
+	}
+	for _, alg := range []string{"HS256", "HS512"} {
+		if st, _, _ := r.do("POST", "/keys/mac384//sign", bearer, map[string]string{"alg": alg, "value": val}); st != 400 {
+			t.Errorf("%s for a sha384 key: %d", alg, st)
+		}
+	}
+	if st, _, _ := r.do("POST", "/keys/mac//sign", bearer, map[string]string{"alg": "HS384", "value": val}); st != 400 {
+		t.Errorf("HS384 for a sha256 key: %d", st)
+	}
+	// the key says it is a MAC key; the other keys know no HS name
+	if st, _, _ := r.do("POST", "/keys/seal//sign", bearer, map[string]string{"alg": "HS384", "value": val}); st != 400 {
+		t.Errorf("HS384 for a sealing key: %d", st)
+	}
 }

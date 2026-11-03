@@ -60,7 +60,9 @@ const (
 	purposeMAC     = 9
 	algSymmetric   = 1
 	algECP256      = 12
-	algHMAC        = 32
+	algHMAC        = 32 // HMAC_SHA256
+	algHMAC384     = 34
+	algHMAC512     = 35
 	stateEnabled   = 1
 	levelHSM       = 2
 )
@@ -610,11 +612,17 @@ func (c *call) macVerify() ([]byte, *kerr) {
 
 // ---- metadata: cloudkms uses these to find a key (GetPublicKey of a version name is the usual path; the rest are for tools) ----
 
-func purposeOf(usage string) (purpose, alg uint64) {
-	switch usage {
+func purposeOf(k config.Key) (purpose, alg uint64) {
+	switch k.Usage() {
 	case config.UsageSignVerify:
 		return purposeSign, algECP256
 	case config.UsageMAC:
+		switch k.MACBits() {
+		case 384:
+			return purposeMAC, algHMAC384
+		case 512:
+			return purposeMAC, algHMAC512
+		}
 		return purposeMAC, algHMAC
 	}
 	return purposeEncrypt, algSymmetric
@@ -628,7 +636,7 @@ func (c *call) versionMsg(key string, ver int, alg uint64) *writer {
 }
 
 func (c *call) keyMsg(key string, k config.Key) *writer {
-	purpose, alg := purposeOf(k.Usage())
+	purpose, alg := purposeOf(k)
 	w := &writer{}
 	w.str(1, c.s.names.key(key))
 	if purpose == purposeEncrypt { // only a key that encrypts has a primary version
@@ -665,7 +673,7 @@ func (c *call) getCryptoKeyVersion() ([]byte, *kerr) {
 	if _, oe := c.svc.Describe(c.client, key); oe != nil {
 		return nil, fromOps(oe)
 	}
-	_, alg := purposeOf(k.Usage())
+	_, alg := purposeOf(k)
 	return c.versionMsg(key, ver, alg).b, nil
 }
 
@@ -697,7 +705,7 @@ func (c *call) listCryptoKeyVersions() ([]byte, *kerr) {
 		return nil, fromOps(oe)
 	}
 	k := c.s.cfg.Keys[key]
-	_, alg := purposeOf(k.Usage())
+	_, alg := purposeOf(k)
 	w := &writer{}
 	for v := 1; v <= len(k.Versions); v++ {
 		w.msg(1, c.versionMsg(key, v, alg))

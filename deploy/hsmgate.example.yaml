@@ -9,6 +9,9 @@ audit: {file: /var/log/hsmgate/audit.log}
 # metrics: {enabled: false, detail: basic}    # GET /metrics on the admin socket; sensitive (docs/operations.md)
 # optional second face (docs/specs/kms-json.md): ECDH for clients that sign requests; enabling it needs a restart
 # kmsjson: {enabled: true, region: local, mac_cache_seconds: 0}
+# the algorithms can be replaced if one is ever broken (docs/key-management.md): the suite of what is sealed (ecies2 default, ecies3 SHA-512, ecies4 XChaCha20-Poly1305; all are read
+# whatever is written), and per MAC key the hash of the HMAC (mac_hash: sha256|sha384|sha512)
+# seal_suite: ecies2
 
 tokens:
   - name: card

@@ -3,6 +3,7 @@ package ecies
 import (
 	"bytes"
 	"crypto/ecdh"
+	"crypto/fips140"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -66,6 +67,12 @@ func TestVectorsOpen(t *testing.T) {
 	v, key, pub := load(t)
 	for _, c := range v.Valid {
 		plain, err := Unwrap(pub, key, c.Wrapped, []byte(c.AAD))
+		if fips140.Enabled() && strings.HasPrefix(c.Wrapped, "ecies4.") { // a suite that is not approved is not opened in FIPS 140-3 mode
+			if !errors.Is(err, ErrSuiteRefused) {
+				t.Errorf("%s in FIPS mode: %v", c.Name, err)
+			}
+			continue
+		}
 		if err != nil || hex.EncodeToString(plain) != c.PlainHex {
 			t.Errorf("%s: %x, %v", c.Name, plain, err)
 		}
@@ -163,4 +170,55 @@ func FuzzRoundTrip(f *testing.F) {
 			}
 		}
 	})
+}
+
+func TestEverySuiteSealsAndOpens(t *testing.T) {
+	_, key, pub := load(t)
+	if got := strings.Join(Suites(), ","); got != "ecies2,ecies3,ecies4" {
+		t.Fatalf("suites %s", got)
+	}
+	for _, tag := range Suites() {
+		w, err := WrapSuite(tag, pub, []byte("data key"), []byte("ctx"))
+		if fips140.Enabled() && !Approved(tag) {
+			if !errors.Is(err, ErrSuiteNotApproved) {
+				t.Errorf("%s in FIPS mode: %v", tag, err)
+			}
+			continue
+		}
+		if err != nil || !strings.HasPrefix(w, tag+".") || !Valid(w) {
+			t.Fatalf("%s: %q %v", tag, w, err)
+		}
+		if p, err := Unwrap(pub, key, w, []byte("ctx")); err != nil || string(p) != "data key" {
+			t.Errorf("%s: %q %v", tag, p, err)
+		}
+		if _, err := Unwrap(pub, key, w, []byte("other")); !errors.Is(err, ErrDamaged) {
+			t.Errorf("%s with another context: %v", tag, err)
+		}
+		// a text relabelled to another suite does not open: each suite derives its own key
+		for _, other := range Suites() {
+			if other == tag || (fips140.Enabled() && !Approved(other)) {
+				continue
+			}
+			p := strings.Split(w, ".")
+			p[0] = other
+			if _, err := Unwrap(pub, key, strings.Join(p, "."), []byte("ctx")); !errors.Is(err, ErrDamaged) {
+				t.Errorf("%s relabelled %s opened: %v", tag, other, err)
+			}
+		}
+	}
+	if _, err := WrapSuite("ecies9", pub, nil, nil); err == nil {
+		t.Error("an unknown suite")
+	}
+	w, err := WrapSuite("", pub, []byte("x"), nil)
+	if err != nil || !strings.HasPrefix(w, DefaultSuite+".") {
+		t.Errorf("the default: %q %v", w, err)
+	}
+	for _, bad := range []string{"", "ecies2", "ecies9.a.b.c", "nope.a"} {
+		if Valid(bad) && bad != "ecies2" {
+			t.Errorf("%q is valid", bad)
+		}
+	}
+	if !Approved("ecies2") || !Approved("ecies3") || Approved("ecies4") || Approved("nope") {
+		t.Error("Approved")
+	}
 }

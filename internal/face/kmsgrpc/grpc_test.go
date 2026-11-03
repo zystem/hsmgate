@@ -57,7 +57,7 @@ func (r *rig) jwt(issuer string, key *rsa.PrivateKey, life time.Duration) string
 func newRig(t *testing.T) *rig {
 	dir := t.TempDir()
 	files := map[string]string{}
-	for i, n := range []string{"m1", "m2", "m3", "m4"} {
+	for i, n := range []string{"m1", "m2", "m3", "m4", "m5"} {
 		p := filepath.Join(dir, n)
 		os.WriteFile(p, []byte(strings.Repeat(string(rune('1'+i)), 64)), 0o600)
 		files[n] = p
@@ -71,17 +71,18 @@ func newRig(t *testing.T) *rig {
 	os.WriteFile(pubFile, pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der}), 0o644)
 	cfg, err := config.Parse([]byte(`
 kmsgrpc: {enabled: true}
-tokens: [{name: soft, type: soft, keys: {m1: ` + files["m1"] + `, m2: ` + files["m2"] + `, m3: ` + files["m3"] + `, m4: ` + files["m4"] + `}}]
+tokens: [{name: soft, type: soft, keys: {m1: ` + files["m1"] + `, m2: ` + files["m2"] + `, m3: ` + files["m3"] + `, m4: ` + files["m4"] + `, m5: ` + files["m5"] + `}}]
 keys:
   seal: {kmsgrpc: true, kmsjson_usage: encrypt_decrypt, versions: [{token: soft, label: m1}], aad: {mode: fixed}}
   sig:  {kmsgrpc: true, kmsjson_usage: sign_verify, versions: [{token: soft, label: m2}], aad: {mode: fixed}}
   mac:  {kmsgrpc: true, kmsjson_usage: generate_verify_mac, versions: [{token: soft, label: m3}], aad: {mode: fixed}}
   other: {kmsgrpc: false, kmsjson: true, kmsjson_usage: encrypt_decrypt, versions: [{token: soft, label: m4}], aad: {mode: fixed}}
+  mac512: {kmsgrpc: true, kmsjson_usage: generate_verify_mac, mac_hash: sha512, versions: [{token: soft, label: m5}], aad: {mode: fixed}}
 clients:
   - name: app
     identity: {cn: app}
     jwt: {issuer: app@example.test, public_key_file: ` + pubFile + `}
-    keys: {seal: {ops: [encrypt, decrypt]}, sig: {ops: [sign]}, mac: {ops: [generate_mac, verify_mac]}, other: {ops: [encrypt]}}
+    keys: {seal: {ops: [encrypt, decrypt]}, sig: {ops: [sign]}, mac: {ops: [generate_mac, verify_mac]}, mac512: {ops: [generate_mac, verify_mac]}, other: {ops: [encrypt]}}
 `))
 	if err != nil {
 		t.Fatal(err)
@@ -224,7 +225,7 @@ func TestEndToEnd(t *testing.T) {
 	}
 	// metadata
 	code, _, rep = r.rpc("ListCryptoKeys", tk.AccessToken, (&writer{}).str(1, "projects/hsmgate/locations/global/keyRings/main"))
-	if code != 0 || len(rep.bytes[1]) != 3 || rep.u64(3) != 3 {
+	if code != 0 || len(rep.bytes[1]) != 4 || rep.u64(3) != 4 {
 		t.Fatalf("list: %d %d", code, len(rep.bytes[1]))
 	}
 	code, _, rep = r.rpc("GetCryptoKey", tk.AccessToken, (&writer{}).str(1, ring+"seal"))
@@ -403,4 +404,28 @@ func FuzzParseKeyName(f *testing.F) {
 			t.Fatalf("%q parsed as %q %d %v", name, key, ver, hasVer)
 		}
 	})
+}
+
+// The hash of the HMAC is a choice of the key (mac_hash): the key's algorithm says it, and the MAC has that hash's size.
+func TestMacHashIsChosenPerKey(t *testing.T) {
+	r := newRig(t)
+	bearer := r.jwt("app@example.test", r.rsaKey, time.Hour)
+	for key, c := range map[string]struct {
+		alg  uint64
+		size int
+	}{"mac": {algHMAC, 32}, "mac512": {algHMAC512, 64}} {
+		st, _, rep := r.rpc("GetCryptoKeyVersion", bearer, (&writer{}).str(1, ring+key+"/cryptoKeyVersions/1"))
+		if st != 0 || rep.u64(10) != c.alg {
+			t.Errorf("%s: the algorithm is %d (%d)", key, rep.u64(10), st)
+		}
+		st, _, rep = r.rpc("MacSign", bearer, (&writer{}).str(1, ring+key+"/cryptoKeyVersions/1").bytes(2, []byte("data")))
+		if st != 0 || len(rep.raw(2)) != c.size {
+			t.Fatalf("%s: %d a MAC of %d bytes", key, st, len(rep.raw(2)))
+		}
+		mac := rep.raw(2)
+		st, _, rep = r.rpc("MacVerify", bearer, (&writer{}).str(1, ring+key).bytes(2, []byte("data")).bytes(4, mac))
+		if st != 0 || rep.u64(2) != 1 {
+			t.Errorf("%s verify: %d", key, st)
+		}
+	}
 }

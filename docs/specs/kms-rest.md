@@ -41,6 +41,8 @@ The client functions are those of `go.step.sm/crypto/kms/azurekms` (Apache-2.0) 
 
 Everything else answers `404`. Errors: `{"error": {"code", "message"}}`: `401 Unauthorized`, `403 Forbidden` (key not there, not on the face, or no right: one answer), `400 BadParameter` (usage, algorithm, size, damaged ciphertext), `429 Throttled`, `503 ServiceUnavailable`.
 
+- `HS256` on a MAC key is the HMAC of `value`; with `mac_hash: sha384` or `sha512` on the key the name is `HS384` or `HS512` and only that one is accepted.
+
 ## 4. What does not work
 
 - The algorithm names `A256GCM` and `A256KW` are what the clients send; the cipher is the one of the blob of the service (an ecies2 blob that authenticates the key name and the version). The blob goes in `value`; `iv` and `tag` are not used, and a client that wants to read them out of the answer gets none.

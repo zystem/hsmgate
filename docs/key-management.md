@@ -34,3 +34,20 @@ Not used: SHA-1, 3DES, RSA below 2048, P-192, MD5. The service refuses a JWT wit
 - No automatic rotation or expiry of a version: the operator decides (a cron job that adds a version is possible; not provided).
 - Keys that are derived on the host for an operation (MAC keys, data keys) exist in memory for its duration; `kmsjson.mac_cache_seconds` lengthens it on purpose.
 - Split knowledge and dual control for the initialisation of a token are the card's (DKEK shares), not the service's.
+
+## Algorithm agility: what can be switched, and how fast
+
+If an algorithm is broken, the project can move to another one with a change of configuration, no new release. What exists, and what does not:
+
+| What | Choices | How to switch | Existing data |
+|---|---|---|---|
+| **Sealing: the hash** of the key derivation | SHA-256 (`ecies2`), SHA-512 (`ecies3`) | `seal_suite: ecies3`, reload | every suite is read; `rewrap` moves texts to the new one |
+| **Sealing: the cipher** | AES-256-GCM (`ecies2`, `ecies3`), XChaCha20-Poly1305 (`ecies4`, another family, not FIPS-approved) | `seal_suite: ecies4`, reload | the same |
+| **MAC: the hash of the HMAC** (keys with `kmsjson_usage: generate_verify_mac`) | SHA-256, SHA-384, SHA-512 | `mac_hash: sha384` on the key; the faces name it (`HMAC_SHA_384`, `HS384`, `HMAC_SHA384`) | a MAC made with another hash does not verify under the new one: make a new key (or version) with the new hash, and verify old MACs with the old key until they are gone |
+| **Authentication of clients** | RS256 JWT; TLS 1.3 only (its own negotiation); SigV4 (HMAC-SHA-256, the scheme of the clients) | the JWT algorithm is checked, one is accepted; the other two are what the clients speak | none stored |
+| **Signatures** | ECDSA P-256 with SHA-256 | **not switchable**: another curve (P-384) needs the card's keys and a new face contract | none stored (signatures are verified by the client's copy of the public key) |
+| **The key agreement** | ECDH P-256 | **not switchable** for the same reason | sealed texts name the key by its fingerprint |
+
+The sequence for a broken cipher or hash of sealing: (1) set `seal_suite` to the other suite and reload (new texts are in it from the next request); (2) re-seal what exists with `rewrap` (or by the client that holds the texts); (3) when nothing is left in the old suite, nothing else needs to be done: reading the old suite remains for old backups. For a broken MAC hash: make the new MAC key and move the clients to it.
+
+What does not exist, and is said here so that nobody assumes it: other curves, RSA keys on the token, post-quantum algorithms. They would need new formats; the tags of the formats (`ecies2`, `HGK2`) and the versioned keys are what make such a change possible without breaking what is stored.
