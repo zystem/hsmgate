@@ -141,6 +141,9 @@ func (f *Face) now() time.Time {
 	return time.Now()
 }
 
+// serve answers the operations of the face. GetPublicKey serves awskms KMS.GetPublicKey and the preload of KMS.CreateSigner; Sign (crypto.go) serves
+// Signer.Sign. DescribeKey, ListKeys, ListAliases, DeriveSharedSecret and the sealing, MAC and random calls serve no function of awskms: they are for
+// the official SDK. awskms CreateKey, CreateAlias and Decrypter (RSA) are not served.
 func (f *Face) serve(w http.ResponseWriter, r *http.Request) {
 	rid := requestID(r)
 	w.Header().Set("X-Request-Id", rid)

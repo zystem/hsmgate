@@ -647,6 +647,7 @@ func (c *call) keyMsg(key string, k config.Key) *writer {
 	return w
 }
 
+// getCryptoKey serves no function of cloudkms; it is the official library's lookup of a key.
 func (c *call) getCryptoKey() ([]byte, *kerr) {
 	key, _, hasVer, e := c.key(c.req.str(1))
 	if e != nil {
@@ -661,6 +662,8 @@ func (c *call) getCryptoKey() ([]byte, *kerr) {
 	return c.keyMsg(key, c.s.cfg.Keys[key]).b, nil
 }
 
+// getCryptoKeyVersion is the call of cloudkms CloudKMS.VerifyAttestation (this face has no attestation, so that function gets none) and the official
+// library's lookup of a version.
 func (c *call) getCryptoKeyVersion() ([]byte, *kerr) {
 	key, ver, hasVer, e := c.key(c.req.str(1))
 	if e != nil {
@@ -677,6 +680,7 @@ func (c *call) getCryptoKeyVersion() ([]byte, *kerr) {
 	return c.versionMsg(key, ver, alg).b, nil
 }
 
+// listCryptoKeys serves no function of cloudkms; it is the official library's list of keys.
 func (c *call) listCryptoKeys() ([]byte, *kerr) {
 	if !c.s.names.isRing(c.req.str(1)) {
 		return nil, &kerr{cDenied, "the key ring does not exist or the client has no right to it", "forbidden"}
@@ -693,6 +697,7 @@ func (c *call) listCryptoKeys() ([]byte, *kerr) {
 	return w.b, nil
 }
 
+// listCryptoKeyVersions serves no function of cloudkms; it is the official library's list of versions.
 func (c *call) listCryptoKeyVersions() ([]byte, *kerr) {
 	key, _, hasVer, e := c.key(c.req.str(1))
 	if e != nil {

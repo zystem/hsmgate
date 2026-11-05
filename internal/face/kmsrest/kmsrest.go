@@ -603,6 +603,7 @@ func (c *call) getKey(name string, ver int) (any, *kerr) {
 	return c.bundle(name, ver, k)
 }
 
+// listKeys serves no function of azurekms (it has none to list keys); it is the call that tools and the official SDK make to look a key up.
 func (c *call) listKeys(string, int) (any, *kerr) {
 	list, oe := c.svc.List(c.client)
 	if oe != nil {
@@ -615,6 +616,7 @@ func (c *call) listKeys(string, int) (any, *kerr) {
 	return map[string]any{"value": items, "nextLink": nil}, nil
 }
 
+// listVersions serves no function of azurekms; it is the official SDK's list of the versions of a key.
 func (c *call) listVersions(name string, _ int) (any, *kerr) {
 	k, e := c.key(name)
 	if e != nil {
@@ -661,6 +663,7 @@ func macJOSE(k config.Key) string {
 	return "HS" + strconv.Itoa(k.MACBits())
 }
 
+// sign serves azurekms Signer.Sign (ES256 over a SHA-256 digest). HS256 on a MAC key is for the official SDK only.
 func (c *call) sign(name string, ver int) (any, *kerr) {
 	q, e := c.req()
 	if e != nil {
@@ -695,6 +698,7 @@ func (c *call) sign(name string, ver int) (any, *kerr) {
 	return nil, bad("bad_algorithm", "the algorithm is not supported by this key")
 }
 
+// verify serves no function of azurekms (its Signer only signs); it is the official SDK's verify.
 func (c *call) verify(name string, ver int) (any, *kerr) {
 	q, e := c.req()
 	if e != nil {
@@ -737,6 +741,7 @@ func (c *call) verify(name string, ver int) (any, *kerr) {
 
 func (c *call) algOK(alg string) bool { return alg == "A256GCM" || alg == "A256KW" }
 
+// encrypt serves no function of azurekms (it has no encryption); it is the official SDK's call with a symmetric key.
 func (c *call) encrypt(name string, ver int) (any, *kerr) {
 	q, e := c.req()
 	if e != nil {
@@ -764,6 +769,7 @@ func (c *call) encrypt(name string, ver int) (any, *kerr) {
 	return out, nil
 }
 
+// decrypt serves no function of azurekms; it is the official SDK's call with a symmetric key.
 func (c *call) decrypt(name string, ver int) (any, *kerr) {
 	q, e := c.req()
 	if e != nil {

@@ -312,6 +312,7 @@ func wipe(b []byte) {
 
 func b64(b []byte) string { return base64.StdEncoding.EncodeToString(b) }
 
+// encrypt serves no function of awskms (its Decrypter is RSA only); it is the official SDK's Encrypt with a symmetric key.
 func (c *call) encrypt(req cryptoReq) {
 	if !okAlgorithm(req.EncryptionAlgorithm) {
 		c.badAlgorithm("EncryptionAlgorithm", req.EncryptionAlgorithm)
@@ -363,6 +364,7 @@ func (c *call) source(blob []byte, id string, ctx map[string]string) (name strin
 	return name, ver, key, text, aad, ok
 }
 
+// decrypt serves no function of awskms (its Decrypter is RSA-OAEP and this face has no RSA key); it is the official SDK's Decrypt with a symmetric key.
 func (c *call) decrypt(req cryptoReq) {
 	if !okAlgorithm(req.EncryptionAlgorithm) {
 		c.badAlgorithm("EncryptionAlgorithm", req.EncryptionAlgorithm)
@@ -384,6 +386,7 @@ func (c *call) decrypt(req cryptoReq) {
 	c.succeed(map[string]any{"KeyId": c.f.arnFor(req.KeyID, name), "Plaintext": b64(plain), "EncryptionAlgorithm": algorithm})
 }
 
+// reencrypt serves no function of awskms; it is the official SDK's ReEncrypt.
 func (c *call) reencrypt(req cryptoReq) {
 	if !okAlgorithm(req.SourceEncryptionAlgorithm) || !okAlgorithm(req.DestinationEncryptionAlgorithm) {
 		c.badAlgorithm("EncryptionAlgorithm", req.SourceEncryptionAlgorithm+req.DestinationEncryptionAlgorithm)
@@ -420,6 +423,7 @@ func (c *call) reencrypt(req cryptoReq) {
 		"SourceEncryptionAlgorithm": algorithm, "DestinationEncryptionAlgorithm": algorithm})
 }
 
+// dataKey serves no function of awskms; it is the official SDK's GenerateDataKey and GenerateDataKeyWithoutPlaintext.
 func (c *call) dataKey(op string, req cryptoReq) {
 	if !okAlgorithm(req.EncryptionAlgorithm) {
 		c.badAlgorithm("EncryptionAlgorithm", req.EncryptionAlgorithm)
@@ -521,6 +525,7 @@ func (c *call) digestOf(req cryptoReq) ([]byte, bool) {
 	return nil, false
 }
 
+// sign serves awskms Signer.Sign: MessageType DIGEST, ECDSA_SHA_256, a DER signature made on the token.
 func (c *call) sign(req cryptoReq) {
 	name, ver, key, _, ok := c.target(req.KeyID, 0, "sign", nil)
 	if !ok {
@@ -713,6 +718,7 @@ func (c *call) macKey(name string, ver int, key config.Key) ([]byte, bool) {
 // macAlgorithm is the name of the HMAC that a MAC key makes (its hash is mac_hash of the key): HMAC_SHA_256, HMAC_SHA_384 or HMAC_SHA_512.
 func macAlgorithm(k config.Key) string { return "HMAC_SHA_" + itoa(k.MACBits()) }
 
+// mac serves no function of awskms; it is the official SDK's GenerateMac and VerifyMac.
 func (c *call) mac(op string, req cryptoReq) {
 	generate := op == "GenerateMac"
 	right := "verify_mac"
