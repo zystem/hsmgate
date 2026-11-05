@@ -14,7 +14,7 @@ RUN CGO_ENABLED=1 GOFIPS140=${GOFIPS140} go build -buildmode=pie -trimpath -buil
 
 # the module of OpenSC and what it needs (the PC/SC client library is loaded by OpenSC with dlopen, so ldd does not show it), with the same paths, into /rootfs;
 # the core of glibc comes from the final image
-FROM debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587 AS libs
+FROM debian:bookworm-slim@sha256:99c0b25c46d0214d5a2091092e7908907dcaecd6a962cde0ac700acee222b6f3 AS libs
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 # (the versions of the packages are not pinned on purpose: the base is pinned by digest, the packages are the current security updates of it)
 # hadolint ignore=DL3008
