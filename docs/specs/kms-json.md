@@ -28,6 +28,18 @@ Kubernetes KMS v2 and Transit only encrypt and decrypt; on a token that is used 
 
 `DeriveSharedSecret` checks the algorithm is `ECDH`, that the peer key is a P-256 DER SPKI and **on the curve before the token is asked**; `Recipient` is refused; `DryRun` answers `DryRunOperationException` after the policy check. Everything else: `UnsupportedOperationException`.
 
+### 2a'. The client function each operation serves
+
+The reference clients are those of `go.step.sm/crypto/kms/awskms` (Apache-2.0, <https://github.com/smallstep/crypto#kms>) and the official SDK; the names below are theirs.
+
+| Server operation | Serves | Notes |
+|---|---|---|
+| `GetPublicKey` | `KMS.GetPublicKey`, the preload of `KMS.CreateSigner` | DER SPKI of a signing key |
+| `Sign` | `Signer.Sign` | `MessageType` `DIGEST`, `ECDSA_SHA_256`, DER signature |
+| `Decrypt` | `Decrypter.Decrypt` | **not served**: it is RSA only (`RSAES_OAEP_*`); a key of this face is P-256 |
+| `CreateKey`, `CreateAlias` | `KMS.CreateKey` | **not served**: keys are made in the configuration and on the token |
+| `Encrypt`, `Decrypt`, `GenerateMac`, `VerifyMac`, `GenerateRandom`, `DeriveSharedSecret` | the official SDK only | no function of `awskms` calls them |
+
 ### 2b. Signing (`kmsjson_usage: sign_verify`)
 
 `Sign` and `Verify` with `ECDSA_SHA_256` (P-256): the signature is made **on the token** (`CKM_ECDSA` over the SHA-256 digest) and returned as ASN.1 DER, as the SDKs expect. `MessageType` `RAW` (1 to 4096 bytes, hashed by the service) or `DIGEST` (32 bytes). `Verify` uses the public key and no private operation; an invalid signature is `KMSInvalidSignatureException`. The rights are `sign` and `verify`; `GetPublicKey` and `DescribeKey` show `SIGN_VERIFY` and `SigningAlgorithms`. A private key signs **or** does ECDH, never both: configuration is refused if a signing key shares a token key with another key. The audit holds no part of the message; with `kmsjson.audit_message_prefix: true` it holds the first 6 bytes of its hash (off by default: the hash of a message with little variety can be guessed from its prefix). Tried on a card (§7).

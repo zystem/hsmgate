@@ -1,7 +1,7 @@
 // Package kmsjson is the second face of the service: a subset of the JSON API that cloud key services of this kind speak, enough for a client to fetch the public key of a key that
 // stays on the token (GetPublicKey, DescribeKey, ListKeys, ListAliases) and to have the token do ECDH with a public key of its own choice (DeriveSharedSecret). The client then
 // seals and opens by itself; the service never sees a data key. The names in this package are descriptive of the API shape; the service is not affiliated with the makers of any
-// cloud service whose clients can talk to it, and the wire constants (X-Amz-Target, "TrentService.", the content type, error type names) are those the clients require.
+// cloud service whose clients can talk to it (the client functions it serves are named after go.step.sm/crypto/kms/awskms, Apache-2.0: see docs/specs/kms-json.md §2a'), and the wire constants (X-Amz-Target, "TrentService.", the content type, error type names) are those the clients require.
 //
 // Authentication is two-fold, both required: the client certificate of the TLS connection (as for the Transit face) and a signature of the request (package sigv4) with the
 // credential of the same client. Authorisation is the policy of the service: a key is visible to a client with any grant on it, and DeriveSharedSecret needs the right "derive".
