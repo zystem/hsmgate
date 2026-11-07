@@ -13,8 +13,8 @@ Restart=on-failure
 RestartSec=5s
 User=hsmgate
 Group=hsmgate
-# the PIN, if it is kept in a file at all: a systemd credential, tried once at start (see docs/operations.md; the other way is `hsmgate unlock`)
-#LoadCredential=pin:/etc/hsmgate/pin
+# the PIN, if it is kept in a file at all: a file owned by this user, mode 0400, named by pin_file, tried once at start (see docs/operations.md; the other way is
+# `hsmgate unlock`). Not LoadCredential=: systemd gives that file to the service through an ACL and it shows as mode 0440, which the service refuses.
 RuntimeDirectory=hsmgate
 RuntimeDirectoryMode=0750
 LogsDirectory=hsmgate
