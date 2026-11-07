@@ -76,7 +76,7 @@ Today: a TLS front outside the service and a header that the service believes. N
 - **Authorisation**: per client, per key: the allowed operations, the context rules, a rate limit (per minute, per day, per client and per key), a size limit. Deny by default. One client may be allowed `wrap` only (a producer that cannot read), another `unwrap` only.
 - **Other doors, each its own client type**: a unix socket with the peer's uid/gid (`SO_PEERCRED`) for a local consumer such as the Kubernetes API server (the KMS v2 face); static credentials (an access key pair) only for a face whose protocol cannot present a client certificate. A token that is a bearer secret (OpenBao's `token`) is **not** an authentication, it is ignored as it is today.
 - **Admin** is a separate listener (a unix socket, or another port with another CA): `unlock`, `disable`/`enable` (the switch), `reload`, `clients`, `keys`. The switch file stays too, for the case where nothing but a shell is left.
-- **Unlocking the token**: the PIN comes from a systemd credential or a file, **or** the service starts locked and an operator runs `hsmgate unlock` (the PIN from the terminal, handed over the admin socket, kept in memory only). The PIN is tried **once**; a refusal leaves the service `locked` until an operator acts (the card blocks at three).
+- **Unlocking the token**: the PIN comes from a file (owned by the service user, mode 0400; a systemd credential shows as 0440 and is refused), **or** the service starts locked and an operator runs `hsmgate unlock` (the PIN from the terminal, handed over the admin socket, kept in memory only). The PIN is tried **once**; a refusal leaves the service `locked` until an operator acts (the card blocks at three).
 - **Audit**: one JSON line per decision, including the refused ones: time, request id, client, face, key, operation, context (public by rule), result, the token's state. Never a key, a plaintext, a PIN, a ciphertext. To a file, journald or syslog; an optional hash chain over the lines so that a cut is visible.
 - **Threat model** to be written in step P1 (attackers: a compromised client, a network attacker, a stolen token, a stolen PIN without the token, an operator error, a client that exhausts the token). The first rule: a compromised client can do exactly what its policy allows and no more, and every use of it is written down.
 
@@ -93,7 +93,7 @@ internal/face/          native, compat1, transit, kmsv2 (gRPC)
 api/                    the OpenAPI of v2, the protos
 docs/                   concepts, protocol, sealed format, threat model, one page per token (the matrix of what was tried), operations
 test/                   SoftHSM2 integration, the real-card script, conformance vectors
-deploy/                 systemd unit (LoadCredential, sandboxing, no network except the listener) (Docker example; no Kubernetes: a card ties the service to one machine)
+deploy/                 systemd unit (sandboxing, no network except the listener) (Docker example; no Kubernetes: a card ties the service to one machine)
 ```
 
 Supply chain as KeySealer: signed releases and containers, an SBOM, SLSA provenance, `govulncheck` and a linter in CI, fuzz targets for every parser (the sealed format, the context, the requests).

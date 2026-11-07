@@ -19,7 +19,7 @@ tokens:
     module: /usr/lib/x86_64-linux-gnu/opensc-pkcs11.so
     token_label: mytoken               # or token_serial: <serial of the token>
     keys: {m1: 0123456789abcdef0123456789abcdef01234567}   # label -> CKA_ID of the key pair, hex
-    # pin_file: /run/credentials/hsmgate.service/pin       # tried ONCE at start; without it: `hsmgate unlock -token card`
+    # pin_file: /etc/hsmgate/pin       # owned by the service user, mode 0400; tried ONCE at start; without it: `hsmgate unlock -token card`
 
 keys:
   # CiNim: the shard's master key; the context (the organisation) is part of the sealed text and must begin with one of `allow`
