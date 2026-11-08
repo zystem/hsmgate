@@ -280,13 +280,25 @@ func TestParseBlobNeverPanics(t *testing.T) {
 	}
 }
 
+// sealed says whether a text begins with the tag of a suite of the sealed format.
+func sealed(text string) bool {
+	for _, tag := range []string{"ecies2.", "ecies3.", "ecies4."} {
+		if strings.HasPrefix(text, tag) {
+			return true
+		}
+	}
+	return false
+}
+
 func FuzzParseBlob(f *testing.F) {
 	f.Add(makeBlob("seal", 1, "ecies2.aa.bb.cc"))
+	f.Add(makeBlob("seal", 1, "ecies3.aa.bb.cc"))
+	f.Add(makeBlob("seal", 1, "ecies4.aa.bb.cc"))
 	f.Add([]byte("HGK1\x01a\x00\x01ecies2.x"))
 	f.Add([]byte{})
 	f.Fuzz(func(t *testing.T, b []byte) {
 		name, ver, text, err := parseBlob(b)
-		if err == nil && (name == "" || ver < 1 || !strings.HasPrefix(text, "ecies2.")) {
+		if err == nil && (name == "" || ver < 1 || !sealed(text)) {
 			t.Fatalf("accepted %q", b)
 		}
 	})
