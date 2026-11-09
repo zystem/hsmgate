@@ -36,7 +36,8 @@ func (l *lockable) State() string {
 }
 
 func TestAdminUnlockAndAudit(t *testing.T) {
-	tk := &lockable{pin: "1234"}
+	// letters, not digits: a digit string can appear in a timestamp of the audit log (nanoseconds), and the test would fail now and then
+	tk := &lockable{pin: "pin-secret"}
 	buf := &bytes.Buffer{}
 	h := adminHandler(func() map[string]backend.Token { return map[string]backend.Token{"card": tk} }, audit.New(buf), nil)
 	post := func(body string) int {
@@ -48,13 +49,13 @@ func TestAdminUnlockAndAudit(t *testing.T) {
 	if c := post(`{"token":"card","pin":"0000"}`); c != 403 || tk.opened {
 		t.Errorf("wrong PIN: %d", c)
 	}
-	if c := post(`{"token":"card","pin":"1234"}`); c != 200 || !tk.opened {
+	if c := post(`{"token":"card","pin":"pin-secret"}`); c != 200 || !tk.opened {
 		t.Errorf("right PIN: %d", c)
 	}
-	if c := post(`{"token":"nobody","pin":"1234"}`); c != 400 {
+	if c := post(`{"token":"nobody","pin":"pin-secret"}`); c != 400 {
 		t.Errorf("unknown token: %d", c)
 	}
-	if strings.Contains(buf.String(), "1234") || strings.Count(buf.String(), `"op":"unlock"`) != 5 {
+	if strings.Contains(buf.String(), "pin-secret") || strings.Count(buf.String(), `"op":"unlock"`) != 5 {
 		t.Errorf("audit: %s", buf.String())
 	}
 }
@@ -76,9 +77,9 @@ func (failingLog) Write([]byte) (int, error) { return 0, errors.New("disk full")
 
 // With no audit log the PIN is not tried at all.
 func TestUnlockNeedsTheAuditLog(t *testing.T) {
-	tk := &lockable{pin: "1234"}
+	tk := &lockable{pin: "pin-secret"}
 	h := adminHandler(func() map[string]backend.Token { return map[string]backend.Token{"card": tk} }, audit.New(failingLog{}), nil)
-	r := httptest.NewRequest("POST", "/unlock", strings.NewReader(`{"token":"card","pin":"1234"}`))
+	r := httptest.NewRequest("POST", "/unlock", strings.NewReader(`{"token":"card","pin":"pin-secret"}`))
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
 	if w.Code != 503 || tk.opened {
