@@ -1,0 +1,17 @@
+{{- if and .Values.audit.persistence.enabled (not .Values.audit.persistence.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "hsmgate.fullname" . }}-audit
+  labels: {{- include "hsmgate.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  accessModes: [ReadWriteOnce]
+  {{- with .Values.audit.persistence.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.audit.persistence.size }}
+{{- end }}

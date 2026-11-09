@@ -93,7 +93,7 @@ internal/face/          native, compat1, transit, kmsv2 (gRPC)
 api/                    the OpenAPI of v2, the protos
 docs/                   concepts, protocol, sealed format, threat model, one page per token (the matrix of what was tried), operations
 test/                   SoftHSM2 integration, the real-card script, conformance vectors
-deploy/                 systemd unit (sandboxing, no network except the listener) (Docker example; no Kubernetes: a card ties the service to one machine)
+deploy/                 systemd unit (sandboxing, no network except the listener) (Docker example; a Helm chart for the software token only: a card ties the service to one machine)
 ```
 
 Supply chain as KeySealer: signed releases and containers, an SBOM, SLSA provenance, `govulncheck` and a linter in CI, fuzz targets for every parser (the sealed format, the context, the requests).

@@ -1,0 +1,84 @@
+{{- $audit := .Values.audit.persistence }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "hsmgate.fullname" . }}
+  labels: {{- include "hsmgate.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  strategy:
+    type: Recreate        # one writer of the audit file; a rolling update would run two at once
+  selector:
+    matchLabels: {{- include "hsmgate.selector" . | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "hsmgate.selector" . | nindent 8 }}
+        {{- with .Values.podLabels }}{{ toYaml . | nindent 8 }}{{ end }}
+      annotations:
+        # a changed configuration restarts the pod (a reload by SIGHUP is possible but the chart keeps it simple)
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}{{ toYaml . | nindent 8 }}{{ end }}
+    spec:
+      serviceAccountName: {{ include "hsmgate.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: hsmgate
+          image: {{ include "hsmgate.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: [serve, -config, /etc/hsmgate/hsmgate.yaml]
+          ports:
+            - {name: https, containerPort: 8443}
+          # The key files come from a Secret volume: owned by root, mode 0400 (the service refuses a secret that group or others can read, so no fsGroup).
+          # Only root can read them, hence uid 0 -- with every capability dropped, a read-only root file system and no way to gain more.
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          # a TCP connect to the listener; it never touches the token
+          readinessProbe:
+            tcpSocket: {port: https}
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket: {port: https}
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - {name: config, mountPath: /etc/hsmgate/hsmgate.yaml, subPath: hsmgate.yaml, readOnly: true}
+            - {name: tls, mountPath: /etc/hsmgate/tls, readOnly: true}
+            - {name: soft, mountPath: /etc/hsmgate/soft, readOnly: true}
+            - {name: run, mountPath: /run/hsmgate}
+            - {name: audit, mountPath: /var/log/hsmgate}
+      volumes:
+        - name: config
+          configMap: {name: {{ include "hsmgate.fullname" . }}}
+        - name: tls
+          # 256 is 0400
+          secret: {secretName: {{ include "hsmgate.tlsSecret" . }}, defaultMode: 256}
+        - name: soft
+          secret: {secretName: {{ include "hsmgate.softSecret" . }}, defaultMode: 256}
+        - name: run
+          emptyDir: {medium: Memory, sizeLimit: 1Mi}
+        - name: audit
+          {{- if $audit.enabled }}
+          persistentVolumeClaim: {claimName: {{ default (printf "%s-audit" (include "hsmgate.fullname" .)) $audit.existingClaim }}}
+          {{- else }}
+          emptyDir: {sizeLimit: 256Mi}
+          {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}

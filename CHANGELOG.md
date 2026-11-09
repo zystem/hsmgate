@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Added
+- **Helm chart** (`deploy/helm/hsmgate`, [README](deploy/helm/hsmgate/README.md)) for a software token (tests, development, pilots): the configuration as values, TLS from a Secret, generated soft keys that are kept on uninstall, an optional claim for the audit log, an optional NetworkPolicy, `helm test`. The release publishes it as an OCI artifact, `oci://ghcr.io/zystem/charts/hsmgate`, signed (cosign, keyless) with a build provenance attestation, and as an asset of the GitHub release. CI lints and renders it and validates the result with kubeconform.
+
 ### Changed
 - Documentation: the PIN file must be owned by the service user with mode 0400; a systemd credential (`LoadCredential=`) is refused because systemd shows it as 0440 (an ACL), so it is no longer suggested in `deploy/hsmgate.service` and `deploy/hsmgate.example.yaml`. The Docker case is described with the owner of the file that the container user needs.
 - The test modules (`test/*-sdk`) use `golang.org/x/net` 0.62.0 and the fixed `golang.org/x/crypto` (the older ones have known findings; they are not shipped); the Python requirements of the boto3 test are pinned by hash; the size of a data key of the KMS-JSON face is checked once, on the variable that is allocated (a CodeQL finding; no change of behaviour).
