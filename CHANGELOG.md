@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.7.1 — 2026-11-09
 
 ### Added
 - **Helm chart** (`deploy/helm/hsmgate`, [README](deploy/helm/hsmgate/README.md)) for a software token (tests, development, pilots): the configuration as values, TLS from a Secret, generated soft keys that are kept on uninstall, an optional claim for the audit log, an optional NetworkPolicy, `helm test`. The release publishes it as an OCI artifact, `oci://ghcr.io/zystem/charts/hsmgate`, signed (cosign, keyless) with a build provenance attestation, and as an asset of the GitHub release. CI lints and renders it and validates the result with kubeconform.
