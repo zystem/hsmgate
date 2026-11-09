@@ -10,6 +10,7 @@ For a maintainer (either of the two, [GOVERNANCE.md](../GOVERNANCE.md)). A relea
 ## The release pull request
 
 3. A branch `release-X.Y.Z`. In `CHANGELOG.md` the heading `## Unreleased` becomes `## X.Y.Z — DATE`, and what is missing from it is added (user-visible changes, security fixes with their identifiers).
+3a. In `deploy/helm/hsmgate/Chart.yaml` set `version: X.Y.Z` and `appVersion: "vX.Y.Z"` (the workflow packages the chart with the number of the tag whatever the file says; the file keeps the tree honest).
 4. In `vex/hsmgate.openvex.json`: raise `version`, set `timestamp`, and add the images `vX.Y.Z` and `vX.Y.Z-fips` to the products of the statements that hold for them (for example the OpenSSL finding that is `not_affected`). Check it: `go run github.com/openvex/vexctl@v0.4.1 merge vex/hsmgate.openvex.json`. If a scanner has reported a new finding in a shipped component since the last release, account for it in the document (see [security-policies.md](security-policies.md)) or fix it first.
 5. Commit with a sign-off (`git commit -s`), push, open the pull request, wait for the checks, merge.
 
@@ -20,7 +21,7 @@ For a maintainer (either of the two, [GOVERNANCE.md](../GOVERNANCE.md)). A relea
 
 ## After
 
-8. Check what was made, as a user would ([verifying-releases.md](verifying-releases.md)): the assets of the release (binary, FIPS binary, archive, SBOM, VEX, each with a `.sigstore.json`, and the `.sha256` files), `cosign verify-blob` of each, `gh attestation verify`, `cosign verify` (cosign 3 or later) and `gh attestation verify oci://…` of both images, and `govulncheck -mode=binary` on the binary.
+8. Check what was made, as a user would ([verifying-releases.md](verifying-releases.md)): the assets of the release (binary, FIPS binary, archive, SBOM, VEX, each with a `.sigstore.json`, and the `.sha256` files), `cosign verify-blob` of each, `gh attestation verify`, `cosign verify` (cosign 3 or later) and `gh attestation verify oci://…` of both images and of the chart (`oci://ghcr.io/zystem/charts/hsmgate`; make its package public once, like the image's, GitHub: Packages -> hsmgate -> Package settings -> Change visibility), and `govulncheck -mode=binary` on the binary.
 9. In `compose.yaml` the example image is a release and a digest; Dependabot proposes the bump, merge it.
 10. If something is wrong with a release, do not move the tag: fix on `main` and make the next release; say what was wrong in its notes.
 

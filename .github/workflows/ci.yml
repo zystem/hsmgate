@@ -168,6 +168,30 @@ jobs:
           /tmp/venv/bin/pip install -q --require-hashes -r test/kmsjson-boto3/requirements.txt
           /tmp/venv/bin/python test/kmsjson-boto3/test_boto3.py build/hsmgate
 
+  chart:
+    # the Helm chart: lint, the templates with the variants of the values, and their schema (kubeconform, strict)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: kubeconform
+        run: |
+          curl -fsSL -o /tmp/kc.tgz https://github.com/yannh/kubeconform/releases/download/v0.8.0/kubeconform-linux-amd64.tar.gz
+          echo "9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883  /tmp/kc.tgz" | sha256sum -c -
+          tar -xzf /tmp/kc.tgz -C /tmp kubeconform
+      - name: Lint and render
+        run: |
+          c=deploy/helm/hsmgate
+          helm lint --strict "$c" --set tls.existingSecret=hsmgate-tls
+          ! helm template t "$c" 2>/dev/null            # the TLS secret is required
+          for args in "" \
+            "--set audit.persistence.enabled=true --set networkPolicy.enabled=true" \
+            "--set softToken.generate=false --set softToken.existingSecret=mine --set image.digest=sha256:0000000000000000000000000000000000000000000000000000000000000000"; do
+            # shellcheck disable=SC2086
+            helm template t "$c" --set tls.existingSecret=hsmgate-tls $args | /tmp/kubeconform -strict -summary -kubernetes-version 1.30.0 -
+          done
+
   image:
     # the Dockerfile builds (nothing is pushed), and the program inside the image, built with the toolchain of the Dockerfile, is checked for known vulnerabilities
     needs: test

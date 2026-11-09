@@ -1,0 +1,78 @@
+# hsmgate with a SOFTWARE token: private keys are files (a Secret). For tests, development and pilots, not for keys that must survive the loss of the cluster:
+# whoever reads the Secret has the keys. A card cannot be used from this chart (docs/operations.md).
+
+image:
+  repository: ghcr.io/zystem/hsmgate
+  tag: ""          # default: the appVersion of the chart
+  digest: ""       # "sha256:..." pins the image and wins over the tag; get it from the release notes or `docker buildx imagetools inspect`
+  pullPolicy: IfNotPresent
+imagePullSecrets: []   # a package on ghcr.io is private until its owner makes it public
+
+# One replica: the rate counters and the audit file are those of a single process, and a soft token is one set of key files.
+replicaCount: 1
+
+# --- the soft token ---------------------------------------------------------------------------------------------------------------------------------
+softToken:
+  name: soft
+  # a Secret that holds one key per label: the data key is the label, the value is 64 hexadecimal digits (a P-256 private key).
+  existingSecret: ""
+  # without existingSecret: make a random key for each label at the first install and KEEP it (the Secret carries helm.sh/resource-policy: keep, so that
+  # `helm uninstall` does not destroy the keys: what was sealed under them could never be opened again). Back the Secret up before relying on it.
+  generate: true
+  labels: [m1]
+
+# --- TLS --------------------------------------------------------------------------------------------------------------------------------------------
+# A Secret with tls.crt and tls.key (the service's certificate; the names a client connects to must be in it) and ca.crt (the CA that signed the certificates
+# of the clients: only those get past the handshake). A cert-manager Certificate with a `ca.crt` in its Secret has exactly this shape.
+tls:
+  existingSecret: ""     # required
+
+# --- the configuration (hsmgate.yaml) ------------------------------------------------------------------------------------------------------------------
+# listen, tls, admin_socket, audit and the soft token are set by the chart. Here: the keys, the clients and anything else of docs/ (kmsjson, kmsgrpc, kmsrest,
+# seal_suite, limits, metrics ...). A key names the soft token and one of its labels.
+config:
+  extra: {}
+    # seal_suite: ecies2
+    # kmsjson: {enabled: true, region: local}
+  keys:
+    demo:
+      versions: [{token: soft, label: m1}]
+      aad: {mode: fixed}
+  clients:
+    - name: demo
+      identity: {cn: demo}
+      keys:
+        demo: {ops: [encrypt, decrypt], per_minute: 120}
+
+# --- the audit log ------------------------------------------------------------------------------------------------------------------------------------
+# The service writes a file (/var/log/hsmgate/audit.log). On an emptyDir it is lost with the pod; a claim keeps it.
+audit:
+  persistence:
+    enabled: false
+    size: 1Gi
+    storageClass: ""
+    existingClaim: ""
+
+service:
+  type: ClusterIP
+  port: 8443
+  annotations: {}
+
+# Only the listed sources may reach the port; an empty list allows every pod of the cluster (the service answers only to a client certificate anyway).
+networkPolicy:
+  enabled: false
+  from: []     # e.g. [{namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: apps}}}]
+
+resources:
+  requests: {cpu: 50m, memory: 32Mi}
+  limits: {memory: 128Mi}
+
+podAnnotations: {}
+podLabels: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}

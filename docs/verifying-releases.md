@@ -51,6 +51,19 @@ git -c gpg.ssh.allowedSignersFile=allowed_signers tag -v vX.Y.Z
 
 The key is also published on https://github.com/zystem.keys. The release assets are verified as above, independently of the tag.
 
+## The Helm chart
+
+The chart is an OCI artifact, `oci://ghcr.io/zystem/charts/hsmgate`, with the number of the release (without the `v`); the same `.tgz` is among the assets of the release, with a `.sigstore.json` and a build provenance attestation. Signed as the images are (keyless, by the release workflow):
+
+```bash
+cosign verify ghcr.io/zystem/charts/hsmgate@sha256:<digest> \
+  --certificate-identity-regexp '^https://github.com/zystem/hsmgate/\.github/workflows/release\.yml@refs/tags/v' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+helm pull oci://ghcr.io/zystem/charts/hsmgate --version X.Y.Z    # or: helm install … --version X.Y.Z
+```
+
+The digest is printed by `helm pull` (`Digest:`) and by `helm push` in the log of the release. Use cosign 3 or later, as for the images.
+
 ## The image
 
 Use `cosign` 3 or later for the images: since cosign 3 the signature is stored as an OCI referrer in the new bundle format, which cosign 2 does not find ("no signatures found"). The blob bundles above verify with cosign 2.5 and 3.

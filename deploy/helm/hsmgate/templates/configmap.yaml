@@ -1,0 +1,18 @@
+{{- $soft := dict }}
+{{- range .Values.softToken.labels }}{{ $_ := set $soft . (printf "/etc/hsmgate/soft/%s" .) }}{{ end }}
+{{- $base := dict
+  "listen" "0.0.0.0:8443"
+  "tls" (dict "cert" "/etc/hsmgate/tls/tls.crt" "key" "/etc/hsmgate/tls/tls.key" "client_ca" "/etc/hsmgate/tls/ca.crt")
+  "admin_socket" "/run/hsmgate/admin.sock"
+  "audit" (dict "file" "/var/log/hsmgate/audit.log")
+  "tokens" (list (dict "name" .Values.softToken.name "type" "soft" "keys" $soft))
+  "keys" .Values.config.keys
+  "clients" .Values.config.clients }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "hsmgate.fullname" . }}
+  labels: {{- include "hsmgate.labels" . | nindent 4 }}
+data:
+  hsmgate.yaml: |
+{{ merge (deepCopy $base) (deepCopy .Values.config.extra) | toYaml | indent 4 }}
