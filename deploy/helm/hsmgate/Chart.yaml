@@ -10,4 +10,3 @@ home: https://github.com/zystem/hsmgate
 sources:
   - https://github.com/zystem/hsmgate
 keywords: [kms, encryption, hsm, transit]
-license: MIT
