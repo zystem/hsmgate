@@ -2,7 +2,12 @@
 
 ## Unreleased
 
+### Added
+- **`hsmgate dev`**: a throw-away service to try hsmgate in a minute with no hardware and nothing to prepare (a software token with a fresh key, a CA of its own, the certificate of the service and of a client `demo`, the keys `demo` and `demo-ctx`). It prints the commands to type (`hsmgate encrypt`/`decrypt` with the files it made). Without `-dir` everything is deleted at the stop; `-dir DIR` keeps it. Not for real keys.
+- **[docs/troubleshooting.md](docs/troubleshooting.md)**: what the client sees and what the service says at its start (message, meaning, what to do), for a container or a cluster, and for OpenBao.
+
 ### Changed
+- README: starts with what hsmgate is for (and is not for), a picture, the try-it path, a table of ways to install, a glossary and the documents by what the reader wants; the status moved to the end.
 - Helm chart: **the chart makes the TLS files itself** (a CA, the certificate of the service and a certificate per client in `tls.generate.clients`; made once, reused on upgrade, kept on uninstall) when `tls.existingSecret` is not set, so `helm install` needs no cert-manager and no prepared Secret; an optional Ingress that passes the TLS through (`ingress.enabled`, `ingress.host`); an example of connecting OpenBao (`examples/values-openbao.yaml`, `openbao-seal.hcl`); [`examples/cert-manager.yaml`](deploy/helm/hsmgate/examples/cert-manager.yaml) makes the TLS Secret (a CA of its own, the certificate of the service, a client certificate) and the README says how to use it, why the chart has no Ingress (a proxy that ends TLS hides the client certificate) and how to reach the service from outside (LoadBalancer, TLS passthrough).
 
 ## 0.7.1 — 2026-11-09

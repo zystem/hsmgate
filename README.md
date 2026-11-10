@@ -1,33 +1,85 @@
-# hsmgate
-
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/15821/badge)](https://www.bestpractices.dev/projects/15821)
 
-A small network service that holds no key material of its own and lets authenticated clients seal and open short secrets
-(data keys, the root key of another vault) under a master key that lives on a PKCS#11 token (HSM, smart card, software token for tests).
-A door in front of the token: who may ask, for which key, with which context, how often, and what is written down.
+**hsmgate keeps the master key of your secrets on a smart card or HSM and lets your applications use it over the network, only as far as a policy allows.**
 
-Status: **working service** (steps P0-P6 of the plan). Tried on: OpenBao (seal `transit` and `awskms`), `vault-kubernetes-kms`, the SmartCard-HSM, mTLS; see the "Verified" sections of [docs/transit-face.md](docs/transit-face.md). The plan is [docs/project-plan.md](docs/project-plan.md), the threat model is [docs/threat-model.md](docs/threat-model.md).
-What exists: the `ecies2` sealed format in Go ([internal/scheme/ecies](internal/scheme/ecies)), checked against test vectors
-([testdata/vectors/ecies2.json](testdata/vectors/ecies2.json), a test key: never use it).
-
-Decisions (P0): name `hsmgate`, language Go, licence MIT. First client: CiNim, through the Transit face ([docs/transit-face.md](docs/transit-face.md)); no own protocol. Etcd encryption through `vault-kubernetes-kms`; an optional second, **KMS-JSON face** speaks a subset of the JSON API of a widely implemented cloud key service, so that programs written for it can use hsmgate by changing their endpoint: `DeriveSharedSecret` (ECDH on the token), `Encrypt`, `Decrypt`, `ReEncrypt`, `GenerateDataKey`, `Sign`, `Verify`, `GenerateMac`, `VerifyMac`, `GenerateRandom`, `GetPublicKey`, `DescribeKey` ([docs/specs/kms-json.md](docs/specs/kms-json.md)). Checked against the real service, OpenBao (`seal "awskms"`) and, for signing and MAC, a SmartCard-HSM. Not affiliated with the makers of that service.
+Your applications and vaults (OpenBao, Kubernetes, your own code) need a key to seal their secrets, and that key should not sit in a file next to the data it protects.
+hsmgate is a small service in front of a PKCS#11 token (a SmartCard-HSM, any HSM with a PKCS#11 module, or a software token for tests). The key never leaves the token; clients send a short secret and get it back sealed, or sealed and get it opened.
+It is a door, not a vault: **who** may ask (a client certificate), for **which key**, with **which context**, **how often**, and what is **written down** (an audit line for every call, a refusal too).
 
 ```
-go test ./...
+ your application / OpenBao /          mTLS: the certificate        ┌──────────────────────────────┐
+ Kubernetes (etcd) / a script   ─────────────────────────────────▶ │ hsmgate: the policy, the rate, │ ───▶  token: card, HSM,
+   "seal this" / "open this"     ◀─────────────────────────────────  │ the audit line                │      or a software key (tests)
+                                  vault:v1:...  (the ciphertext)     └──────────────────────────────┘      (the private key stays there)
 ```
 
-## Quick start
+**Use it for**
+- **Auto-unseal of OpenBao** (`seal "transit"`): the key of the vault stays behind hsmgate. [Step by step, also for another cluster](deploy/helm/hsmgate/README.md#openbao-auto-unseal).
+- **Encryption of etcd in Kubernetes** through `vault-kubernetes-kms` ([the contract](docs/specs/kubernetes-kms-v2.md)) and **secrets in pods without Vault** ([guide](docs/guides/kubernetes-pod-secrets.md)).
+- **The master key of an application**: seal its data keys with a key that only the card can open (CiNim does).
+- Other clients of the AWS-KMS-, Google-Cloud-KMS- or Azure-style APIs that sign requests ([KMS-JSON, gRPC and REST faces](docs/specs/README.md)).
 
-(Requirements and the release build: [docs/building.md](docs/building.md). Verify a release before you run it: [docs/verifying-releases.md](docs/verifying-releases.md).)
+**Not for**: encrypting large data (it seals short secrets: a value is at most 8 KiB by default), a replacement for a key-management product with its own user interface, or a service with no machine to keep the token on (a card is one machine or VM with a reader; the Kubernetes chart uses a software token and is for tests and pilots).
 
+## Try it in a minute (no hardware, nothing to prepare)
+
+You need Go ([building.md](docs/building.md)). From a clone of this repository:
+
+```bash
+go run ./cmd/hsmgate dev
 ```
+
+It starts a throw-away service with a software token, a CA of its own and a client certificate, and prints what to type in another terminal:
+
+```bash
+export HSMGATE_ADDR=https://127.0.0.1:8443 HSMGATE_CA=... HSMGATE_CERT=... HSMGATE_KEYFILE=... HSMGATE_TRANSIT_KEY=demo   # as printed
+echo 'my secret' | hsmgate encrypt > sealed.txt     # vault:v1:...
+hsmgate decrypt < sealed.txt                        # my secret
+```
+
+Stop it with Ctrl-C: everything it made is deleted (`-dir DIR` keeps it). Without a client certificate the connection is refused; the audit log says who did what. **Not for real keys.**
+
+## Install for real
+
+| You have | Use | Token | Start here |
+|---|---|---|---|
+| A machine (or VM) and a SmartCard-HSM or another PKCS#11 token | the binary from a [release](https://github.com/zystem/hsmgate/releases) (verify it: [verifying-releases.md](docs/verifying-releases.md)) and the systemd unit in [deploy/](deploy/) | the card | [operations.md](docs/operations.md), [smartcard-hsm.md](docs/tokens/smartcard-hsm.md) |
+| Docker on that machine | the image `ghcr.io/zystem/hsmgate` ([compose.yaml](deploy/docker/compose.yaml)) | the card (a reader passed through) | [operations.md, "Running in Docker"](docs/operations.md) |
+| Kubernetes, for tests, development or a pilot | the Helm chart `oci://ghcr.io/zystem/charts/hsmgate`: `helm install` makes its own certificates | software (a key in a Secret: whoever reads the Secret has the key) | [the chart](deploy/helm/hsmgate/README.md) |
+| Only curiosity | `hsmgate dev` | software | above |
+
+The steps of a manual install with a card: `hsmgate ca setup` (the certificates: no openssl needed), `hsmgate check` (what the configuration means, no PIN needed), `hsmgate serve`, `hsmgate unlock` (the PIN goes in once and stays in memory).
+
+```bash
 go build -o hsmgate ./cmd/hsmgate
-cp deploy/hsmgate.example.yaml hsmgate.yaml    # edit: certificates, token, clients
-./hsmgate ca setup -config hsmgate.yaml -client demo   # the certificates at the paths of tls:, no openssl needed (docs/operations.md)
-./hsmgate check -config hsmgate.yaml           # lists key versions, holders, fingerprints; needs no PIN
+cp deploy/hsmgate.example.yaml hsmgate.yaml     # edit: the token, the keys, the clients
+./hsmgate ca setup -config hsmgate.yaml -client demo
+./hsmgate check -config hsmgate.yaml
 ./hsmgate serve -config hsmgate.yaml &
 ./hsmgate unlock -config hsmgate.yaml -token card
 ```
 
-Docs: **[specifications](docs/specs/README.md)**, [secrets in pods without Vault](docs/guides/kubernetes-pod-secrets.md), ([Transit](docs/specs/transit.md), [sealed format](docs/specs/ecies2.md), [Kubernetes KMS v2](docs/specs/kubernetes-kms-v2.md), [KMS-JSON](docs/specs/kms-json.md) and [how to connect to it](docs/guides/kms-json-clients.md); [OpenAPI](api/openapi.yaml)), [transit-face.md](docs/transit-face.md) (design and what was tried), [operations.md](docs/operations.md) (unlock, rotation, spare card, lost card), [threat-model.md](docs/threat-model.md), [architecture](docs/architecture.md), [security requirements](docs/security-requirements.md) and [assurance case](docs/assurance-case.md), [compliance](docs/compliance.md), [upgrading](docs/upgrading.md), [roadmap](docs/roadmap.md), [contributing](CONTRIBUTING.md), [governance](GOVERNANCE.md), [code of conduct](CODE_OF_CONDUCT.md),
-[tokens/smartcard-hsm.md](docs/tokens/smartcard-hsm.md), [project-plan.md](docs/project-plan.md). Deployment: [deploy/](deploy/) (systemd unit; Docker: `Dockerfile` in the root and [deploy/docker/compose.yaml](deploy/docker/compose.yaml), see [Running in Docker](docs/operations.md)). One card means one machine or VM with the reader, not a scheduler.
+## Words
+
+| Word | Means |
+|---|---|
+| **token** | the PKCS#11 device (card, HSM) or a software key that holds the private keys. Not an access token: clients are known by their certificates |
+| **key** | a named master key of the service (`demo`, `cinim-shard`); one or more **versions** (a rotation adds a version; old ciphertexts still open) |
+| **client** | whoever connects with a certificate; known by its CN, a URI name or the hash of the certificate, and allowed some operations on some keys |
+| **context** | a string bound into the ciphertext: it must be the same to open it (for example `k8s/shop/secret/field`); a key may require one, or have a fixed one |
+| **face** | an API the service speaks: Transit (the Vault/OpenBao one), and optional KMS-JSON, gRPC and REST ones |
+| **seal / open** | `encrypt` / `decrypt`; **rewrap** re-seals a ciphertext under the latest key version without showing the plaintext |
+| **unlock** | giving the card its PIN (once, over a local socket; the service never tries a refused PIN again) |
+
+## Documentation
+
+- **I want to know what it is and whether it fits:** [architecture](docs/architecture.md), [threat model](docs/threat-model.md), [compliance](docs/compliance.md), [roadmap](docs/roadmap.md).
+- **I install and run it:** [operations](docs/operations.md) (unlock, rotation, spare card, lost card, Docker), [the SmartCard-HSM](docs/tokens/smartcard-hsm.md), [the Helm chart](deploy/helm/hsmgate/README.md), [upgrading](docs/upgrading.md), [key management](docs/key-management.md), [verifying a release](docs/verifying-releases.md).
+- **It does not work:** [troubleshooting](docs/troubleshooting.md): the message, what it means, what to do.
+- **I connect a client:** [the Transit API](docs/specs/transit.md) ([OpenAPI](api/openapi.yaml)), [OpenBao](deploy/helm/hsmgate/README.md#openbao-auto-unseal), [Kubernetes KMS v2](docs/specs/kubernetes-kms-v2.md), [secrets in pods](docs/guides/kubernetes-pod-secrets.md), [the KMS-JSON face](docs/guides/kms-json-clients.md), [all the specifications](docs/specs/README.md), [the sealed format](docs/specs/ecies2.md).
+- **I check how it is made:** [security requirements](docs/security-requirements.md), [assurance case](docs/assurance-case.md), [security policies](docs/security-policies.md), [design notes and what was tried](docs/transit-face.md), [the plan](docs/project-plan.md).
+- **I contribute:** [CONTRIBUTING](CONTRIBUTING.md), [building](docs/building.md), [releasing](docs/releasing.md), [governance](GOVERNANCE.md), [code of conduct](CODE_OF_CONDUCT.md), [security reports](SECURITY.md).
+
+## Status
+
+A working service. Tried on: OpenBao (`seal "transit"` and `awskms`), `vault-kubernetes-kms`, the SmartCard-HSM, mTLS; the "Verified" sections of [docs/transit-face.md](docs/transit-face.md) say exactly what was run and what was not. The Helm chart was checked by rendering and by running the image with its files; not yet in a long-lived cluster. The sealed format `ecies2` (and `ecies3`, `ecies4`) is specified with test vectors ([testdata/vectors/ecies2.json](testdata/vectors/ecies2.json): a test key, never use it). Releases are signed and come with a provenance attestation, an SBOM and a VEX document ([CHANGELOG](CHANGELOG.md)). Licence: MIT.

@@ -1,4 +1,4 @@
-// hsmgate: a policy-checked network door in front of a key token. Subcommands: serve, check, unlock.
+// hsmgate: a policy-checked network door in front of a key token. Subcommands: serve, check, unlock, dev (a throw-away service to try it), ca, encrypt, decrypt, ping, version.
 package main
 
 import (
@@ -54,12 +54,21 @@ func main() {
 		c.Close()
 		return
 	}
+	if len(os.Args) >= 2 && os.Args[1] == "dev" {
+		if err := runDev(os.Args[2:]); err != nil {
+			if errors.Is(err, flag.ErrHelp) {
+				return
+			}
+			die(err)
+		}
+		return
+	}
 	if len(os.Args) == 2 && os.Args[1] == "version" {
 		fmt.Println("hsmgate", version)
 		return
 	}
 	if len(os.Args) < 2 || (os.Args[1] != "serve" && os.Args[1] != "check" && os.Args[1] != "unlock") {
-		fmt.Fprintln(os.Stderr, "usage: hsmgate serve|check|unlock|version|ping|encrypt|decrypt|ca -config hsmgate.yaml [-token NAME] [-pin-stdin]")
+		fmt.Fprintln(os.Stderr, "usage: hsmgate serve|check|unlock|version|ping|encrypt|decrypt|ca|dev -config hsmgate.yaml [-token NAME] [-pin-stdin]")
 		os.Exit(2)
 	}
 	fs := flag.NewFlagSet(os.Args[1], flag.ExitOnError)
@@ -85,6 +94,14 @@ func main() {
 		fmt.Println("configuration ok")
 		return
 	}
+	if err := serve(s, cfg, *path, nil); err != nil {
+		die(err)
+	}
+}
+
+// serve runs the service until it is told to stop (SIGINT, SIGTERM): the admin socket, the reload on SIGHUP, the listener. It returns nil after a requested stop, once the
+// tokens are logged out. listening, when not nil, is called with the address as soon as the listener is open.
+func serve(s *server.Server, cfg *config.Config, path string, listening func(net.Addr)) error {
 	if cfg.AdminSocket != "" {
 		go func() { die(s.ServeAdmin(cfg.AdminSocket)) }()
 	}
@@ -92,7 +109,7 @@ func main() {
 	signal.Notify(hup, syscall.SIGHUP)
 	go func() {
 		for range hup {
-			next, err := config.Load(*path)
+			next, err := config.Load(path)
 			if err == nil {
 				err = s.Reload(next)
 			}
@@ -114,15 +131,18 @@ func main() {
 	}()
 	l, err := net.Listen("tcp", cfg.Listen)
 	if err != nil {
-		die(err)
+		return err
 	}
 	fmt.Fprintln(os.Stderr, "hsmgate: listening on", l.Addr())
-	err = s.Serve(l)
-	if errors.Is(err, http.ErrServerClosed) { // a requested stop is not a failure: wait for the tokens to be closed, exit 0
-		<-stopped
-		return
+	if listening != nil {
+		listening(l.Addr())
 	}
-	die(err)
+	err = s.Serve(l)
+	if errors.Is(err, http.ErrServerClosed) { // a requested stop is not a failure: wait for the tokens to be closed
+		<-stopped
+		return nil
+	}
+	return err
 }
 
 // unlock hands a PIN to the running service over its admin socket. The PIN is read from the terminal without echo (or from standard input) and is never an argument.
