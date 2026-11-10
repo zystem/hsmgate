@@ -1,0 +1,29 @@
+hsmgate {{ .Chart.AppVersion }} is installed as "{{ .Release.Name }}" in {{ .Release.Namespace }}, with a software token (the keys are files in a Secret: for tests, development and pilots).
+
+Where it is:
+  in the cluster   https://{{ include "hsmgate.fullname" . }}.{{ .Release.Namespace }}.svc:{{ .Values.service.port }}
+{{- if .Values.ingress.enabled }}
+  from outside     https://{{ .Values.ingress.host }}   (an Ingress that passes the TLS through: the controller must allow it)
+{{- end }}
+{{- if eq .Values.service.type "LoadBalancer" }}
+  from outside     the address of the Service: kubectl -n {{ .Release.Namespace }} get svc {{ include "hsmgate.fullname" . }}
+{{- end }}
+
+The service answers only a client with a certificate of its CA; the client is known by the CN of the certificate (identity: {cn: ...} in config.clients).
+{{- if .Values.tls.existingSecret }}
+TLS: your Secret "{{ .Values.tls.existingSecret }}" (the CA of the clients is its ca.crt).
+{{- else }}
+The certificates were made by the chart, once, and are kept on uninstall. For each client:
+{{- range .Values.tls.generate.clients }}
+  kubectl -n {{ $.Release.Namespace }} get secret {{ include "hsmgate.fullname" $ }}-client-{{ . }} -o jsonpath='{.data.tls\.crt}' | base64 -d > {{ . }}.pem    # likewise tls.key, ca.crt
+{{- end }}
+A client that is not in tls.generate.clients needs a certificate too (and an entry in config.clients with the same CN). They are valid {{ .Values.tls.generate.days }} days; nothing renews them (README, "TLS").
+{{- end }}
+
+Check that it answers (a connection to the port with the certificate of the pod):
+  helm -n {{ .Release.Namespace }} test {{ .Release.Name }}
+
+BACK UP the Secret of the soft keys: kubectl -n {{ .Release.Namespace }} get secret {{ include "hsmgate.softSecret" . }} -o yaml > hsmgate-soft-keys.yaml
+What clients sealed under these keys cannot be opened without it. Keep that file as you would a private key.
+
+OpenBao auto-unseal, other clients, renewal: {{ .Chart.Home }}/tree/main/deploy/helm/hsmgate
