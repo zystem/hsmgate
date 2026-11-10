@@ -23,7 +23,8 @@ softToken:
 
 # --- TLS --------------------------------------------------------------------------------------------------------------------------------------------
 # A Secret with tls.crt and tls.key (the service's certificate; the names a client connects to must be in it) and ca.crt (the CA that signed the certificates
-# of the clients: only those get past the handshake). A cert-manager Certificate with a `ca.crt` in its Secret has exactly this shape.
+# of the clients: only those get past the handshake). A cert-manager Certificate from a CA issuer has exactly this shape: examples/cert-manager.yaml makes the Secret
+# (and a client certificate); see the README, "The TLS Secret".
 tls:
   existingSecret: ""     # required
 

@@ -24,7 +24,20 @@ kubectl -n hsmgate create secret generic hsmgate-tls \
   --from-file=tls.crt=server.pem --from-file=tls.key=server.key --from-file=ca.crt=clients-ca.pem
 ```
 
-A cert-manager `Certificate` with `secretName: hsmgate-tls` and a CA issuer makes a Secret of the same shape. The built-in CA of hsmgate (`hsmgate ca setup`, [operations.md](../../../docs/operations.md)) makes the files too.
+**From cert-manager:** [`examples/cert-manager.yaml`](examples/cert-manager.yaml) makes all of it: a CA of its own, the certificate of the service (the Secret `hsmgate-tls` with `tls.crt`, `tls.key` and `ca.crt`, the three that the chart wants) and the certificate of one client (`demo-client-tls`, for the application that calls hsmgate; its `commonName` is the `identity: {cn: ...}` of a client in `config.extra.clients`). The Secret must exist before the pod can start, so apply it first:
+
+```bash
+kubectl -n hsmgate apply -f examples/cert-manager.yaml
+kubectl -n hsmgate wait certificate/hsmgate-tls certificate/demo-client --for=condition=Ready --timeout=2m
+```
+
+An `Issuer` that already exists in your cluster can take the place of the CA of the example, if it is a CA issuer: then `ca.crt` of the Secret is that CA, and it is the CA of the clients too. With an ACME issuer (Let's Encrypt) `ca.crt` is not what clients are signed by, and a client certificate from it would not do: the clients of hsmgate need a CA of your own. The built-in CA of hsmgate (`hsmgate ca setup`, [operations.md](../../../docs/operations.md)) makes the files too.
+
+cert-manager renews the certificate in the Secret, but nothing tells the pod that the files changed: restart it after a renewal (`kubectl -n hsmgate rollout restart deploy/hsmgate`), or use a tool that does it for you (such as Reloader).
+
+### Reaching it from outside the cluster
+
+The chart has no Ingress, on purpose: hsmgate knows a client by the certificate it presents in the handshake, so a proxy that ends TLS hides the client from it (and the policy has nothing to decide on). The ways that keep the handshake end to end: a Service of type `LoadBalancer` or `NodePort` (`service.type`), an Ingress with TLS passthrough (ingress-nginx: the controller started with `--enable-ssl-passthrough` and the annotation `nginx.ingress.kubernetes.io/ssl-passthrough: "true"` on an Ingress made by you), or a Gateway API `TLSRoute` with `mode: Passthrough`. For a client in the cluster the Service `hsmgate.<namespace>.svc:8443` is enough.
 
 ### The keys and the clients
 
