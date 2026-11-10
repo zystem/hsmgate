@@ -1,0 +1,24 @@
+# hsmgate.minimal.yaml: the smallest working configuration: a software token, one key, one client. For trying it out and for tests (the key is a file).
+# For a card see hsmgate.example.yaml; every setting and its default: docs/configuration.md. `hsmgate dev` makes all of this, files included, in one command.
+#
+# The files it names (make them with: hsmgate ca setup -config hsmgate.yaml -client demo; the soft key: head -c32 /dev/urandom | xxd -p -c64 > soft-key.hex; chmod 400 soft-key.hex):
+listen: 127.0.0.1:8443
+tls:
+  cert: /etc/hsmgate/server.pem          # the certificate of the service
+  key: /etc/hsmgate/server.key
+  client_ca: /etc/hsmgate/ca/ca.pem      # only certificates from this CA get past the handshake
+audit: {file: /var/log/hsmgate/audit.log}
+
+tokens:
+  - {name: soft, type: soft, keys: {m1: /etc/hsmgate/soft-key.hex}}    # label -> the file with the private key (64 hex digits)
+
+keys:
+  demo:
+    versions: [{token: soft, label: m1}]
+    aad: {mode: fixed}                   # no context: the simplest; use `mode: context` with `allow: ["myapp/"]` to bind a ciphertext to where it belongs
+
+clients:
+  - name: demo
+    identity: {cn: demo}                 # the common name of the client certificate
+    keys:
+      demo: {ops: [encrypt, decrypt], per_minute: 120}   # what it may do with the key, and how often (no per_minute: no limit)
