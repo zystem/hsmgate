@@ -52,7 +52,7 @@ The steps of a manual install with a card: `hsmgate ca setup` (the certificates:
 
 ```bash
 go build -o hsmgate ./cmd/hsmgate
-cp deploy/hsmgate.example.yaml hsmgate.yaml     # edit: the token, the keys, the clients
+cp deploy/hsmgate.example.yaml hsmgate.yaml     # edit: the token, the keys, the clients (smaller: deploy/hsmgate.minimal.yaml; every setting: docs/configuration.md)
 ./hsmgate ca setup -config hsmgate.yaml -client demo
 ./hsmgate check -config hsmgate.yaml
 ./hsmgate serve -config hsmgate.yaml &
@@ -73,10 +73,13 @@ cp deploy/hsmgate.example.yaml hsmgate.yaml     # edit: the token, the keys, the
 
 ## Documentation
 
+The full list by what you want to do: [docs/README.md](docs/README.md).
+
 - **I want to know what it is and whether it fits:** [architecture](docs/architecture.md), [threat model](docs/threat-model.md), [compliance](docs/compliance.md), [roadmap](docs/roadmap.md).
 - **I install and run it:** [operations](docs/operations.md) (unlock, rotation, spare card, lost card, Docker), [the SmartCard-HSM](docs/tokens/smartcard-hsm.md), [the Helm chart](deploy/helm/hsmgate/README.md), [upgrading](docs/upgrading.md), [key management](docs/key-management.md), [verifying a release](docs/verifying-releases.md).
+- **I set it up:** [every setting and its default](docs/configuration.md), the smallest file [deploy/hsmgate.minimal.yaml](deploy/hsmgate.minimal.yaml).
 - **It does not work:** [troubleshooting](docs/troubleshooting.md): the message, what it means, what to do.
-- **I connect a client:** [the Transit API](docs/specs/transit.md) ([OpenAPI](api/openapi.yaml)), [OpenBao](deploy/helm/hsmgate/README.md#openbao-auto-unseal), [Kubernetes KMS v2](docs/specs/kubernetes-kms-v2.md), [secrets in pods](docs/guides/kubernetes-pod-secrets.md), [the KMS-JSON face](docs/guides/kms-json-clients.md), [all the specifications](docs/specs/README.md), [the sealed format](docs/specs/ecies2.md).
+- **I connect a client:** [recipes: the command line, `curl`, OpenBao, Kubernetes](docs/guides/clients.md), [the Transit API](docs/specs/transit.md) ([OpenAPI](api/openapi.yaml)), [OpenBao](deploy/helm/hsmgate/README.md#openbao-auto-unseal), [Kubernetes KMS v2](docs/specs/kubernetes-kms-v2.md), [secrets in pods](docs/guides/kubernetes-pod-secrets.md), [the KMS-JSON face](docs/guides/kms-json-clients.md), [all the specifications](docs/specs/README.md), [the sealed format](docs/specs/ecies2.md).
 - **I check how it is made:** [security requirements](docs/security-requirements.md), [assurance case](docs/assurance-case.md), [security policies](docs/security-policies.md), [design notes and what was tried](docs/transit-face.md), [the plan](docs/project-plan.md).
 - **I contribute:** [CONTRIBUTING](CONTRIBUTING.md), [building](docs/building.md), [releasing](docs/releasing.md), [governance](GOVERNANCE.md), [code of conduct](CODE_OF_CONDUCT.md), [security reports](SECURITY.md).
 
