@@ -74,18 +74,38 @@ config:
 
 ### OpenBao (auto-unseal)
 
-OpenBao unseals itself through hsmgate with `seal "transit"`: the key of OpenBao stays behind hsmgate, OpenBao holds only what hsmgate sealed. Three pieces, all in [`examples/`](examples/):
+OpenBao unseals itself through hsmgate with `seal "transit"`: the key stays behind hsmgate, OpenBao holds only what hsmgate sealed. The files are in [`examples/`](examples/): [`values-openbao.yaml`](examples/values-openbao.yaml) (for this chart: the key `openbao-unseal`, with a fixed context because the seal sends none; the client `openbao`, `encrypt` and `decrypt` only; its certificate), [`openbao-seal.hcl`](examples/openbao-seal.hcl) (the stanza) and [`openbao-helm-values.yaml`](examples/openbao-helm-values.yaml) (the values of the OpenBao chart). Soft keys live in a Secret of the cluster of hsmgate: **back that Secret up** (`<release>-soft`), what OpenBao sealed cannot be opened without it.
 
-1. [`values-openbao.yaml`](examples/values-openbao.yaml): the key `openbao-unseal` (a fixed context: the seal sends none), the client `openbao` (by the CN of its certificate; `encrypt` and `decrypt` only) and its certificate (`tls.generate.clients: [openbao]`: the Secret `<release>-client-openbao`).
-2. The Secret of the client certificate (`<release>-client-openbao`; with cert-manager, `openbao-client-tls` of [`cert-manager.yaml`](examples/cert-manager.yaml)): mount it into the OpenBao pod, for example at `/openbao/tls`.
-3. [`openbao-seal.hcl`](examples/openbao-seal.hcl): the `seal "transit"` stanza (`address = "https://hsmgate.hsmgate.svc:8443"`, `key_name = "openbao-unseal"`, `tls_ca_cert`, `tls_client_cert`, `tls_client_key`).
+**In the same cluster:** install this chart with `-f examples/values-openbao.yaml`, mount the Secret `<release>-client-openbao` into OpenBao and use `address = "https://hsmgate.<namespace>.svc:8443"` in the stanza.
 
-```bash
-helm install hsmgate oci://ghcr.io/zystem/charts/hsmgate --version 0.7.1 -n hsmgate \
-  -f examples/values-openbao.yaml
-```
+**In another cluster** (hsmgate in A, OpenBao in B):
 
-Then `bao operator init` (recovery keys, not unseal keys) and restart OpenBao: it opens by itself. This is the combination that was run against OpenBao v2.6.1 over mTLS ([transit-face.md](../../../docs/transit-face.md)); the manifests of this chart with an OpenBao in a cluster were not run. Keep the soft keys of hsmgate backed up: what OpenBao sealed cannot be opened without them.
+1. *In A.* A name that resolves to the ingress controller of A is needed (say `hsmgate.example.com`); the chart puts it into the certificate of the service. The controller must pass the TLS through (ingress-nginx: `--enable-ssl-passthrough`).
+
+   ```bash
+   helm install hsmgate oci://ghcr.io/zystem/charts/hsmgate --version 0.7.1 -n hsmgate --create-namespace \
+     -f examples/values-openbao.yaml --set ingress.enabled=true --set ingress.host=hsmgate.example.com
+   ```
+
+2. *Copy the certificate of the client to B.* The Secret `hsmgate-client-openbao` holds `tls.crt`, `tls.key` and `ca.crt`:
+
+   ```bash
+   kubectl --context B create namespace openbao
+   kubectl --context A -n hsmgate get secret hsmgate-client-openbao -o json \
+     | jq 'del(.metadata.namespace,.metadata.resourceVersion,.metadata.uid,.metadata.creationTimestamp,.metadata.annotations,.metadata.labels,.metadata.managedFields)' \
+     | kubectl --context B -n openbao apply -f -
+   ```
+
+3. *Install OpenBao in B* with [`openbao-helm-values.yaml`](examples/openbao-helm-values.yaml) (set `address` to your host): the chart mounts the Secret at `/openbao/userconfig/hsmgate-client-openbao/`, which is what the stanza names.
+
+   ```bash
+   helm repo add openbao https://openbao.github.io/openbao-helm
+   helm --kube-context B install openbao openbao/openbao -n openbao -f examples/openbao-helm-values.yaml
+   ```
+
+4. *Initialise once:* `kubectl --context B -n openbao exec openbao-0 -- bao operator init -recovery-shares=1 -recovery-threshold=1` (keep the recovery key and the root token), then delete the pod: it starts unsealed. In A the audit of hsmgate shows `encrypt` and `decrypt` by the client `openbao`.
+
+What was run is OpenBao v2.6.1 with this seal over mTLS ([transit-face.md](../../../docs/transit-face.md)); this procedure across two clusters was not run, only rendered (`helm template` of both charts). The OpenBao chart renders with these values and mounts the Secret at the path above.
 
 ### The soft keys
 
