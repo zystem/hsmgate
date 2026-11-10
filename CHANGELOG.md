@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.7.2 — 2026-11-10
 
 ### Added
 - **[docs/audit-log.md](docs/audit-log.md)**: the audit line field by field, every result word with its class in the metrics, questions the log answers (`jq`), what to watch, rotation (`copytruncate`; the file is not reopened on SIGHUP) and shipping. Tests keep the fields, the result classes and the metric names equal to the code.
