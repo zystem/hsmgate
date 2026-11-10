@@ -37,7 +37,13 @@ cert-manager renews the certificate in the Secret, but nothing tells the pod tha
 
 ### Reaching it from outside the cluster
 
-The chart has no Ingress, on purpose: hsmgate knows a client by the certificate it presents in the handshake, so a proxy that ends TLS hides the client from it (and the policy has nothing to decide on). The ways that keep the handshake end to end: a Service of type `LoadBalancer` or `NodePort` (`service.type`), an Ingress with TLS passthrough (ingress-nginx: the controller started with `--enable-ssl-passthrough` and the annotation `nginx.ingress.kubernetes.io/ssl-passthrough: "true"` on an Ingress made by you), or a Gateway API `TLSRoute` with `mode: Passthrough`. For a client in the cluster the Service `hsmgate.<namespace>.svc:8443` is enough.
+hsmgate knows a client by the certificate it presents in the handshake, so a proxy that ends TLS hides the client from it (and the policy has nothing to decide on). Everything here keeps the handshake end to end:
+
+- **Ingress with TLS passthrough:** `--set ingress.enabled=true --set ingress.host=hsmgate.example.com`. For ingress-nginx the chart adds `ssl-passthrough: "true"`; the controller must be started with `--enable-ssl-passthrough` (it is off by default), and the host must be one of the names in the certificate of the service (add it to `dnsNames` in the cert-manager example). For another controller set `ingress.className` and `ingress.annotations` to what it needs. The Ingress is not an HTTP router here: it only picks the pod by the name in the handshake (SNI).
+- **A Service of type `LoadBalancer` or `NodePort`:** `service.type`.
+- A Gateway API `TLSRoute` with `mode: Passthrough` (not made by the chart).
+
+For a client in the cluster the Service `hsmgate.<namespace>.svc:8443` is enough. With `networkPolicy.enabled` add the namespace of the ingress controller to `networkPolicy.from`.
 
 ### The keys and the clients
 

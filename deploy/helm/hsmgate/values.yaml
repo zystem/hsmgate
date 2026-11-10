@@ -59,6 +59,16 @@ service:
   port: 8443
   annotations: {}
 
+# An Ingress that PASSES THE TLS THROUGH to the pod (hsmgate decides by the certificate the client presents in the handshake, so a controller that ends TLS
+# would hide the client). Needs a controller that can pass through: ingress-nginx started with --enable-ssl-passthrough (the chart adds the annotation for
+# className "nginx"); for another controller put what it needs in `annotations`, or use a Service of type LoadBalancer instead. The host must be one of the
+# names in the certificate of the service (tls.existingSecret). With networkPolicy.enabled, add the namespace of the controller to networkPolicy.from.
+ingress:
+  enabled: false
+  className: nginx
+  host: ""               # e.g. hsmgate.example.com (required when enabled)
+  annotations: {}
+
 # Only the listed sources may reach the port; an empty list allows every pod of the cluster (the service answers only to a client certificate anyway).
 networkPolicy:
   enabled: false
