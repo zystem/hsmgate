@@ -22,10 +22,18 @@ softToken:
   labels: [m1]
 
 # --- TLS --------------------------------------------------------------------------------------------------------------------------------------------
-# A Secret with tls.crt and tls.key (the service's certificate; the names a client connects to must be in it) and ca.crt (the CA that signed the certificates
-# of the clients: only those get past the handshake). A cert-manager Certificate with a `ca.crt` in its Secret has exactly this shape.
+# The service answers only clients with a certificate of its CA (the identity of a client is the CN of its certificate). Two ways to have the files:
+#  1. (the default) the chart makes a CA, the certificate of the service and the certificates of the clients named below, once, and keeps them (see generate).
+#  2. a Secret of yours: existingSecret with tls.crt and tls.key (the certificate of the service; the names clients connect to must be in it) and ca.crt (the CA
+#     that signed the certificates of the clients). A cert-manager Certificate from a CA issuer has exactly this shape: examples/cert-manager.yaml.
 tls:
-  existingSecret: ""     # required
+  existingSecret: ""
+  generate:
+    enabled: true
+    caDays: 3650
+    days: 730              # the service and the clients; nothing renews them: see the README ("Renewal")
+    clients: [demo]        # the Secret <fullname>-client-<name> (tls.crt, tls.key, ca.crt) for each; the CN is the name (identity: {cn: ...} in clients below)
+    extraNames: []         # more names for the certificate of the service (ingress.host is added by itself)
 
 # --- the configuration (hsmgate.yaml) ------------------------------------------------------------------------------------------------------------------
 # listen, tls, admin_socket, audit and the soft token are set by the chart. Here: the keys, the clients and anything else of docs/ (kmsjson, kmsgrpc, kmsrest,
@@ -56,6 +64,16 @@ audit:
 service:
   type: ClusterIP
   port: 8443
+  annotations: {}
+
+# An Ingress that PASSES THE TLS THROUGH to the pod (hsmgate decides by the certificate the client presents in the handshake, so a controller that ends TLS
+# would hide the client). Needs a controller that can pass through: ingress-nginx started with --enable-ssl-passthrough (the chart adds the annotation for
+# className "nginx"); for another controller put what it needs in `annotations`, or use a Service of type LoadBalancer instead. The host must be one of the
+# names in the certificate of the service (the chart adds it when it makes the certificate). With networkPolicy.enabled, add the namespace of the controller to networkPolicy.from.
+ingress:
+  enabled: false
+  className: nginx
+  host: ""               # e.g. hsmgate.example.com (required when enabled)
   annotations: {}
 
 # Only the listed sources may reach the port; an empty list allows every pod of the cluster (the service answers only to a client certificate anyway).

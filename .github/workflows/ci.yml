@@ -183,13 +183,14 @@ jobs:
       - name: Lint and render
         run: |
           c=deploy/helm/hsmgate
-          helm lint --strict "$c" --set tls.existingSecret=hsmgate-tls
-          ! helm template t "$c" 2>/dev/null            # the TLS secret is required
-          for args in "" \
-            "--set audit.persistence.enabled=true --set networkPolicy.enabled=true" \
+          helm lint --strict "$c"
+          ! helm template t "$c" --set tls.generate.enabled=false 2>/dev/null     # no TLS Secret and none made: refused
+          ! helm template t "$c" --set ingress.enabled=true 2>/dev/null           # the host of the Ingress is required
+          for args in "" "--set tls.existingSecret=hsmgate-tls" \
+            "--set audit.persistence.enabled=true --set networkPolicy.enabled=true --set ingress.enabled=true --set ingress.host=hsmgate.example.com" \
             "--set softToken.generate=false --set softToken.existingSecret=mine --set image.digest=sha256:0000000000000000000000000000000000000000000000000000000000000000"; do
             # shellcheck disable=SC2086
-            helm template t "$c" --set tls.existingSecret=hsmgate-tls $args | /tmp/kubeconform -strict -summary -kubernetes-version 1.30.0 -
+            helm template t "$c" $args | /tmp/kubeconform -strict -summary -kubernetes-version 1.30.0 -
           done
 
   image:

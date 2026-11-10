@@ -1,0 +1,79 @@
+{{- if and (not .Values.tls.existingSecret) .Values.tls.generate.enabled }}
+{{- /*
+  The CA, the certificate of the service and the certificates of the clients are made here, ONCE: what exists in the cluster is reused (lookup), so an upgrade
+  does not change them, and the Secrets carry helm.sh/resource-policy: keep (a client that holds a certificate keeps working after a reinstall).
+  All of it is in one file because the CA is made (or read) once and signs everything below.
+*/}}
+{{- $fullname := include "hsmgate.fullname" . }}
+{{- $ns := .Release.Namespace }}
+{{- $g := .Values.tls.generate }}
+{{- $caName := printf "%s-ca" $fullname }}
+{{- $ca := dict }}
+{{- $found := lookup "v1" "Secret" $ns $caName }}
+{{- if $found }}
+{{- $ca = buildCustomCert (index $found.data "ca.crt") (index $found.data "ca.key") }}
+{{- else }}
+{{- $ca = genCA "hsmgate-ca" (int $g.caDays) }}
+{{- end }}
+{{- $names := list $fullname (printf "%s.%s" $fullname $ns) (printf "%s.%s.svc" $fullname $ns) (printf "%s.%s.svc.cluster.local" $fullname $ns) "localhost" }}
+{{- if .Values.ingress.host }}{{ $names = append $names .Values.ingress.host }}{{ end }}
+{{- $names = concat $names ($g.extraNames | default list) }}
+{{- $tlsName := printf "%s-tls" $fullname }}
+{{- $tlsFound := lookup "v1" "Secret" $ns $tlsName }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $caName }}
+  labels: {{- include "hsmgate.labels" . | nindent 4 }}
+  annotations:
+    # the key of the CA signs the clients that the service accepts: keep it, and keep it away from the pods (nothing mounts this Secret)
+    helm.sh/resource-policy: keep
+type: Opaque
+data:
+  ca.crt: {{ $ca.Cert | b64enc }}
+  ca.key: {{ $ca.Key | b64enc }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $tlsName }}
+  labels: {{- include "hsmgate.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+type: kubernetes.io/tls
+data:
+  {{- if $tlsFound }}
+  tls.crt: {{ index $tlsFound.data "tls.crt" }}
+  tls.key: {{ index $tlsFound.data "tls.key" }}
+  {{- else }}
+  {{- $cert := genSignedCert $fullname nil $names (int $g.days) $ca }}
+  tls.crt: {{ $cert.Cert | b64enc }}
+  tls.key: {{ $cert.Key | b64enc }}
+  {{- end }}
+  ca.crt: {{ $ca.Cert | b64enc }}
+{{- range $g.clients }}
+{{- $cn := . }}
+{{- $cName := printf "%s-client-%s" $fullname $cn }}
+{{- $cFound := lookup "v1" "Secret" $ns $cName }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $cName }}
+  labels: {{- include "hsmgate.labels" $ | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+type: kubernetes.io/tls
+data:
+  {{- if $cFound }}
+  tls.crt: {{ index $cFound.data "tls.crt" }}
+  tls.key: {{ index $cFound.data "tls.key" }}
+  {{- else }}
+  {{- $c := genSignedCert $cn nil nil (int $g.days) $ca }}
+  tls.crt: {{ $c.Cert | b64enc }}
+  tls.key: {{ $c.Key | b64enc }}
+  {{- end }}
+  ca.crt: {{ $ca.Cert | b64enc }}
+{{- end }}
+{{- end }}

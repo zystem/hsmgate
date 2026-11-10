@@ -1,0 +1,18 @@
+# helm install hsmgate ... -f values-openbao.yaml   (the chart makes the certificate of the client `openbao`; for another cluster add --set ingress.enabled=true --set ingress.host=...)
+# One key for the auto-unseal of OpenBao and one client for it. `aad: fixed`: OpenBao's seal sends no context, so the key has a fixed one.
+# The client is known by the CN of its certificate (the Certificate "openbao-client" of cert-manager.yaml has commonName openbao).
+# It needs encrypt and decrypt only. The list of clients replaces the default one; the default key `demo` is removed with `demo: null`.
+tls:
+  generate:
+    clients: [openbao]
+config:
+  keys:
+    demo: null
+    openbao-unseal:
+      versions: [{token: soft, label: m1}]
+      aad: {mode: fixed}
+  clients:
+    - name: openbao
+      identity: {cn: openbao}
+      keys:
+        openbao-unseal: {ops: [encrypt, decrypt], per_minute: 60}

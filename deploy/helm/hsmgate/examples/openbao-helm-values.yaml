@@ -1,0 +1,29 @@
+# Values for the OpenBao chart (https://openbao.github.io/openbao-helm) in the cluster of OpenBao: auto-unseal through hsmgate in another cluster.
+#   kubectl create namespace openbao   # and copy the Secret of the client certificate into it (README, "OpenBao in another cluster")
+#   helm repo add openbao https://openbao.github.io/openbao-helm
+#   helm install openbao openbao/openbao -n openbao -f openbao-helm-values.yaml
+# `config` replaces the one of the chart: the listener and the storage below are the minimum for one pod (no TLS on 8200 here: a test setup).
+server:
+  extraVolumes:
+    - type: secret
+      name: hsmgate-client-openbao       # mounted at /openbao/userconfig/hsmgate-client-openbao/
+  standalone:
+    enabled: true
+    config: |
+      ui = true
+      listener "tcp" {
+        tls_disable     = 1
+        address         = "[::]:8200"
+        cluster_address = "[::]:8201"
+      }
+      storage "file" {
+        path = "/openbao/data"
+      }
+      seal "transit" {
+        address         = "https://hsmgate.example.com"
+        mount_path      = "transit/"
+        key_name        = "openbao-unseal"
+        tls_ca_cert     = "/openbao/userconfig/hsmgate-client-openbao/ca.crt"
+        tls_client_cert = "/openbao/userconfig/hsmgate-client-openbao/tls.crt"
+        tls_client_key  = "/openbao/userconfig/hsmgate-client-openbao/tls.key"
+      }

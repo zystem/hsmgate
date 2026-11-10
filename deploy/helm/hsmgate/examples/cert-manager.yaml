@@ -1,0 +1,70 @@
+# The TLS Secret of the chart made by cert-manager: a CA of its own, the certificate of the service and the certificates of two clients (demo, openbao).
+# Apply it in the namespace of the release BEFORE helm install (the pod does not start without the Secret):
+#   kubectl -n hsmgate apply -f cert-manager.yaml
+#   kubectl -n hsmgate wait certificate/hsmgate-tls certificate/demo-client certificate/openbao-client --for=condition=Ready
+#   helm install hsmgate ... --set tls.existingSecret=hsmgate-tls
+# Needs cert-manager (cert-manager.io/v1). The release is called "hsmgate" and the namespace "hsmgate" here: change the names in dnsNames otherwise
+# (the service is <fullname>.<namespace>.svc).
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata: {name: hsmgate-selfsigned}
+spec: {selfSigned: {}}
+---
+# the CA: it signs the certificate of the service and the certificates of the clients
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata: {name: hsmgate-ca}
+spec:
+  isCA: true
+  commonName: hsmgate-ca
+  secretName: hsmgate-ca
+  duration: 87600h        # ten years; the CA is not renewed by a rotation of the leaves
+  privateKey: {algorithm: ECDSA, size: 256}
+  issuerRef: {name: hsmgate-selfsigned, kind: Issuer}
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata: {name: hsmgate-ca}
+spec: {ca: {secretName: hsmgate-ca}}
+---
+# the service: the Secret hsmgate-tls has tls.crt, tls.key and ca.crt (the CA above), which is what tls.existingSecret wants
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata: {name: hsmgate-tls}
+spec:
+  secretName: hsmgate-tls
+  commonName: hsmgate
+  dnsNames: [hsmgate, hsmgate.hsmgate, hsmgate.hsmgate.svc, hsmgate.hsmgate.svc.cluster.local]
+  usages: [digital signature, key encipherment, server auth]
+  duration: 8760h
+  renewBefore: 720h
+  privateKey: {algorithm: ECDSA, size: 256, rotationPolicy: Always}
+  issuerRef: {name: hsmgate-ca, kind: Issuer}
+---
+# a client: its commonName is the identity that `clients:` of the configuration names (identity: {cn: demo}).
+# The Secret demo-client-tls (tls.crt, tls.key, ca.crt) goes to the application that calls hsmgate.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata: {name: demo-client}
+spec:
+  secretName: demo-client-tls
+  commonName: demo
+  usages: [digital signature, key encipherment, client auth]
+  duration: 8760h
+  renewBefore: 720h
+  privateKey: {algorithm: ECDSA, size: 256, rotationPolicy: Always}
+  issuerRef: {name: hsmgate-ca, kind: Issuer}
+---
+# a second client, for OpenBao (see openbao-seal.hcl and values-openbao.yaml): the Secret openbao-client-tls goes to the OpenBao pod
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata: {name: openbao-client}
+spec:
+  secretName: openbao-client-tls
+  commonName: openbao
+  usages: [digital signature, key encipherment, client auth]
+  duration: 8760h
+  renewBefore: 720h
+  privateKey: {algorithm: ECDSA, size: 256, rotationPolicy: Always}
+  issuerRef: {name: hsmgate-ca, kind: Issuer}
