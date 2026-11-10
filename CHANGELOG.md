@@ -3,7 +3,7 @@
 ## Unreleased
 
 ### Changed
-- Helm chart: [`examples/cert-manager.yaml`](deploy/helm/hsmgate/examples/cert-manager.yaml) makes the TLS Secret (a CA of its own, the certificate of the service, a client certificate) and the README says how to use it, why the chart has no Ingress (a proxy that ends TLS hides the client certificate) and how to reach the service from outside (LoadBalancer, TLS passthrough).
+- Helm chart: an optional Ingress that passes the TLS through (`ingress.enabled`, `ingress.host`); an example of connecting OpenBao (`examples/values-openbao.yaml`, `openbao-seal.hcl`); [`examples/cert-manager.yaml`](deploy/helm/hsmgate/examples/cert-manager.yaml) makes the TLS Secret (a CA of its own, the certificate of the service, a client certificate) and the README says how to use it, why the chart has no Ingress (a proxy that ends TLS hides the client certificate) and how to reach the service from outside (LoadBalancer, TLS passthrough).
 
 ## 0.7.1 — 2026-11-09
 

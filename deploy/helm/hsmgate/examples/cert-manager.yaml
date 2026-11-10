@@ -1,7 +1,7 @@
-# The TLS Secret of the chart made by cert-manager: a CA of its own, the certificate of the service and the certificate of one client.
+# The TLS Secret of the chart made by cert-manager: a CA of its own, the certificate of the service and the certificates of two clients (demo, openbao).
 # Apply it in the namespace of the release BEFORE helm install (the pod does not start without the Secret):
 #   kubectl -n hsmgate apply -f cert-manager.yaml
-#   kubectl -n hsmgate wait certificate/hsmgate-tls certificate/demo-client --for=condition=Ready
+#   kubectl -n hsmgate wait certificate/hsmgate-tls certificate/demo-client certificate/openbao-client --for=condition=Ready
 #   helm install hsmgate ... --set tls.existingSecret=hsmgate-tls
 # Needs cert-manager (cert-manager.io/v1). The release is called "hsmgate" and the namespace "hsmgate" here: change the names in dnsNames otherwise
 # (the service is <fullname>.<namespace>.svc).
@@ -50,6 +50,19 @@ metadata: {name: demo-client}
 spec:
   secretName: demo-client-tls
   commonName: demo
+  usages: [digital signature, key encipherment, client auth]
+  duration: 8760h
+  renewBefore: 720h
+  privateKey: {algorithm: ECDSA, size: 256, rotationPolicy: Always}
+  issuerRef: {name: hsmgate-ca, kind: Issuer}
+---
+# a second client, for OpenBao (see openbao-seal.hcl and values-openbao.yaml): the Secret openbao-client-tls goes to the OpenBao pod
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata: {name: openbao-client}
+spec:
+  secretName: openbao-client-tls
+  commonName: openbao
   usages: [digital signature, key encipherment, client auth]
   duration: 8760h
   renewBefore: 720h

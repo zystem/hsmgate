@@ -28,7 +28,7 @@ kubectl -n hsmgate create secret generic hsmgate-tls \
 
 ```bash
 kubectl -n hsmgate apply -f examples/cert-manager.yaml
-kubectl -n hsmgate wait certificate/hsmgate-tls certificate/demo-client --for=condition=Ready --timeout=2m
+kubectl -n hsmgate wait certificate/hsmgate-tls certificate/demo-client certificate/openbao-client --for=condition=Ready --timeout=2m
 ```
 
 An `Issuer` that already exists in your cluster can take the place of the CA of the example, if it is a CA issuer: then `ca.crt` of the Secret is that CA, and it is the CA of the clients too. With an ACME issuer (Let's Encrypt) `ca.crt` is not what clients are signed by, and a client certificate from it would not do: the clients of hsmgate need a CA of your own. The built-in CA of hsmgate (`hsmgate ca setup`, [operations.md](../../../docs/operations.md)) makes the files too.
@@ -62,6 +62,21 @@ config:
       identity: {cn: shop}
       keys: {apps: {ops: [encrypt, decrypt]}}
 ```
+
+### OpenBao (auto-unseal)
+
+OpenBao unseals itself through hsmgate with `seal "transit"`: the key of OpenBao stays behind hsmgate, OpenBao holds only what hsmgate sealed. Three pieces, all in [`examples/`](examples/):
+
+1. [`values-openbao.yaml`](examples/values-openbao.yaml): the key `openbao-unseal` (a fixed context: the seal sends none) and the client `openbao` (by the CN of its certificate; `encrypt` and `decrypt` only).
+2. [`cert-manager.yaml`](examples/cert-manager.yaml): the Certificate `openbao-client` makes the Secret `openbao-client-tls`; mount it into the OpenBao pod (for example at `/openbao/tls`).
+3. [`openbao-seal.hcl`](examples/openbao-seal.hcl): the `seal "transit"` stanza (`address = "https://hsmgate.hsmgate.svc:8443"`, `key_name = "openbao-unseal"`, `tls_ca_cert`, `tls_client_cert`, `tls_client_key`).
+
+```bash
+helm install hsmgate oci://ghcr.io/zystem/charts/hsmgate --version 0.7.1 -n hsmgate \
+  --set tls.existingSecret=hsmgate-tls -f examples/values-openbao.yaml
+```
+
+Then `bao operator init` (recovery keys, not unseal keys) and restart OpenBao: it opens by itself. This is the combination that was run against OpenBao v2.6.1 over mTLS ([transit-face.md](../../../docs/transit-face.md)); the manifests of this chart with an OpenBao in a cluster were not run. Keep the soft keys of hsmgate backed up: what OpenBao sealed cannot be opened without them.
 
 ### The soft keys
 
