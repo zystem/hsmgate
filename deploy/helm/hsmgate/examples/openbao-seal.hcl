@@ -1,4 +1,4 @@
-# The seal stanza of OpenBao (auto-unseal through hsmgate). Mount the Secret openbao-client-tls (tls.crt, tls.key, ca.crt; see cert-manager.yaml)
+# The seal stanza of OpenBao (auto-unseal through hsmgate). Mount the Secret of the client certificate (<release>-client-openbao made by the chart, or openbao-client-tls of cert-manager.yaml: tls.crt, tls.key, ca.crt)
 # into the OpenBao pod at /openbao/tls. hsmgate answers the Transit API of Vault/OpenBao; the key is `openbao-unseal` of values-openbao.yaml.
 seal "transit" {
   address         = "https://hsmgate.hsmgate.svc:8443"   # <fullname>.<namespace>.svc: a name in the certificate of the service

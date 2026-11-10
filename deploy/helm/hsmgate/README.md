@@ -9,31 +9,40 @@ The chart is an OCI artifact on ghcr.io, signed like the image ([verifying-relea
 ```bash
 helm install hsmgate oci://ghcr.io/zystem/charts/hsmgate --version 0.7.0 \
   --namespace hsmgate --create-namespace \
-  --set tls.existingSecret=hsmgate-tls \
   -f my-values.yaml
 ```
 
 `--version` is the number of the release without the `v`; the chart starts the image of the same release.
 
-### The TLS Secret (required)
+### TLS: made by the chart, or yours
 
-A Secret in the release's namespace with three entries: `tls.crt` and `tls.key` (the service's certificate; the names clients connect to, such as `hsmgate.hsmgate.svc`, must be in it) and `ca.crt` (the CA that signed the certificates of the clients: only those get past the handshake).
+The service answers only clients with a certificate of its CA; a client is known by the CN of its certificate (`identity: {cn: ...}` in `config.clients`).
+
+**By default the chart makes everything, once:** a CA (`<release>-ca`, with its key: nothing mounts it), the certificate of the service (`<release>-tls`: `tls.crt`, `tls.key`, `ca.crt`; the names are the service's own, `localhost`, `ingress.host` and `tls.generate.extraNames`) and a certificate for each name in `tls.generate.clients` (default `[demo]`: the Secret `<release>-client-demo` with `tls.crt`, `tls.key`, `ca.crt`). An upgrade reuses what exists (the Secrets carry `helm.sh/resource-policy: keep`, so an uninstall leaves them, and a client that holds a certificate keeps working after a reinstall). To give a client its files:
+
+```bash
+kubectl -n hsmgate get secret hsmgate-client-demo -o jsonpath='{.data.tls\.crt}' | base64 -d > demo.pem     # likewise tls.key and ca.crt
+```
+
+or mount the Secret into the pod of the client. Add a client: put its name into `tls.generate.clients` **and** a client with the same `identity.cn` into `config.clients`, then `helm upgrade`.
+
+*Renewal.* The certificates last 730 days (the CA 3650) and nothing renews them. To renew the service's certificate delete the Secret `<release>-tls` and `helm upgrade` (the CA is kept, so the clients stay valid; the pod then needs a restart: `kubectl rollout restart deploy/<release>`); for a client delete its Secret the same way and hand out the new files. A new CA: delete all of `<release>-ca`, `-tls` and the clients' Secrets, and give the clients their files again. The keys the chart makes are RSA 2048 (Helm makes no other); `hsmgate ca` ([operations.md](../../../docs/operations.md)) makes P-256 ones, and files made by it, or by your own PKI, go in through `tls.existingSecret`.
+
+**Your own Secret:** `--set tls.existingSecret=hsmgate-tls`, in the release's namespace, with `tls.crt` and `tls.key` (the certificate of the service; the names clients connect to, such as `hsmgate.hsmgate.svc`, must be in it) and `ca.crt` (the CA that signed the certificates of the clients).
 
 ```bash
 kubectl -n hsmgate create secret generic hsmgate-tls \
   --from-file=tls.crt=server.pem --from-file=tls.key=server.key --from-file=ca.crt=clients-ca.pem
 ```
 
-**From cert-manager:** [`examples/cert-manager.yaml`](examples/cert-manager.yaml) makes all of it: a CA of its own, the certificate of the service (the Secret `hsmgate-tls` with `tls.crt`, `tls.key` and `ca.crt`, the three that the chart wants) and the certificate of one client (`demo-client-tls`, for the application that calls hsmgate; its `commonName` is the `identity: {cn: ...}` of a client in `config.extra.clients`). The Secret must exist before the pod can start, so apply it first:
+**From cert-manager:** [`examples/cert-manager.yaml`](examples/cert-manager.yaml) makes the same Secrets (a CA of its own, the certificate of the service and the certificates of two clients), and cert-manager renews them. Apply it before the install and set `tls.existingSecret`:
 
 ```bash
 kubectl -n hsmgate apply -f examples/cert-manager.yaml
 kubectl -n hsmgate wait certificate/hsmgate-tls certificate/demo-client certificate/openbao-client --for=condition=Ready --timeout=2m
 ```
 
-An `Issuer` that already exists in your cluster can take the place of the CA of the example, if it is a CA issuer: then `ca.crt` of the Secret is that CA, and it is the CA of the clients too. With an ACME issuer (Let's Encrypt) `ca.crt` is not what clients are signed by, and a client certificate from it would not do: the clients of hsmgate need a CA of your own. The built-in CA of hsmgate (`hsmgate ca setup`, [operations.md](../../../docs/operations.md)) makes the files too.
-
-cert-manager renews the certificate in the Secret, but nothing tells the pod that the files changed: restart it after a renewal (`kubectl -n hsmgate rollout restart deploy/hsmgate`), or use a tool that does it for you (such as Reloader).
+With an ACME issuer (Let's Encrypt) `ca.crt` is not what clients are signed by: the clients of hsmgate need a CA of your own. cert-manager renews the files in the Secret, but nothing tells the pod: restart it after a renewal (or use a tool such as Reloader).
 
 ### Reaching it from outside the cluster
 
@@ -67,13 +76,13 @@ config:
 
 OpenBao unseals itself through hsmgate with `seal "transit"`: the key of OpenBao stays behind hsmgate, OpenBao holds only what hsmgate sealed. Three pieces, all in [`examples/`](examples/):
 
-1. [`values-openbao.yaml`](examples/values-openbao.yaml): the key `openbao-unseal` (a fixed context: the seal sends none) and the client `openbao` (by the CN of its certificate; `encrypt` and `decrypt` only).
-2. [`cert-manager.yaml`](examples/cert-manager.yaml): the Certificate `openbao-client` makes the Secret `openbao-client-tls`; mount it into the OpenBao pod (for example at `/openbao/tls`).
+1. [`values-openbao.yaml`](examples/values-openbao.yaml): the key `openbao-unseal` (a fixed context: the seal sends none), the client `openbao` (by the CN of its certificate; `encrypt` and `decrypt` only) and its certificate (`tls.generate.clients: [openbao]`: the Secret `<release>-client-openbao`).
+2. The Secret of the client certificate (`<release>-client-openbao`; with cert-manager, `openbao-client-tls` of [`cert-manager.yaml`](examples/cert-manager.yaml)): mount it into the OpenBao pod, for example at `/openbao/tls`.
 3. [`openbao-seal.hcl`](examples/openbao-seal.hcl): the `seal "transit"` stanza (`address = "https://hsmgate.hsmgate.svc:8443"`, `key_name = "openbao-unseal"`, `tls_ca_cert`, `tls_client_cert`, `tls_client_key`).
 
 ```bash
 helm install hsmgate oci://ghcr.io/zystem/charts/hsmgate --version 0.7.1 -n hsmgate \
-  --set tls.existingSecret=hsmgate-tls -f examples/values-openbao.yaml
+  -f examples/values-openbao.yaml
 ```
 
 Then `bao operator init` (recovery keys, not unseal keys) and restart OpenBao: it opens by itself. This is the combination that was run against OpenBao v2.6.1 over mTLS ([transit-face.md](../../../docs/transit-face.md)); the manifests of this chart with an OpenBao in a cluster were not run. Keep the soft keys of hsmgate backed up: what OpenBao sealed cannot be opened without them.

@@ -23,4 +23,4 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- else }}{{ printf "%s:%s" .Values.image.repository (default .Chart.AppVersion .Values.image.tag) }}{{ end }}
 {{- end -}}
 {{- define "hsmgate.softSecret" -}}{{ default (printf "%s-soft" (include "hsmgate.fullname" .)) .Values.softToken.existingSecret }}{{- end -}}
-{{- define "hsmgate.tlsSecret" -}}{{ required "tls.existingSecret is required: a Secret with tls.crt, tls.key and ca.crt (the CA of the clients)" .Values.tls.existingSecret }}{{- end -}}
+{{- define "hsmgate.tlsSecret" -}}{{- if not (or .Values.tls.existingSecret .Values.tls.generate.enabled) }}{{ fail "tls: set existingSecret or leave generate.enabled on" }}{{ end }}{{ default (printf "%s-tls" (include "hsmgate.fullname" .)) .Values.tls.existingSecret }}{{- end -}}
