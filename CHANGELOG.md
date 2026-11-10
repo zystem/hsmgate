@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Added
+- **[docs/audit-log.md](docs/audit-log.md)**: the audit line field by field, every result word with its class in the metrics, questions the log answers (`jq`), what to watch, rotation (`copytruncate`; the file is not reopened on SIGHUP) and shipping. Tests keep the fields, the result classes and the metric names equal to the code.
 - **[docs/configuration.md](docs/configuration.md)**: every setting of `hsmgate.yaml` with its default, what is required, and what needs a restart or only a reload; a test fails when a setting is added without a line there, and another keeps the stated defaults equal to the code's. The smallest configuration, `deploy/hsmgate.minimal.yaml` (tested); [docs/guides/clients.md](docs/guides/clients.md) (recipes for the command line, `curl`, OpenBao and Kubernetes, tried against `hsmgate dev`); [docs/README.md](docs/README.md), the index of the documents by what the reader wants.
 - **`hsmgate dev`**: a throw-away service to try hsmgate in a minute with no hardware and nothing to prepare (a software token with a fresh key, a CA of its own, the certificate of the service and of a client `demo`, the keys `demo` and `demo-ctx`). It prints the commands to type (`hsmgate encrypt`/`decrypt` with the files it made). Without `-dir` everything is deleted at the stop; `-dir DIR` keeps it. Not for real keys.
 - **[docs/troubleshooting.md](docs/troubleshooting.md)**: what the client sees and what the service says at its start (message, meaning, what to do), for a container or a cluster, and for OpenBao.

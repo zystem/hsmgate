@@ -26,7 +26,7 @@ Off by default. In `hsmgate.yaml`, with `admin_socket` set:
 
 ```yaml
 admin_socket: /run/hsmgate/admin.sock
-metrics: {enabled: true}      # GET /metrics: the counters, and the gauges of the process (hsmgate_go_goroutines, hsmgate_go_heap_alloc_bytes, hsmgate_process_resident_bytes, hsmgate_process_open_fds, …)
+metrics: {enabled: true}      # GET /metrics: the counters, and the gauges of the process (hsmgate_go_goroutines, hsmgate_go_heap_alloc_bytes, hsmgate_go_heap_inuse_bytes, hsmgate_go_sys_bytes, hsmgate_go_gc_cycles, hsmgate_process_resident_bytes, hsmgate_process_open_fds)
 debug: {pprof: true}          # GET /debug/pprof/…
 ```
 

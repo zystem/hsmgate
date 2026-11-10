@@ -13,6 +13,7 @@ What hsmgate is, and a one-minute try: [the README](../README.md). The rest, by 
 - [operations.md](operations.md): certificates (`hsmgate ca`), unlock, reload, rotation, spare card, lost card, Docker
 - [tokens/smartcard-hsm.md](tokens/smartcard-hsm.md): the SmartCard-HSM
 - [configuration.md](configuration.md): **every setting and its default**; the smallest file is [deploy/hsmgate.minimal.yaml](../deploy/hsmgate.minimal.yaml), a larger one for a card [deploy/hsmgate.example.yaml](../deploy/hsmgate.example.yaml)
+- [audit-log.md](audit-log.md): the audit line, every result word, questions it answers, rotation and shipping
 - [key-management.md](key-management.md): keys, versions, changing the algorithms
 - [upgrading.md](upgrading.md), [verifying-releases.md](verifying-releases.md)
 
