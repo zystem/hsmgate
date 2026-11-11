@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+- Helm chart, tried in a cluster (2026-11-12, chart 0.7.3 and the OpenBao chart): `helm test` passes, OpenBao initialises through hsmgate, restarts and unseals itself. The OpenBao values in `deploy/helm/hsmgate/examples/openbao-helm-values.yaml` were wrong for current OpenBao (no `file` storage) and now use the integrated raft storage; the chart README says what was run and what was not, and that a namespace enforcing the `restricted` Pod Security Standard refuses the pod (uid 0). Troubleshooting and the audit-log page explain the probe handshake noise and OpenBao's periodic seal check.
+
 ## 0.7.3 — 2026-11-11
 
 ### Security
