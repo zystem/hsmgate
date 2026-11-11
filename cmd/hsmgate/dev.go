@@ -108,7 +108,11 @@ What was done is in %s/audit.log. Stop with Ctrl-C.
 func runDev(args []string) error {
 	fs := flag.NewFlagSet("dev", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	fs.Usage = func() { fmt.Fprintln(os.Stderr, devUsage) }
+	fs.Usage = func() {
+		fmt.Fprintln(os.Stderr, devUsage)
+		fmt.Fprintln(os.Stderr)
+		fs.PrintDefaults()
+	}
 	listen := fs.String("listen", "127.0.0.1:8443", "address to listen on (loopback unless you say otherwise)")
 	dir := fs.String("dir", "", "keep the files in this new or empty directory (default: a temporary one, deleted at the stop)")
 	if err := fs.Parse(args); err != nil {
