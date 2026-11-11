@@ -2,7 +2,7 @@
 
 ## Build
 
-Requirements: the Go toolchain of `go.mod` (1.26.10; the `go` command fetches it by itself), a C compiler (`gcc`) because the PKCS#11 binding (`github.com/miekg/pkcs11`) uses cgo, and for a real token a PKCS#11 module (OpenSC `opensc-pkcs11.so` for a SmartCard-HSM; SoftHSM2 for a software token).
+Requirements: the Go toolchain of `go.mod` (1.26.11; the `go` command fetches it by itself), a C compiler (`gcc`) because the PKCS#11 binding (`github.com/miekg/pkcs11`) uses cgo, and for a real token a PKCS#11 module (OpenSC `opensc-pkcs11.so` for a SmartCard-HSM; SoftHSM2 for a software token).
 
 ```bash
 git clone https://github.com/zystem/hsmgate && cd hsmgate

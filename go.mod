@@ -1,6 +1,6 @@
 module github.com/zystem/hsmgate
 
-go 1.26.10
+go 1.26.11
 
 require (
 	github.com/miekg/pkcs11 v1.1.2

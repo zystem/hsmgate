@@ -18,7 +18,7 @@ permissions:
 jobs:
   fuzz:
     runs-on: ubuntu-latest
-    container: golang:1.26.10-bookworm
+    container: golang:1.26.11-bookworm
     timeout-minutes: 240
     env:
       FUZZTIME: ${{ github.event.inputs.fuzztime || (github.event.schedule == '17 1 1 * *' && '15m' || '60s') }}
