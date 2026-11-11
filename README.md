@@ -29,15 +29,26 @@ You need Go ([building.md](docs/building.md)). From a clone of this repository:
 go run ./cmd/hsmgate dev
 ```
 
-It starts a throw-away service with a software token, a CA of its own and a client certificate, and prints what to type in another terminal:
+It starts a throw-away service with a software token, a CA of its own and a client certificate, and prints what to type in another terminal. First the three variables it names (`HSMGATE_ADDR`, `HSMGATE_CA`, `HSMGATE_CERT`, `HSMGATE_KEYFILE`, `HSMGATE_TRANSIT_KEY=demo`), then:
 
-```bash
-export HSMGATE_ADDR=https://127.0.0.1:8443 HSMGATE_CA=... HSMGATE_CERT=... HSMGATE_KEYFILE=... HSMGATE_TRANSIT_KEY=demo   # as printed
-echo 'my secret' | hsmgate encrypt > sealed.txt     # vault:v1:...
-hsmgate decrypt < sealed.txt                        # my secret
+```console
+$ echo 'my secret' | hsmgate encrypt > sealed.txt
+sealed under version 1 of key "demo" with context ""
+$ cat sealed.txt
+vault:v1:ZWNpZXMy...
+$ hsmgate decrypt < sealed.txt
+my secret
+$ echo x | hsmgate encrypt -transit-key demo-ctx -context demo/a > c.txt
+sealed under version 1 of key "demo-ctx" with context "demo/a"
+$ hsmgate decrypt -transit-key demo-ctx -context demo/b < c.txt
+hsmgate decrypt: the ciphertext cannot be opened with key "demo-ctx" and context "demo/b": it was sealed with another key or another context, or it is damaged
 ```
 
-Stop it with Ctrl-C: everything it made is deleted (`-dir DIR` keeps it). Without a client certificate the connection is refused; the audit log says who did what. **Not for real keys.**
+(The ciphertext is longer than shown. A test runs these commands against `hsmgate dev` and fails when what they print is not what is shown here.)
+
+What you just saw: the key never left the service; the ciphertext opens only with the key *and* the context it was sealed with; a client with no certificate cannot even connect, and the audit log (`audit.log` in the directory `dev` names) has a line for each call, the refused one too. Stop it with Ctrl-C: everything it made is deleted (`-dir DIR` keeps it). **Not for real keys**: the key is a file, and what you sealed cannot be opened again after the stop.
+
+**Next:** [connect a client](docs/guides/clients.md) (`curl`, OpenBao, Kubernetes) · [install it for real](#install-for-real) · [what to do before it holds real keys](docs/production.md) · [questions people ask](docs/faq.md).
 
 ## Install for real
 
@@ -75,8 +86,8 @@ cp deploy/hsmgate.example.yaml hsmgate.yaml     # edit: the token, the keys, the
 
 The full list by what you want to do: [docs/README.md](docs/README.md).
 
-- **I want to know what it is and whether it fits:** [architecture](docs/architecture.md), [threat model](docs/threat-model.md), [compliance](docs/compliance.md), [roadmap](docs/roadmap.md).
-- **I install and run it:** [operations](docs/operations.md) (unlock, rotation, spare card, lost card, Docker), [the SmartCard-HSM](docs/tokens/smartcard-hsm.md), [the Helm chart](deploy/helm/hsmgate/README.md), [upgrading](docs/upgrading.md), [key management](docs/key-management.md), [verifying a release](docs/verifying-releases.md).
+- **I want to know what it is and whether it fits:** [questions people ask](docs/faq.md), [architecture](docs/architecture.md), [threat model](docs/threat-model.md), [compliance](docs/compliance.md), [roadmap](docs/roadmap.md).
+- **I install and run it:** [before it holds real keys](docs/production.md), [operations](docs/operations.md) (unlock, rotation, spare card, lost card, Docker), [the SmartCard-HSM](docs/tokens/smartcard-hsm.md), [the Helm chart](deploy/helm/hsmgate/README.md), [upgrading](docs/upgrading.md), [supported versions](docs/supported-versions.md), [key management](docs/key-management.md), [verifying a release](docs/verifying-releases.md).
 - **I set it up:** [every setting and its default](docs/configuration.md), the smallest file [deploy/hsmgate.minimal.yaml](deploy/hsmgate.minimal.yaml).
 - **I watch it:** [the audit log](docs/audit-log.md) (every result word, what to watch), metrics in [operations.md](docs/operations.md).
 - **It does not work:** [troubleshooting](docs/troubleshooting.md): the message, what it means, what to do.
