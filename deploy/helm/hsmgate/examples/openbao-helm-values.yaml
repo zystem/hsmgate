@@ -1,29 +1,34 @@
-# Values for the OpenBao chart (https://openbao.github.io/openbao-helm) in the cluster of OpenBao: auto-unseal through hsmgate in another cluster.
+# Values for the OpenBao chart (https://openbao.github.io/openbao-helm) in the cluster of OpenBao: auto-unseal through hsmgate.
 #   kubectl create namespace openbao   # and copy the Secret of the client certificate into it (README, "OpenBao in another cluster")
 #   helm repo add openbao https://openbao.github.io/openbao-helm
 #   helm install openbao openbao/openbao -n openbao -f openbao-helm-values.yaml
-# `config` replaces the one of the chart: the listener and the storage below are the minimum for one pod (no TLS on 8200 here: a test setup).
+# One pod with the integrated (raft) storage: current OpenBao has no `file` storage. `config` replaces the one of the chart; no TLS on 8200 here: a test setup.
+# Run in a cluster (hsmgate chart 0.7.3 and the OpenBao chart, two namespaces): init, restart of the pod, auto-unseal: see the README of the chart.
 server:
   extraVolumes:
     - type: secret
       name: hsmgate-client-openbao       # mounted at /openbao/userconfig/hsmgate-client-openbao/
-  standalone:
+  ha:
     enabled: true
-    config: |
-      ui = true
-      listener "tcp" {
-        tls_disable     = 1
-        address         = "[::]:8200"
-        cluster_address = "[::]:8201"
-      }
-      storage "file" {
-        path = "/openbao/data"
-      }
-      seal "transit" {
-        address         = "https://hsmgate.example.com"
-        mount_path      = "transit/"
-        key_name        = "openbao-unseal"
-        tls_ca_cert     = "/openbao/userconfig/hsmgate-client-openbao/ca.crt"
-        tls_client_cert = "/openbao/userconfig/hsmgate-client-openbao/tls.crt"
-        tls_client_key  = "/openbao/userconfig/hsmgate-client-openbao/tls.key"
-      }
+    replicas: 1
+    raft:
+      enabled: true
+      setNodeId: true
+      config: |
+        ui = true
+        listener "tcp" {
+          tls_disable     = 1
+          address         = "[::]:8200"
+          cluster_address = "[::]:8201"
+        }
+        storage "raft" {
+          path = "/openbao/data"
+        }
+        seal "transit" {
+          address         = "https://hsmgate.example.com"     # the Ingress of hsmgate; in the same cluster: https://hsmgate.<namespace>.svc:8443
+          mount_path      = "transit/"
+          key_name        = "openbao-unseal"
+          tls_ca_cert     = "/openbao/userconfig/hsmgate-client-openbao/ca.crt"
+          tls_client_cert = "/openbao/userconfig/hsmgate-client-openbao/tls.crt"
+          tls_client_key  = "/openbao/userconfig/hsmgate-client-openbao/tls.key"
+        }

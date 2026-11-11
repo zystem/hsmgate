@@ -79,9 +79,21 @@ func devSetup(dir, listen string) (string, error) {
 	return cfgPath, nil
 }
 
+// clientAddr is the address a client on this machine connects to: a listener on every address ([::]:8443, 0.0.0.0:8443) is reached by 127.0.0.1.
+func clientAddr(listen string) string {
+	host, port, err := net.SplitHostPort(listen)
+	if err != nil {
+		return listen
+	}
+	if ip := net.ParseIP(host); host == "" || (ip != nil && ip.IsUnspecified()) {
+		return net.JoinHostPort("127.0.0.1", port)
+	}
+	return listen
+}
+
 // devHelp is what the user is told to type.
 func devHelp(w io.Writer, addr net.Addr, dir string, keep bool) {
-	url := "https://" + addr.String()
+	url := "https://" + clientAddr(addr.String())
 	fmt.Fprintf(w, `
 hsmgate dev: a throw-away service with a software token. NOT for real keys.
   address   %s
@@ -108,7 +120,11 @@ What was done is in %s/audit.log. Stop with Ctrl-C.
 func runDev(args []string) error {
 	fs := flag.NewFlagSet("dev", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	fs.Usage = func() { fmt.Fprintln(os.Stderr, devUsage) }
+	fs.Usage = func() {
+		fmt.Fprintln(os.Stderr, devUsage)
+		fmt.Fprintln(os.Stderr)
+		fs.PrintDefaults()
+	}
 	listen := fs.String("listen", "127.0.0.1:8443", "address to listen on (loopback unless you say otherwise)")
 	dir := fs.String("dir", "", "keep the files in this new or empty directory (default: a temporary one, deleted at the stop)")
 	if err := fs.Parse(args); err != nil {

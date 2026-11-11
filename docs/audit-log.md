@@ -65,6 +65,8 @@ jq -c 'select(.op=="decrypt" and (.context//"")|startswith("k8s/shop/"))' audit.
 jq -c 'select(.op=="unlock")' audit.log
 ```
 
+Expect steady lines from some clients even when nobody does anything: OpenBao's `seal "transit"` asks hsmgate to `encrypt` (and now and then `decrypt`) every few seconds to check that its seal works. That is normal; a change in that rhythm, or an `encrypt` with a `result` other than `ok`, is the signal.
+
 What to watch: a rise of `decrypt` for a client that normally only encrypts; `forbidden` or `forbidden_context` from a client that never used to get them (a probe, or a changed configuration); `locked` (the card is waiting for a person); `unavailable` (the reader, the card); any `refused` on an unlock (a wrong PIN: the card blocks after three); a gap in the lines of a busy service.
 
 ## Keeping it

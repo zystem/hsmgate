@@ -26,6 +26,29 @@ import (
 // version is set at build time (-X main.version=...)
 var version = "dev"
 
+const usage = `hsmgate: a policy-checked door in front of a key token.
+
+usage: hsmgate <command> [flags]       (hsmgate <command> -h shows the flags of a command)
+
+  dev       start a throw-away service to try hsmgate: no hardware, nothing to prepare
+  serve     run the service
+  check     load a configuration, open the tokens and list every key version; starts nothing, needs no PIN
+  unlock    give a card its PIN (to the running service, over its admin socket)
+  encrypt   seal a value (or the files of a directory) with a key of the service
+  decrypt   open what encrypt sealed
+  ca        make the certificates: the authority, the service, the clients (init, setup, server, client, list)
+  ping      connect to the listener (a container health check; needs no certificate)
+  version   print the version
+
+Documentation: https://github.com/zystem/hsmgate#readme`
+
+// commandHelp is the line under "usage:" of serve, check and unlock.
+var commandHelp = map[string]string{
+	"serve":  "Runs the service until SIGINT or SIGTERM (then the tokens are logged out). SIGHUP reloads the configuration, the policy and the certificates.",
+	"check":  "Loads the configuration, opens the tokens and prints every key version with its holders, their state and the fingerprint of the public key. Starts nothing and needs no PIN. Exit status 0 means the configuration is good.",
+	"unlock": "Hands the PIN of a card to the running service over its admin socket (admin_socket of the configuration). The PIN is read from the terminal without echo, or from standard input with -pin-stdin; it is never an argument and stays in memory only.",
+}
+
 func die(err error) {
 	fmt.Fprintln(os.Stderr, "hsmgate:", err)
 	os.Exit(1)
@@ -67,21 +90,34 @@ func main() {
 		fmt.Println("hsmgate", version)
 		return
 	}
+	if len(os.Args) >= 2 && (os.Args[1] == "help" || os.Args[1] == "-h" || os.Args[1] == "-help" || os.Args[1] == "--help") {
+		fmt.Println(usage)
+		return
+	}
 	if len(os.Args) < 2 || (os.Args[1] != "serve" && os.Args[1] != "check" && os.Args[1] != "unlock") {
-		fmt.Fprintln(os.Stderr, "usage: hsmgate serve|check|unlock|version|ping|encrypt|decrypt|ca|dev -config hsmgate.yaml [-token NAME] [-pin-stdin]")
+		fmt.Fprintln(os.Stderr, usage)
 		os.Exit(2)
 	}
-	fs := flag.NewFlagSet(os.Args[1], flag.ExitOnError)
+	cmd := os.Args[1]
+	fs := flag.NewFlagSet(cmd, flag.ExitOnError)
+	fs.Usage = func() {
+		fmt.Fprintf(os.Stderr, "usage: hsmgate %s -config hsmgate.yaml%s\n\n%s\n\n", cmd, map[string]string{"unlock": " -token NAME [-pin-stdin]"}[cmd], commandHelp[cmd])
+		fs.PrintDefaults()
+	}
 	path := fs.String("config", "hsmgate.yaml", "configuration file")
-	tokenName := fs.String("token", "", "unlock: the token to unlock")
-	pinStdin := fs.Bool("pin-stdin", false, "unlock: read the PIN from standard input instead of the terminal")
+	var tokenName string
+	var pinStdin bool
+	if cmd == "unlock" {
+		fs.StringVar(&tokenName, "token", "", "the token to unlock (a name in tokens: of the configuration)")
+		fs.BoolVar(&pinStdin, "pin-stdin", false, "read the PIN from standard input instead of the terminal")
+	}
 	fs.Parse(os.Args[2:])
 	cfg, err := config.Load(*path)
 	if err != nil {
 		die(err)
 	}
 	if os.Args[1] == "unlock" {
-		die(unlock(cfg, *tokenName, *pinStdin))
+		die(unlock(cfg, tokenName, pinStdin))
 	}
 	s, err := server.New(cfg, nil)
 	if err != nil {

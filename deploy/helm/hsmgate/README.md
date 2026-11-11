@@ -105,7 +105,7 @@ OpenBao unseals itself through hsmgate with `seal "transit"`: the key stays behi
 
 4. *Initialise once:* `kubectl --context B -n openbao exec openbao-0 -- bao operator init -recovery-shares=1 -recovery-threshold=1` (keep the recovery key and the root token), then delete the pod: it starts unsealed. In A the audit of hsmgate shows `encrypt` and `decrypt` by the client `openbao`.
 
-What was run is OpenBao v2.6.1 with this seal over mTLS ([transit-face.md](../../../docs/transit-face.md)); this procedure across two clusters was not run, only rendered (`helm template` of both charts). The OpenBao chart renders with these values and mounts the Secret at the path above.
+**What was run (2026-11-12, a Talos cluster):** the chart 0.7.3 from ghcr.io and the OpenBao chart with [`openbao-helm-values.yaml`](examples/openbao-helm-values.yaml) in two namespaces of one cluster (the address `https://hsmgate.<namespace>.svc:8443`, the client Secret copied between namespaces as in step 2): `helm test` passed, `bao operator init -recovery-shares=1`, the pod deleted and started again, and it came up **unsealed by itself** (`type: transit`); the audit of hsmgate shows `encrypt` and `decrypt` by the client `openbao` on the key `openbao-unseal`, `result: ok`. OpenBao keeps asking hsmgate to `encrypt` (and now and then `decrypt`) every few seconds to check its seal, so expect steady lines in the audit log. **Not run:** two clusters with the Ingress with TLS passthrough in between (the part that differs is the address and the controller). Earlier: OpenBao v2.6.1 with this seal over mTLS ([transit-face.md](../../../docs/transit-face.md)).
 
 ### The soft keys
 
@@ -117,7 +117,7 @@ The service writes a file. On the default `emptyDir` it is lost with the pod; `a
 
 ## How it runs
 
-One replica, strategy `Recreate`, a read-only root file system, no capabilities, seccomp `RuntimeDefault`, no service-account token. The container runs as **uid 0**: the key files come from a Secret volume (owned by root, mode 0400) and the service refuses a secret that group or others can read, so `fsGroup` is not an option and only root can read them. With every capability dropped that root can do nothing else. The Pod Security level is therefore *baseline*, not *restricted* (`runAsNonRoot`).
+One replica, strategy `Recreate`, a read-only root file system, no capabilities, seccomp `RuntimeDefault`, no service-account token. The container runs as **uid 0**: the key files come from a Secret volume (owned by root, mode 0400) and the service refuses a secret that group or others can read, so `fsGroup` is not an option and only root can read them. With every capability dropped that root can do nothing else. The Pod Security level is therefore *baseline*, not *restricted* (`runAsNonRoot`). A namespace that **enforces** the Pod Security Standard `restricted` refuses such a pod (Helm prints "would violate PodSecurity restricted" even where it only warns, as in the test of 2026-11-12): use a namespace at `baseline`, which allows uid 0 with no capabilities.
 
 The configuration is a ConfigMap; a change restarts the pod. `networkPolicy.enabled=true` limits ingress to port 8443 (set `networkPolicy.from` to the namespaces that may call) and allows no egress. `helm test <release>` connects to the port.
 
