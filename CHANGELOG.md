@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.7.3 — 2026-11-11
 
 ### Security
 - **GO-2026-6859** (net/http: an HTTP/1 server crash through a race on the headers of a request body that `http.MaxBytesReader` limits). The Go standard library of the 0.7.2 binaries (Go 1.26.10) and images (Go 1.27.3) has it, and the program reaches it (`govulncheck` says so, and the CI of `main` failed on it). Built with Go 1.26.11 (the binaries) and 1.27.4 (the images), `govulncheck` is clean on the sources and on the program inside both images. Update from 0.7.2.
