@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Added
+- **[docs/writing-docs.md](docs/writing-docs.md)**: how the pages are written (one of four kinds: tutorial, how-to, reference, explanation; a command with what it prints; what was not run) and which test keeps which page equal to the program. [docs/README.md](docs/README.md) says which kind each page is.
 - **[docs/cli.md](docs/cli.md)**: every command and flag, generated from what `hsmgate <command> -h` prints; a test fails when the page differs from the program (`go test ./cmd/hsmgate -run CLIReference -update` rewrites it). `hsmgate` with no arguments, `hsmgate help` and `-h` list the commands with one line each; `serve` and `check` no longer show the flags of `unlock`; `dev -h` shows its flags. `hsmgate dev` for a listener on every address (`-listen 0.0.0.0:8443`, as in a container) now tells the client `127.0.0.1`, not `[::]`; the README shows how to try it with `docker run` and no Go.
 
 ### Changed

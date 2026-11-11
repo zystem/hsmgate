@@ -35,3 +35,16 @@ What hsmgate is, and a one-minute try: [the README](../README.md). The rest, by 
 
 ## I contribute
 - [CONTRIBUTING](../CONTRIBUTING.md), [GOVERNANCE](../GOVERNANCE.md), [releasing.md](releasing.md), [SECURITY](../SECURITY.md), [CODE OF CONDUCT](../CODE_OF_CONDUCT.md)
+
+## What kind of page is it
+
+Pages are written as one of four kinds ([Diátaxis](https://diataxis.fr/)), and a page that mixes them is split when it grows: a reader who looks something up does not want to be taught, and one who is learning does not want a table of every flag.
+
+| Kind | Answers | Pages |
+|---|---|---|
+| **Tutorial** (learn by doing) | "Show me it works" | [README, "Try it in a minute"](../README.md#try-it-in-a-minute-no-hardware-nothing-to-prepare) |
+| **How-to** (do a task) | "How do I ...?" | [production.md](production.md), [operations.md](operations.md), [troubleshooting.md](troubleshooting.md), [guides/](guides/clients.md), [the Helm chart](../deploy/helm/hsmgate/README.md), [upgrading.md](upgrading.md), [verifying-releases.md](verifying-releases.md), [building.md](building.md), [releasing.md](releasing.md) |
+| **Reference** (look it up) | "What exactly does X do, and what is its default?" | [cli.md](cli.md), [configuration.md](configuration.md), [audit-log.md](audit-log.md), [specs/](specs/README.md), [openapi.yaml](../api/openapi.yaml), [supported-versions.md](supported-versions.md) |
+| **Explanation** (understand why) | "Why is it like this? Is it right for me?" | [faq.md](faq.md), [architecture.md](architecture.md), [threat-model.md](threat-model.md), [compliance.md](compliance.md), [key-management.md](key-management.md), [transit-face.md](transit-face.md), [security-requirements.md](security-requirements.md), [assurance-case.md](assurance-case.md), [roadmap.md](roadmap.md) |
+
+How these pages are written, for someone who adds one: [writing-docs.md](writing-docs.md).
