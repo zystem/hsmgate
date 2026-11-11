@@ -1,6 +1,6 @@
 module github.com/zystem/hsmgate/test/kmsgrpc-sdk
 
-go 1.26.10
+go 1.26.11
 
 require (
 	cloud.google.com/go/kms v1.36.1

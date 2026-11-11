@@ -19,7 +19,7 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
-    container: golang:1.26.10-bookworm
+    container: golang:1.26.11-bookworm
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -41,7 +41,7 @@ jobs:
     # staticcheck with all its checks, and gosec without G104 (unchecked errors: closing files and the best-effort audit line of a refusal, on purpose); each exception in the code has its reason
     needs: test
     runs-on: ubuntu-latest
-    container: golang:1.26.10-bookworm
+    container: golang:1.26.11-bookworm
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -54,7 +54,7 @@ jobs:
     # the PKCS#11 backend against SoftHSM2 (a software token); the card itself is run by hand with tools/card-decrypt-test.sh
     needs: test
     runs-on: ubuntu-latest
-    container: golang:1.26.10-bookworm
+    container: golang:1.26.11-bookworm
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -67,7 +67,7 @@ jobs:
     # the faces against the official client libraries of the services they imitate (modules of their own: test/*-sdk)
     needs: test
     runs-on: ubuntu-latest
-    container: golang:1.26.10-bookworm
+    container: golang:1.26.11-bookworm
     strategy:
       fail-fast: false
       matrix:
@@ -82,7 +82,7 @@ jobs:
   build:
     needs: test
     runs-on: ubuntu-latest
-    container: golang:1.26.10-bookworm
+    container: golang:1.26.11-bookworm
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -117,7 +117,7 @@ jobs:
     # the tests with the Go cryptographic module in FIPS 140-3 mode; the FIPS binary starts with require_fips and the usual one refuses to
     needs: build
     runs-on: ubuntu-latest
-    container: golang:1.26.10-bookworm
+    container: golang:1.26.11-bookworm
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

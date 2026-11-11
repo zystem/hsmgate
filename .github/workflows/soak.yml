@@ -17,7 +17,7 @@ permissions:
 jobs:
   soak:
     runs-on: ubuntu-latest
-    container: golang:1.26.10-bookworm
+    container: golang:1.26.11-bookworm
     timeout-minutes: 340
     defaults:
       run:
