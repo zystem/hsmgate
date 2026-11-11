@@ -48,6 +48,24 @@ hsmgate decrypt: the ciphertext cannot be opened with key "demo-ctx" and context
 
 What you just saw: the key never left the service; the ciphertext opens only with the key *and* the context it was sealed with; a client with no certificate cannot even connect, and the audit log (`audit.log` in the directory `dev` names) has a line for each call, the refused one too. Stop it with Ctrl-C: everything it made is deleted (`-dir DIR` keeps it). **Not for real keys**: the key is a file, and what you sealed cannot be opened again after the stop.
 
+**With Docker and no Go** (the image has `dev` too; the files go to a directory of yours, which must be new or empty and writable by the user you run as):
+
+```bash
+mkdir demo
+docker run --rm --user "$(id -u):$(id -g)" -p 127.0.0.1:8443:8443 -v "$PWD/demo:/demo" \
+  ghcr.io/zystem/hsmgate:latest dev -listen 0.0.0.0:8443 -dir /demo
+```
+
+In another terminal, with `curl` and the files it made in `demo/clients` (the paths it prints are the ones inside the container; yours are `demo/clients/...`):
+
+```bash
+curl --cacert demo/clients/ca.pem --cert demo/clients/demo.pem --key demo/clients/demo.key \
+  -X POST https://127.0.0.1:8443/v1/transit/encrypt/demo -d "{\"plaintext\":\"$(printf 'my secret' | base64)\"}"
+# {"data":{"ciphertext":"vault:v1:ZWNpZXMy..."}}
+```
+
+(`:latest` is for trying; for real use pin a release by its digest. Tried by hand on 2026-11-12 with the image of 0.7.3.)
+
 **Next:** [connect a client](docs/guides/clients.md) (`curl`, OpenBao, Kubernetes) · [install it for real](#install-for-real) · [what to do before it holds real keys](docs/production.md) · [questions people ask](docs/faq.md).
 
 ## Install for real

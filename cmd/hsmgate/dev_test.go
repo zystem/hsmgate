@@ -108,3 +108,12 @@ func TestDevSetupDirectory(t *testing.T) {
 		t.Error("a file was touched")
 	}
 }
+
+// A service that listens on every address is reached on this machine by 127.0.0.1: that is what the help shows (the certificate has 127.0.0.1 in it).
+func TestClientAddress(t *testing.T) {
+	for in, want := range map[string]string{"[::]:8443": "127.0.0.1:8443", "0.0.0.0:8443": "127.0.0.1:8443", ":8443": "127.0.0.1:8443", "127.0.0.1:8443": "127.0.0.1:8443", "192.0.2.7:9000": "192.0.2.7:9000", "[2001:db8::1]:8443": "[2001:db8::1]:8443"} {
+		if got := clientAddr(in); got != want {
+			t.Errorf("clientAddr(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

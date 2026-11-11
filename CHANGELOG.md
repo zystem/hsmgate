@@ -3,7 +3,7 @@
 ## Unreleased
 
 ### Added
-- **[docs/cli.md](docs/cli.md)**: every command and flag, generated from what `hsmgate <command> -h` prints; a test fails when the page differs from the program (`go test ./cmd/hsmgate -run CLIReference -update` rewrites it). `hsmgate` with no arguments, `hsmgate help` and `-h` list the commands with one line each; `serve` and `check` no longer show the flags of `unlock`; `dev -h` shows its flags.
+- **[docs/cli.md](docs/cli.md)**: every command and flag, generated from what `hsmgate <command> -h` prints; a test fails when the page differs from the program (`go test ./cmd/hsmgate -run CLIReference -update` rewrites it). `hsmgate` with no arguments, `hsmgate help` and `-h` list the commands with one line each; `serve` and `check` no longer show the flags of `unlock`; `dev -h` shows its flags. `hsmgate dev` for a listener on every address (`-listen 0.0.0.0:8443`, as in a container) now tells the client `127.0.0.1`, not `[::]`; the README shows how to try it with `docker run` and no Go.
 
 ### Changed
 - Helm chart, tried in a cluster (2026-11-12, chart 0.7.3 and the OpenBao chart): `helm test` passes, OpenBao initialises through hsmgate, restarts and unseals itself. The OpenBao values in `deploy/helm/hsmgate/examples/openbao-helm-values.yaml` were wrong for current OpenBao (no `file` storage) and now use the integrated raft storage; the chart README says what was run and what was not, and that a namespace enforcing the `restricted` Pod Security Standard refuses the pod (uid 0). Troubleshooting and the audit-log page explain the probe handshake noise and OpenBao's periodic seal check.
