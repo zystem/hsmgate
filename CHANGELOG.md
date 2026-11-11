@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **[docs/production.md](docs/production.md)** (a checklist before it holds real keys: the token and its backup, the PIN, the policy, certificates, the network, the audit log, the software, drills), **[docs/faq.md](docs/faq.md)** and **[docs/supported-versions.md](docs/supported-versions.md)** (which release is supported until when).
+
+### Changed
+- README: "Try it in a minute" shows what each command prints and ends with next steps; a test (`TestTryItOutputsAreWhatTheReadmeShows`) runs those commands against `hsmgate dev` and fails when what they print is not what the README shows.
+
 ## 0.7.2 — 2026-11-10
 
 ### Added
