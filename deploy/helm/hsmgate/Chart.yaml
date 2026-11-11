@@ -3,8 +3,8 @@ name: hsmgate
 description: A policy-checked network door in front of a key token. This chart runs hsmgate with a software token (tests, development, a pilot); a card needs a machine, see docs/operations.md.
 type: application
 # the release workflow packages the chart with the version of the tag; these are the values of the tree
-version: 0.7.3
-appVersion: "v0.7.3"
+version: 0.7.4
+appVersion: "v0.7.4"
 kubeVersion: ">=1.27.0-0"
 home: https://github.com/zystem/hsmgate
 sources:

@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.7.4 — 2026-11-11
 
 ### Added
 - **[docs/writing-docs.md](docs/writing-docs.md)**: how the pages are written (one of four kinds: tutorial, how-to, reference, explanation; a command with what it prints; what was not run) and which test keeps which page equal to the program. [docs/README.md](docs/README.md) says which kind each page is.

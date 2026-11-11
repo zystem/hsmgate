@@ -83,7 +83,7 @@ OpenBao unseals itself through hsmgate with `seal "transit"`: the key stays behi
 1. *In A.* A name that resolves to the ingress controller of A is needed (say `hsmgate.example.com`); the chart puts it into the certificate of the service. The controller must pass the TLS through (ingress-nginx: `--enable-ssl-passthrough`).
 
    ```bash
-   helm install hsmgate oci://ghcr.io/zystem/charts/hsmgate --version 0.7.3 -n hsmgate --create-namespace \
+   helm install hsmgate oci://ghcr.io/zystem/charts/hsmgate --version 0.7.4 -n hsmgate --create-namespace \
      -f examples/values-openbao.yaml --set ingress.enabled=true --set ingress.host=hsmgate.example.com
    ```
 
