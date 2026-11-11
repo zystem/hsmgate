@@ -2,7 +2,6 @@ package main
 
 import (
 	"flag"
-	"fmt"
 	"os"
 	"os/exec"
 	"strings"
@@ -64,6 +63,6 @@ One binary, several commands. This page is what ` + "`hsmgate <command> -h`" + `
 		t.Fatal(err)
 	}
 	if string(got) != want {
-		t.Error(fmt.Sprint("docs/cli.md is not what the commands print: run `go test ./cmd/hsmgate -run CLIReference -update` and commit the file"))
+		t.Error("docs/cli.md is not what the commands print: run `go test ./cmd/hsmgate -run CLIReference -update` and commit the file")
 	}
 }
