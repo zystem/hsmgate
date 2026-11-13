@@ -1,0 +1,24 @@
+# Rules over the audit lines of hsmgate (docs/audit-log.md). The source is `collector`; a line is one JSON object, read with json.value[/field].
+- rule: hsmgate call refused
+  desc: hsmgate refused a call (the client, key or operation is not in the policy, or a credential did not check).
+  condition: json.value[/result] in (forbidden, forbidden_context, unauthenticated, unknown_access_key, bad_signature, unsigned, malformed_signature, credential_mismatch, address_refused)
+  output: hsmgate refused (client=%json.value[/client] face=%json.value[/face] key=%json.value[/key] op=%json.value[/op] result=%json.value[/result] request_id=%json.value[/request_id])
+  priority: WARNING
+  source: collector
+  tags: [hsmgate, audit]
+
+- rule: hsmgate token or service failure
+  desc: hsmgate could not do what was asked because the token is locked or unavailable, or an internal error.
+  condition: json.value[/result] in (locked, unavailable, internal_error)
+  output: hsmgate failure (client=%json.value[/client] face=%json.value[/face] key=%json.value[/key] op=%json.value[/op] result=%json.value[/result])
+  priority: ERROR
+  source: collector
+  tags: [hsmgate, audit]
+
+- rule: hsmgate unlock attempt
+  desc: Someone tried to unlock a token on the admin socket (a PIN was sent to the card).
+  condition: json.value[/op] = unlock and json.value[/result] in (attempt, refused)
+  output: hsmgate unlock (token=%json.value[/key] result=%json.value[/result])
+  priority: NOTICE
+  source: collector
+  tags: [hsmgate, audit]

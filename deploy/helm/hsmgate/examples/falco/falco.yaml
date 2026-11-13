@@ -1,0 +1,16 @@
+# A minimal Falco configuration that receives the audit lines of hsmgate (sent by the Fluent Bit sidecar of the chart) and checks them with rules.
+# Falco needs no kernel driver for this: only the plugin source `collector`, which listens for HTTP POST, and the plugin `json`, which reads the fields.
+# For the Falco Helm chart put the same `load_plugins`, `plugins` and `rules_files` into its values (the chart's own keys differ; see its documentation).
+engine:
+  kind: nodriver          # no syscall source: only the plugins
+load_plugins: [collector, json]
+plugins:
+  - name: collector
+    library_path: libcollector.so
+    init_config: '{"addr": ":54827", "buffer": 0}'
+  - name: json
+    library_path: libjson.so
+rules_files:
+  - /etc/falco/hsmgate_rules.yaml
+json_output: true
+stdout_output: {enabled: true}

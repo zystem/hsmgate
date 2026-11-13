@@ -69,6 +69,27 @@ audit:
     storageClass: ""
     existingClaim: ""
 
+# --- a Fluent Bit sidecar that ships the audit file -----------------------------------------------------------------------------------------------------
+# It tails /var/log/hsmgate/audit.log (so audit.file must be true) and sends every line (a JSON object) to the [OUTPUT] sections below: VictoriaLogs, Loki,
+# Elasticsearch/OpenSearch, Splunk, syslog (for Wazuh), HTTP ... (https://docs.fluentbit.io/manual/pipeline/outputs). Delivery is not part of the audit
+# guarantee: the file is the record, and a failed send is retried by Fluent Bit, not by hsmgate. Off by default.
+fluentbit:
+  enabled: false
+  image:
+    repository: cr.fluentbit.io/fluent/fluent-bit
+    tag: "5.1.5"
+    digest: ""     # "sha256:..." pins the image and wins over the tag
+  # Raw Fluent Bit sections placed after [INPUT]. The tag of the records is hsmgate.audit; the fields are those of docs/audit-log.md.
+  filters: ""
+  outputs: |
+    [OUTPUT]
+        Name  stdout
+        Match hsmgate.audit
+        Format json_lines
+  resources:
+    requests: {cpu: 25m, memory: 32Mi}
+    limits: {memory: 128Mi}
+
 service:
   type: ClusterIP
   port: 8443
