@@ -4,6 +4,15 @@ The latest release is supported, and the previous minor release for 30 days ([SE
 
 General steps: read the notes; run `hsmgate check -config …` with the new binary (it needs no PIN); replace the binary or the image (pin the digest); restart; `hsmgate unlock`; look at the audit log. A configuration that the new version refuses is refused at the start, not at the first request. SIGHUP reloads the configuration without a restart for what a reload may change (not the listener, the admin socket, the audit file, the limits, the enabled faces).
 
+## 0.7 to 0.8
+
+- **Helm chart: the audit file is not written by default.** `audit.file` is `false`: the audit goes to the output of the container (`kubectl logs deploy/<release>-hsmgate`). A cluster that reads `/var/log/hsmgate/audit.log` (a collector, `audit.persistence`) sets `audit.file=true`. The service and its configuration are not changed by this.
+- With `audit.file=true` the chart rotates the file itself (`audit.maxSizeMB` 25, `audit.maxFiles` 5) and refuses a pair that does not fit the 256 MiB `emptyDir`. `audit.maxSizeMB=0` is the old behaviour (no limit).
+- New settings of the service, all optional, off by default: `audit.stdout`, `audit.max_size_mb`, `audit.max_files`. SIGHUP now also opens the audit file again, so `logrotate` with a rename works.
+- The chart runs `hsmgate ping` with a TLS handshake as its probe (`probe.tls`): use the image of the same release (0.8.0); with an older image set `probe.tls=false`.
+- New and optional in the chart: `fluentbit.enabled`, `extraContainers`, `extraVolumes`.
+- The service no longer logs `http: TLS handshake error ... EOF` for a bare TCP connect.
+
 ## 0.3 to 0.4
 
 - **`ecies1` is gone.** The service seals and opens `ecies2` only. Texts sealed by 0.3 or earlier in the old format (`ecies1.…`) are **not** read any more: with 0.3.x, `rewrap` them (Transit `rewrap`) so that they become `ecies2`, and only then upgrade. 0.3.0 and later already write `ecies2`; only data written before that is affected.

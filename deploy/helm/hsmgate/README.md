@@ -85,7 +85,7 @@ OpenBao unseals itself through hsmgate with `seal "transit"`: the key stays behi
 1. *In A.* A name that resolves to the ingress controller of A is needed (say `hsmgate.example.com`); the chart puts it into the certificate of the service. The controller must pass the TLS through (ingress-nginx: `--enable-ssl-passthrough`).
 
    ```bash
-   helm install hsmgate oci://ghcr.io/zystem/charts/hsmgate --version 0.7.4 -n hsmgate --create-namespace \
+   helm install hsmgate oci://ghcr.io/zystem/charts/hsmgate --version 0.8.0 -n hsmgate --create-namespace \
      -f examples/values-openbao.yaml --set ingress.enabled=true --set ingress.host=hsmgate.example.com
    ```
 
@@ -115,7 +115,7 @@ By default the chart makes a random key for each label at the first install, in 
 
 ### The audit log
 
-By default (`audit.file=false`) the audit goes only to the output of the container, so `kubectl logs deploy/<release>-hsmgate` shows it and the container runtime rotates it; nothing is kept on a volume. With `audit.file=true` the service also writes a file, and with `audit.stdout=true` (the default) every line also to the output (the same lines as in the file; never a key, a plaintext or a PIN). With `audit.file=true` the keys `stdout`, `max_size_mb` and `max_files` are written into the configuration only when they are on (`audit.stdout=true`, `audit.maxSizeMB>0`); an image that does not know them (up to v0.7.4) needs `--set audit.stdout=false --set audit.maxSizeMB=0`. Not run in a cluster. `audit.maxSizeMB` (default 25) and `audit.maxFiles` (5) make the service rotate the file itself (`audit.log`, `audit.log.1` ... `.5`; the volume then holds at most `maxSizeMB x (maxFiles + 1)`, 150 MB by default; on the default `emptyDir` of 256 MiB the chart refuses a pair that does not fit, on a claim you size it yourself); 0 means no rotation and the file grows until the volume is full, when the service answers 503. For the file: on the default `emptyDir` it is lost with the pod; `audit.persistence.enabled=true` keeps it on a claim (kept when the release is uninstalled).
+By default (`audit.file=false`) the audit goes only to the output of the container, so `kubectl logs deploy/<release>-hsmgate` shows it and the container runtime rotates it; nothing is kept on a volume. With `audit.file=true` the service also writes a file, and with `audit.stdout=true` (the default) every line also to the output (the same lines as in the file; never a key, a plaintext or a PIN). With `audit.file=true` the keys `stdout`, `max_size_mb` and `max_files` are written into the configuration only when they are on (`audit.stdout=true`, `audit.maxSizeMB>0`); an image that does not know them (0.7.3 and earlier) needs `--set audit.stdout=false --set audit.maxSizeMB=0`. `audit.maxSizeMB` (default 25) and `audit.maxFiles` (5) make the service rotate the file itself (`audit.log`, `audit.log.1` ... `.5`; the volume then holds at most `maxSizeMB x (maxFiles + 1)`, 150 MB by default; on the default `emptyDir` of 256 MiB the chart refuses a pair that does not fit, on a claim you size it yourself); 0 means no rotation and the file grows until the volume is full, when the service answers 503. For the file: on the default `emptyDir` it is lost with the pod; `audit.persistence.enabled=true` keeps it on a claim (kept when the release is uninstalled).
 
 ### Shipping the audit with Fluent Bit
 
@@ -145,7 +145,7 @@ Delivery is not part of the audit guarantee: the file is the record, and a faile
 - Default values (`audit.file=false`): the audit lines of three calls of the client `demo` (`ok`, `ok`, `forbidden`) are in `kubectl logs deploy/hsmgate`; one container.
 - `audit.file=true`, `audit.stdout=false`, `audit.maxSizeMB=0` and `fluentbit.enabled=true`: Fluent Bit 5.1.5 read the audit file and printed every line as JSON in its own log (six lines for two runs of the three calls); the service log had none of them.
 - `extraContainers` and `extraVolumes`: a `busybox` container read the audit file from the `audit` volume and wrote it to a volume added with `extraVolumes`.
-- **Not run in a cluster:** rotation by the service, the reopen on SIGHUP and `audit.stdout=true` (no image with them is published: the chart's `appVersion` v0.7.4 is not in ghcr.io, the last image is v0.7.3, so a plain install fails with `ImagePullBackOff` until `image.tag` is set); the TLS ping probe (`probe.tls=true`, needs the same newer image); the Vector sidecar and Falco; a store such as VictoriaLogs. Rotation and the reopen are covered by tests that run a real process (`cmd/hsmgate`, `internal/audit`).
+- **Not run in a cluster:** rotation by the service, the reopen on SIGHUP and `audit.stdout=true` (no image with them was published on that day: the last was v0.7.3, so the chart was installed with `image.tag=v0.7.3`; they are in 0.8.0); the TLS ping probe (`probe.tls=true`, needs an image of 0.8.0 or later); the Vector sidecar and Falco; a store such as VictoriaLogs. Rotation and the reopen are covered by tests that run a real process (`cmd/hsmgate`, `internal/audit`).
 
 ## How it runs
 
