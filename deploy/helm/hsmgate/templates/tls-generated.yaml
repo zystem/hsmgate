@@ -76,4 +76,27 @@ data:
   {{- end }}
   ca.crt: {{ $ca.Cert | b64enc }}
 {{- end }}
+{{- if .Values.probe.tls }}
+{{- /* the certificate of the health probe: signed by the CA, named by no client of the policy, so it has no rights (the handshake only) */}}
+{{- $pName := printf "%s-probe" $fullname }}
+{{- $pFound := lookup "v1" "Secret" $ns $pName }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $pName }}
+  labels: {{- include "hsmgate.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+type: kubernetes.io/tls
+data:
+  {{- if $pFound }}
+  tls.crt: {{ index $pFound.data "tls.crt" }}
+  tls.key: {{ index $pFound.data "tls.key" }}
+  {{- else }}
+  {{- $p := genSignedCert "hsmgate-probe" nil nil (int $g.days) $ca }}
+  tls.crt: {{ $p.Cert | b64enc }}
+  tls.key: {{ $p.Key | b64enc }}
+  {{- end }}
+{{- end }}
 {{- end }}

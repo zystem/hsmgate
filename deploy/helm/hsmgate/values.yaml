@@ -35,6 +35,13 @@ tls:
     clients: [demo]        # the Secret <fullname>-client-<name> (tls.crt, tls.key, ca.crt) for each; the CN is the name (identity: {cn: ...} in clients below)
     extraNames: []         # more names for the certificate of the service (ingress.host is added by itself)
 
+# --- health probes ------------------------------------------------------------------------------------------------------------------------------------
+# With the certificates made by the chart (tls.generate) the probes make the whole TLS handshake with a certificate that no client of the policy uses (CN
+# hsmgate-probe): no rights, no request, no audit line, nothing in the log of the service. With a Secret of yours (tls.existingSecret) or tls: false here the
+# probes are a TCP connect (the service does not log that either). The probe certificate lasts tls.generate.days, like the others; see "Renewal" in the README.
+probe:
+  tls: true
+
 # --- the configuration (hsmgate.yaml) ------------------------------------------------------------------------------------------------------------------
 # listen, tls, admin_socket, audit and the soft token are set by the chart. Here: the keys, the clients and anything else of docs/ (kmsjson, kmsgrpc, kmsrest,
 # seal_suite, limits, metrics ...). A key names the soft token and one of its labels.

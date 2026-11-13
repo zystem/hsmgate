@@ -1,4 +1,6 @@
 {{- $audit := .Values.audit.persistence }}
+{{- /* the probe that shakes hands needs the certificate the chart makes for it: only with the generated certificates */}}
+{{- $probeTLS := and .Values.probe.tls (not .Values.tls.existingSecret) .Values.tls.generate.enabled }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -42,7 +44,22 @@ spec:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             capabilities: {drop: [ALL]}
-          # a TCP connect to the listener; it never touches the token
+          {{- if $probeTLS }}
+          # the whole TLS handshake with a certificate of the CA that no client of the policy uses: the probe has no rights, asks nothing, leaves no audit line
+          # and writes nothing to the log of the service; it never touches the token
+          readinessProbe:
+            exec:
+              command: [/usr/local/bin/hsmgate, ping, -addr, "127.0.0.1:8443", -name, localhost, -cert, /etc/hsmgate/probe/tls.crt, -key, /etc/hsmgate/probe/tls.key, -ca, /etc/hsmgate/tls/ca.crt]
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            exec:
+              command: [/usr/local/bin/hsmgate, ping, -addr, "127.0.0.1:8443", -name, localhost, -cert, /etc/hsmgate/probe/tls.crt, -key, /etc/hsmgate/probe/tls.key, -ca, /etc/hsmgate/tls/ca.crt]
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+          {{- else }}
+          # a TCP connect to the listener; it never touches the token (the service does not log it)
           readinessProbe:
             tcpSocket: {port: https}
             periodSeconds: 10
@@ -50,10 +67,14 @@ spec:
             tcpSocket: {port: https}
             initialDelaySeconds: 10
             periodSeconds: 30
+          {{- end }}
           resources: {{- toYaml .Values.resources | nindent 12 }}
           volumeMounts:
             - {name: config, mountPath: /etc/hsmgate/hsmgate.yaml, subPath: hsmgate.yaml, readOnly: true}
             - {name: tls, mountPath: /etc/hsmgate/tls, readOnly: true}
+            {{- if $probeTLS }}
+            - {name: probe, mountPath: /etc/hsmgate/probe, readOnly: true}
+            {{- end }}
             - {name: soft, mountPath: /etc/hsmgate/soft, readOnly: true}
             - {name: run, mountPath: /run/hsmgate}
             - {name: audit, mountPath: /var/log/hsmgate}
@@ -63,6 +84,10 @@ spec:
         - name: tls
           # 256 is 0400
           secret: {secretName: {{ include "hsmgate.tlsSecret" . }}, defaultMode: 256}
+        {{- if $probeTLS }}
+        - name: probe
+          secret: {secretName: {{ include "hsmgate.fullname" . }}-probe, defaultMode: 256}
+        {{- end }}
         - name: soft
           secret: {secretName: {{ include "hsmgate.softSecret" . }}, defaultMode: 256}
         - name: run

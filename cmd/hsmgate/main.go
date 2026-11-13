@@ -15,7 +15,6 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
-	"time"
 
 	"golang.org/x/term"
 
@@ -37,7 +36,7 @@ usage: hsmgate <command> [flags]       (hsmgate <command> -h shows the flags of 
   encrypt   seal a value (or the files of a directory) with a key of the service
   decrypt   open what encrypt sealed
   ca        make the certificates: the authority, the service, the clients (init, setup, server, client, list)
-  ping      connect to the listener (a container health check; needs no certificate)
+  ping      connect to the listener (a container health check; a TCP connect, or the whole TLS handshake with a certificate that has no rights)
   version   print the version
 
 Documentation: https://github.com/zystem/hsmgate#readme`
@@ -66,16 +65,7 @@ func main() {
 		os.Exit(runCA(os.Args[2:], os.Stdout, os.Stderr))
 	}
 	if len(os.Args) >= 2 && os.Args[1] == "ping" {
-		// a TCP connect to the listener: for a container health check (it must not touch the token or need a certificate)
-		fs := flag.NewFlagSet("ping", flag.ExitOnError)
-		addr := fs.String("addr", "127.0.0.1:8443", "address to connect to")
-		fs.Parse(os.Args[2:])
-		c, err := net.DialTimeout("tcp", *addr, 3*time.Second)
-		if err != nil {
-			die(err)
-		}
-		c.Close()
-		return
+		os.Exit(runPing(os.Args[2:], os.Stderr))
 	}
 	if len(os.Args) >= 2 && os.Args[1] == "dev" {
 		if err := runDev(os.Args[2:]); err != nil {
