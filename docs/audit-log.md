@@ -2,7 +2,7 @@
 
 Every decision of the service is one line of JSON, **a refusal as well as a success**. A call is answered only after its line is written: if the log cannot be written the service answers 503 `audit log unavailable` and does nothing, and it writes a probe line until the log works again. There is never a key, a plaintext, a ciphertext or a PIN in it.
 
-Where it goes: `audit.file` of the configuration (opened for append, mode 0640 so that a log shipper in the group can read it), or standard output when there is no file (the journal, under systemd; `docker logs`; the log of the pod) ([configuration.md](configuration.md)).
+Where it goes: `audit.file` of the configuration (opened for append, mode 0640 so that a log shipper in the group can read it), or standard output when there is no file; `audit.stdout: true` writes to both (the journal, under systemd; `docker logs`; the log of the pod) ([configuration.md](configuration.md)).
 
 ## A line
 
@@ -71,7 +71,7 @@ What to watch: a rise of `decrypt` for a client that normally only encrypts; `fo
 
 ## Keeping it
 
-- **Rotation:** the file is opened once, for append, and is not reopened on SIGHUP. `logrotate` with `copytruncate` works; a plain rename does not (the service goes on writing to the renamed file) unless the service is restarted. Under systemd, standard output goes to the journal and its own rotation.
+- **Rotation:** with `audit.max_size_mb` the service rotates the file itself (`audit.log` -> `audit.log.1` -> ... up to `audit.max_files`, default 5; no line is split). Without it the file grows without limit. The file is also reopened on **SIGHUP** (before the configuration is read, so even a refused reload reopens it): a plain rename by `logrotate` then works, send `kill -HUP` in its `postrotate`; `copytruncate` works too. Do not combine `logrotate` with `audit.max_size_mb` on one file. Under systemd or in a container, standard output goes to the journal or the runtime, which rotate it themselves. Not run in a cluster.
 - **Shipping:** read the file (group of the service user) or the journal; the lines are self-contained JSON. Ship it off the host: an audit log that lives only next to the service tells little when the host is the problem.
 - **In Kubernetes** the chart writes to a file on an `emptyDir` (lost with the pod) unless `audit.persistence.enabled` gives it a claim, or ship it by reading the file in a sidecar of your own ([the chart](../deploy/helm/hsmgate/README.md)).
 - **Integrity:** the log is a plain file: whoever can write it can change it. Keep the service user the only writer, and ship the lines away as they are written.

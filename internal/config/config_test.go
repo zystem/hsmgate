@@ -457,3 +457,21 @@ func TestMacHash(t *testing.T) {
 		}
 	}
 }
+
+func TestAuditRotationRules(t *testing.T) {
+	c := &Config{}
+	c.Audit.MaxSizeMB = 10
+	if err := c.Validate(); err == nil {
+		t.Error("max_size_mb without audit.file was accepted")
+	}
+	c = &Config{}
+	c.Audit.File, c.Audit.MaxSizeMB = "a.log", 10
+	if err := c.Validate(); err != nil || c.Audit.MaxFiles != 5 {
+		t.Errorf("err %v, max_files %d (want the default 5)", err, c.Audit.MaxFiles)
+	}
+	c = &Config{}
+	c.Audit.File, c.Audit.MaxSizeMB = "a.log", -1
+	if err := c.Validate(); err == nil {
+		t.Error("a negative size was accepted")
+	}
+}

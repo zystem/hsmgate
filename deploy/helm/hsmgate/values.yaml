@@ -60,13 +60,49 @@ config:
         demo: {ops: [encrypt, decrypt], per_minute: 120}
 
 # --- the audit log ------------------------------------------------------------------------------------------------------------------------------------
-# The service writes a file (/var/log/hsmgate/audit.log). On an emptyDir it is lost with the pod; a claim keeps it.
+# By default the audit goes to the output of the container only. With file: true it is also a file (/var/log/hsmgate/audit.log); on an emptyDir that is lost with the pod, a claim keeps it.
+# stdout: also write every line to the output of the container (`kubectl logs`, a log collector). Needs an image with `audit.stdout` (after v0.7.3); set false for an older one.
+# file: false (the default) writes no file, only to the output of the container (`kubectl logs`, a log collector; the runtime rotates that and nothing can fill a volume).
+# file: true also writes /var/log/hsmgate/audit.log (persistence below keeps it); stdout then says whether the lines are also on the output. maxSizeMB > 0 makes the service rotate the file
+# (audit.log.1 ... audit.log.<maxFiles>) so that it cannot fill the volume; 0 means it grows without limit.
 audit:
+  file: false
+  stdout: true
+  maxSizeMB: 100
+  maxFiles: 5
   persistence:
     enabled: false
     size: 1Gi
     storageClass: ""
     existingClaim: ""
+
+# --- a Fluent Bit sidecar that ships the audit file -----------------------------------------------------------------------------------------------------
+# It tails /var/log/hsmgate/audit.log (so audit.file must be true) and sends every line (a JSON object) to the [OUTPUT] sections below: VictoriaLogs, Loki,
+# Elasticsearch/OpenSearch, Splunk, syslog (for Wazuh), HTTP ... (https://docs.fluentbit.io/manual/pipeline/outputs). Delivery is not part of the audit
+# guarantee: the file is the record, and a failed send is retried by Fluent Bit, not by hsmgate. Off by default.
+fluentbit:
+  enabled: false
+  image:
+    repository: cr.fluentbit.io/fluent/fluent-bit
+    tag: "5.1.5"
+    digest: ""     # "sha256:..." pins the image and wins over the tag
+  # Raw Fluent Bit sections placed after [INPUT]. The tag of the records is hsmgate.audit; the fields are those of docs/audit-log.md.
+  filters: ""
+  outputs: |
+    [OUTPUT]
+        Name  stdout
+        Match hsmgate.audit
+        Format json_lines
+  resources:
+    requests: {cpu: 25m, memory: 32Mi}
+    limits: {memory: 128Mi}
+
+# Containers and volumes of your own in the pod (a log agent other than Fluent Bit, a metrics exporter ...), written as in a Pod spec and added as they are, so the chart
+# does not check them. They can mount the volume named `audit` (the audit file, /var/log/hsmgate in hsmgate), `run` (the admin socket, mode 0600 owned by root) and the
+# volumes you add. A container that reads the audit file runs as uid 0 (the file is 0640, owned by root); mount it readOnly. A name that is already used (hsmgate, fluent-bit, config, tls,
+# soft, run, audit, fluentbit-config, fluentbit-state) makes the pod invalid.
+extraContainers: []
+extraVolumes: []
 
 service:
   type: ClusterIP

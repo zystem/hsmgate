@@ -115,7 +115,31 @@ By default the chart makes a random key for each label at the first install, in 
 
 ### The audit log
 
-The service writes a file. On the default `emptyDir` it is lost with the pod; `audit.persistence.enabled=true` keeps it on a claim (kept when the release is uninstalled).
+By default (`audit.file=false`) the audit goes only to the output of the container, so `kubectl logs deploy/<release>-hsmgate` shows it and the container runtime rotates it; nothing is kept on a volume. With `audit.file=true` the service also writes a file, and with `audit.stdout=true` (the default) every line also to the output (the same lines as in the file; never a key, a plaintext or a PIN). It needs an image newer than v0.7.3 only with `audit.file=true` (older images do not know `audit.stdout`). Not run in a cluster. `audit.maxSizeMB` (default 100) and `audit.maxFiles` (5) make the service rotate the file itself (`audit.log`, `audit.log.1` ... `.5`; the volume then holds at most about 600 MB, so size the claim for it); 0 means no rotation and the file grows until the volume is full, when the service answers 503. For the file: on the default `emptyDir` it is lost with the pod; `audit.persistence.enabled=true` keeps it on a claim (kept when the release is uninstalled).
+
+### Shipping the audit with Fluent Bit
+
+`fluentbit.enabled=true` (needs `audit.file=true`) adds a [Fluent Bit](https://fluentbit.io) container to the pod. It reads `/var/log/hsmgate/audit.log` from the shared volume and sends each line (a JSON object, fields as in [audit-log.md](../../../docs/audit-log.md)) to the `[OUTPUT]` sections of `fluentbit.outputs`; `fluentbit.filters` takes `[FILTER]` sections. The default output prints to the log of the container (`kubectl logs <pod> -c fluent-bit`). It follows the rotation by the service. The offset is kept on an `emptyDir`, so a restarted pod reads the file from the start again (a store may then see lines twice).
+
+```yaml
+audit: {file: true}
+fluentbit:
+  enabled: true
+  outputs: |
+    [OUTPUT]
+        Name   http
+        Match  hsmgate.audit
+        Host   victorialogs.logging.svc
+        Port   9428
+        URI    /insert/jsonline?_stream_fields=client,face&_msg_field=op&_time_field=time
+        Format json_lines
+```
+
+Delivery is not part of the audit guarantee: the file is the record, and a failed send is retried by Fluent Bit, not by hsmgate. The container runs as uid 0 (the file is 0640, owned by root), read-only root file system, no capability; the volume is mounted read-only. Run on 2026-11-13 in Docker with the rendered configuration and a sample file (the lines came out as JSON with a `date`); **not run in a cluster, not run against a real store**. The sample for VictoriaLogs is from its documentation, not tried. For Falco see [examples/falco](examples/falco/README.md): Fluent Bit cannot feed its `collector` (it joins lines into one request).
+
+### Your own containers and volumes
+
+`extraContainers` and `extraVolumes` add anything you write, as in a Pod spec, to the pod: a log agent other than Fluent Bit, an exporter. The chart does not check them. They can mount the volume `audit` (the audit file; mount it `readOnly`, and run as uid 0, since the file is 0640 owned by root) and `run` (the admin socket), and the volumes you add. The names the chart uses (`hsmgate`, `fluent-bit`, `config`, `tls`, `soft`, `run`, `audit`, `fluentbit-config`, `fluentbit-state`) must not be reused. [examples/vector-sidecar-values.yaml](examples/vector-sidecar-values.yaml) adds a Vector sidecar this way (for the Falco `collector`, [examples/falco](examples/falco/README.md)). Checked with `helm lint` and `kubectl apply --dry-run=client` (no cluster); the pod was **not run**.
 
 ## How it runs
 

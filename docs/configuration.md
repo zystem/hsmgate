@@ -4,7 +4,7 @@ The configuration is one YAML file (`hsmgate.yaml`, `-config` on every command).
 
 The smallest working file is the one `hsmgate dev -dir DIR` writes (`DIR/hsmgate.yaml`); a larger one for a card is [deploy/hsmgate.example.yaml](../deploy/hsmgate.example.yaml). This page lists every setting, what happens when it is left out, and whether a change needs a restart or a reload (`kill -HUP`, [operations.md](operations.md)).
 
-**Reload or restart.** A reload (SIGHUP) takes a new file as a whole or not at all (a refused file leaves the old one running). It changes the tokens' keys, the keys, the clients, the policy and the certificates. These need a **restart**: `listen`, `admin_socket`, `audit.file`, `limits`, `transit.mount`, `kmsjson.enabled`, `kmsgrpc.enabled` and `kmsgrpc.token_path`, `kmsrest.enabled` and `kmsrest.tenant`, and the module or slot of a `pkcs11` token.
+**Reload or restart.** A reload (SIGHUP) takes a new file as a whole or not at all (a refused file leaves the old one running). It changes the tokens' keys, the keys, the clients, the policy and the certificates. These need a **restart**: `listen`, `admin_socket`, `audit.file`, `audit.stdout`, `audit.max_size_mb`, `audit.max_files`, `limits`, `transit.mount`, `kmsjson.enabled`, `kmsgrpc.enabled` and `kmsgrpc.token_path`, `kmsrest.enabled` and `kmsrest.tenant`, and the module or slot of a `pkcs11` token.
 
 ## The service
 
@@ -33,6 +33,9 @@ The smallest working file is the one `hsmgate dev -dir DIR` writes (`DIR/hsmgate
 | Setting | Default | Meaning |
 |---|---|---|
 | `metrics.enabled` | `false` | `GET /metrics` on the admin socket, Prometheus text format. What is counted tells when secrets are used: treat it as sensitive |
+| `audit.stdout` | `false` | with `audit.file`, also write every audit line to standard output (for a log collector that reads the container's output). Without a file the audit is on standard output anyway. If either write fails the call is answered 503 as for any audit failure. Needs a restart |
+| `audit.max_size_mb` | `0`: no limit, the file grows and is never rotated by the service | rotate the audit file when a line would pass this size (MiB): `audit.log` becomes `audit.log.1`, `.1` becomes `.2`, and so on; the oldest beyond `audit.max_files` is deleted. Needs `audit.file`. **Without it a full disk stops the service** (503). Needs a restart |
+| `audit.max_files` | `5` when `max_size_mb` is set | how many older files are kept (`audit.log.1` is the newest). Needs `audit.file`. Needs a restart |
 | `metrics.detail` | `basic` | `basic`: decisions by face and outcome class; `full`: also the operation and the result word of the audit line |
 | `debug.pprof` | `false` | the profiles of the process (CPU, heap, goroutines) on the admin socket. A heap profile may hold secrets: for the operator who holds the socket |
 

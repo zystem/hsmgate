@@ -1,0 +1,24 @@
+# Reads the audit file of hsmgate and sends EVERY line as its own POST to the `collector` plugin of Falco (falco.yaml here).
+# One line per request is required: the collector takes one JSON object per request and drops a body of several lines or an array without an event
+# (tested 2026-11-13 with Falco 0.45.2). Fluent Bit cannot limit its batch to one record, Vector can (batch.max_events: 1).
+# The file is the audit file of the chart (audit.file=true) at /var/log/hsmgate/audit.log: run Vector where it can read that file.
+sources:
+  audit:
+    type: file
+    include: [/var/log/hsmgate/audit.log]
+    read_from: beginning
+transforms:
+  parse:
+    type: remap
+    inputs: [audit]
+    source: |
+      . = parse_json!(.message)
+sinks:
+  falco:
+    type: http
+    inputs: [parse]
+    uri: http://falco.falco.svc:54827/      # the Service of your Falco
+    method: post
+    encoding: {codec: json}
+    framing: {method: newline_delimited}
+    batch: {max_events: 1}

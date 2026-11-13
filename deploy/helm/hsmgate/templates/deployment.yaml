@@ -19,6 +19,9 @@ spec:
       annotations:
         # a changed configuration restarts the pod (a reload by SIGHUP is possible but the chart keeps it simple)
         checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- if .Values.fluentbit.enabled }}
+        checksum/fluentbit: {{ include (print $.Template.BasePath "/configmap-fluentbit.yaml") . | sha256sum }}
+        {{- end }}
         {{- with .Values.podAnnotations }}{{ toYaml . | nindent 8 }}{{ end }}
     spec:
       serviceAccountName: {{ include "hsmgate.serviceAccountName" . }}
@@ -78,6 +81,28 @@ spec:
             - {name: soft, mountPath: /etc/hsmgate/soft, readOnly: true}
             - {name: run, mountPath: /run/hsmgate}
             - {name: audit, mountPath: /var/log/hsmgate}
+        {{- if .Values.fluentbit.enabled }}
+        # Ships the audit file to what `fluentbit.outputs` says. It reads the file (a volume shared with hsmgate); it never sees a key or a PIN, only what the audit file has.
+        # uid 0 because the audit file is 0640 and owned by root; no capability, a read-only root file system.
+        - name: fluent-bit
+          image: {{ if .Values.fluentbit.image.digest }}{{ printf "%s@%s" .Values.fluentbit.image.repository .Values.fluentbit.image.digest | quote }}{{ else }}{{ printf "%s:%s" .Values.fluentbit.image.repository .Values.fluentbit.image.tag | quote }}{{ end }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: [/fluent-bit/bin/fluent-bit, -c, /fluent-bit/etc/fluent-bit.conf]
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          resources: {{- toYaml .Values.fluentbit.resources | nindent 12 }}
+          volumeMounts:
+            - {name: fluentbit-config, mountPath: /fluent-bit/etc, readOnly: true}
+            - {name: audit, mountPath: /var/log/hsmgate, readOnly: true}
+            - {name: fluentbit-state, mountPath: /var/lib/fluent-bit}
+        {{- end }}
+        {{- with .Values.extraContainers }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
       volumes:
         - name: config
           configMap: {name: {{ include "hsmgate.fullname" . }}}
@@ -92,6 +117,15 @@ spec:
           secret: {secretName: {{ include "hsmgate.softSecret" . }}, defaultMode: 256}
         - name: run
           emptyDir: {medium: Memory, sizeLimit: 1Mi}
+        {{- if .Values.fluentbit.enabled }}
+        - name: fluentbit-config
+          configMap: {name: {{ include "hsmgate.fullname" . }}-fluentbit}
+        - name: fluentbit-state
+          emptyDir: {sizeLimit: 16Mi}   # the offset of the reading: lost with the pod, then the file is read again from the start
+        {{- end }}
+        {{- with .Values.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
         - name: audit
           {{- if $audit.enabled }}
           persistentVolumeClaim: {claimName: {{ default (printf "%s-audit" (include "hsmgate.fullname" .)) $audit.existingClaim }}}

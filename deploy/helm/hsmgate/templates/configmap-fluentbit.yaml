@@ -1,0 +1,35 @@
+{{- if .Values.fluentbit.enabled }}
+{{- if not .Values.audit.file }}{{ fail "fluentbit.enabled needs audit.file=true (the sidecar reads the audit file; it cannot read the output of another container)" }}{{ end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "hsmgate.fullname" . }}-fluentbit
+  labels: {{- include "hsmgate.labels" . | nindent 4 }}
+data:
+  fluent-bit.conf: |
+    [SERVICE]
+        Flush        1
+        Log_Level    info
+        Parsers_File /fluent-bit/etc/hsmgate-parsers.conf
+
+    [INPUT]
+        Name           tail
+        Path           /var/log/hsmgate/audit.log
+        Tag            hsmgate.audit
+        Parser         hsmgate_audit
+        DB             /var/lib/fluent-bit/audit.db
+        Read_from_Head true
+        Rotate_Wait    5
+        Refresh_Interval 5
+
+    {{- .Values.fluentbit.filters | nindent 4 }}
+
+    {{- .Values.fluentbit.outputs | nindent 4 }}
+  hsmgate-parsers.conf: |
+    [PARSER]
+        Name        hsmgate_audit
+        Format      json
+        Time_Key    time
+        Time_Format %Y-%m-%dT%H:%M:%S.%LZ
+        Time_Keep   On
+{{- end }}
