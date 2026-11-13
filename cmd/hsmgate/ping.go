@@ -66,7 +66,7 @@ func pingTLS(addr, certFile, keyFile, caFile, name string, timeout time.Duration
 	if err != nil {
 		return err
 	}
-	pem, err := os.ReadFile(caFile)
+	pem, err := os.ReadFile(caFile) // #nosec G304 -- the CA file is the operator's own flag
 	if err != nil {
 		return err
 	}
