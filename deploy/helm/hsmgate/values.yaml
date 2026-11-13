@@ -61,7 +61,7 @@ config:
 
 # --- the audit log ------------------------------------------------------------------------------------------------------------------------------------
 # By default the audit goes to the output of the container only. With file: true it is also a file (/var/log/hsmgate/audit.log); on an emptyDir that is lost with the pod, a claim keeps it.
-# stdout: also write every line to the output of the container (`kubectl logs`, a log collector). Needs an image with `audit.stdout` (after v0.7.3); set false for an older one.
+# stdout: also write every line to the output of the container (`kubectl logs`, a log collector). Needs an image newer than v0.7.4 with audit.file=true; set false (and maxSizeMB 0) for an older one.
 # file: false (the default) writes no file, only to the output of the container (`kubectl logs`, a log collector; the runtime rotates that and nothing can fill a volume).
 # file: true also writes /var/log/hsmgate/audit.log (persistence below keeps it); stdout then says whether the lines are also on the output. maxSizeMB > 0 makes the service rotate the file
 # (audit.log.1 ... audit.log.<maxFiles>) so that it cannot fill the volume: at most maxSizeMB x (maxFiles + 1) is on it (the default 150 MB; the emptyDir without

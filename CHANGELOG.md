@@ -10,6 +10,7 @@
 - **API reference**: OpenAPI files for every API of the service in `api/` (`kms-json.yaml`, `kms-rest.yaml`, `kms-grpc.yaml`, `admin.yaml`, next to the Transit `openapi.yaml`), a page that shows them all ([api/index.html](api/index.html), Scalar, read-only), and a workflow that publishes `api/` to GitHub Pages when a file there changes on `main` (the owner sets Settings, Pages, Source to "GitHub Actions" once). `internal/apispec` checks the files against the code. The service itself still serves no UI. gRPC is described as OpenAPI for lack of a better page; the answer fields of the new files are written from the code and are not tested.
 
 ### Changed
+- Helm chart: with `audit.file=true` the keys `stdout`, `max_size_mb` and `max_files` are written into the configuration only when they are on, so an image that does not know them (up to v0.7.3) still starts with `audit.stdout=false` and `audit.maxSizeMB=0`. Run in a Talos cluster on 2026-11-13 with `ghcr.io/zystem/hsmgate:v0.7.3`: the audit in `kubectl logs`, the Fluent Bit sidecar, `extraContainers`/`extraVolumes` (details in the chart README).
 - Helm chart: `audit.file` defaults to **false**; the audit goes only to the output of the container (`kubectl logs`). Set `audit.file=true` to keep the file as before.
 
 ## 0.7.4 — 2026-11-11
