@@ -1,0 +1,380 @@
+openapi: 3.1.0
+info:
+  title: hsmgate REST face (KMS-REST)
+  version: 0.1.0
+  summary: A subset of the REST API of a cloud key vault, as its client libraries speak it. Optional (kmsrest.enabled).
+  description: |
+    JSON over HTTPS on the same listener as the other faces. The face is **not** that service and not affiliated with its vendor; the vendor's names appear only where the wire needs them
+    (paths, field and algorithm names, the challenge). Design and limits: docs/specs/kms-rest.md.
+
+    **Authentication** is an OAuth 2.0 bearer token from `POST /{tenant}/oauth2/v2.0/token` (client secret, or an RS256 assertion). A call without a valid bearer answers `401` with
+    `WWW-Authenticate: Bearer authorization="https://HOST/TENANT", resource="https://vault.azure.net"`. A client certificate, if shown, must be the client's; without one the client needs
+    `oauth.no_cert` and a listed address. **Authorisation** is per client and key (rights, a rate limit); a key that is not there, not on the face, or not allowed is one answer: `403`.
+
+    `api-version` is required on key calls and not interpreted. A version is 32 hexadecimal digits; a missing version is the latest. Values (`value`, `digest`, `aad`) are base64url without padding.
+    Errors: `{"error": {"code": "...", "message": "..."}}`. Everything else answers `404`. Keys are never created, rotated, imported or deleted through this API.
+  license: {name: MIT, identifier: MIT}
+servers:
+  - url: https://hsmgate.example.org:8443
+    description: Replace with the address of your service.
+tags:
+  - {name: auth, description: Token endpoint and discovery}
+  - {name: keys, description: Look a key up}
+  - {name: crypto, description: Sign, verify, encrypt, decrypt, wrap}
+  - {name: random, description: Random bytes}
+security:
+  - bearer: []
+paths:
+  /{tenant}/v2.0/.well-known/openid-configuration:
+    get:
+      operationId: discovery
+      tags: [auth]
+      summary: Where the token endpoint is (public)
+      security: []
+      parameters: [{$ref: '#/components/parameters/tenant'}]
+      responses:
+        '200': {description: The discovery document, content: {application/json: {schema: {$ref: '#/components/schemas/Discovery'}}}}
+  /{tenant}/oauth2/v2.0/token:
+    post:
+      operationId: token
+      tags: [auth]
+      summary: Trade a client secret or an RS256 assertion for an access token (one hour, in memory only)
+      security: []
+      parameters: [{$ref: '#/components/parameters/tenant'}]
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema: {$ref: '#/components/schemas/TokenRequest'}
+      responses:
+        '200': {description: An opaque bearer token, content: {application/json: {schema: {$ref: '#/components/schemas/TokenResponse'}}}}
+        '400': {description: A request the endpoint does not take (an OAuth error), content: {application/json: {schema: {$ref: '#/components/schemas/OAuthError'}}}}
+        '401': {description: The credential is not valid, content: {application/json: {schema: {$ref: '#/components/schemas/OAuthError'}}}}
+        '429': {$ref: '#/components/responses/Throttled'}
+        '503': {$ref: '#/components/responses/Unavailable'}
+  /keys:
+    get:
+      operationId: list_keys
+      tags: [keys]
+      summary: The keys on the face that the client may see
+      parameters: [{$ref: '#/components/parameters/apiVersion'}]
+      responses:
+        '200': {description: The keys, content: {application/json: {schema: {$ref: '#/components/schemas/KeyList'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '429': {$ref: '#/components/responses/Throttled'}
+        '503': {$ref: '#/components/responses/Unavailable'}
+  /keys/{name}/versions:
+    get:
+      operationId: list_versions
+      tags: [keys]
+      summary: The versions of a key
+      parameters: [{$ref: '#/components/parameters/name'}, {$ref: '#/components/parameters/apiVersion'}]
+      responses:
+        '200': {description: The versions, content: {application/json: {schema: {$ref: '#/components/schemas/KeyList'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '503': {$ref: '#/components/responses/Unavailable'}
+  /keys/{name}:
+    get:
+      operationId: get_key
+      tags: [keys]
+      summary: The public key (a JWK EC-HSM, P-256) of a signing key; other usages answer an oct-HSM with no material
+      parameters: [{$ref: '#/components/parameters/name'}, {$ref: '#/components/parameters/apiVersion'}]
+      responses:
+        '200': {description: The key, content: {application/json: {schema: {$ref: '#/components/schemas/KeyBundle'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '429': {$ref: '#/components/responses/Throttled'}
+        '503': {$ref: '#/components/responses/Unavailable'}
+  /keys/{name}/{version}:
+    get:
+      operationId: get_key_version
+      tags: [keys]
+      summary: One version of the key (as /keys/{name})
+      parameters: [{$ref: '#/components/parameters/name'}, {$ref: '#/components/parameters/version'}, {$ref: '#/components/parameters/apiVersion'}]
+      responses:
+        '200': {description: The key, content: {application/json: {schema: {$ref: '#/components/schemas/KeyBundle'}}}}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '503': {$ref: '#/components/responses/Unavailable'}
+  /keys/{name}/sign:
+    post:
+      operationId: sign
+      tags: [crypto]
+      summary: ES256 over a SHA-256 digest (ECDSA on the token, signature r‖s, 64 bytes); HS256, HS384 or HS512 on a MAC key
+      parameters: [{$ref: '#/components/parameters/name'}, {$ref: '#/components/parameters/apiVersion'}]
+      requestBody: {$ref: '#/components/requestBodies/Operation'}
+      responses:
+        '200': {description: The result, content: {application/json: {schema: {$ref: '#/components/schemas/Result'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '429': {$ref: '#/components/responses/Throttled'}
+        '503': {$ref: '#/components/responses/Unavailable'}
+  /keys/{name}/{version}/sign:
+    post:
+      operationId: sign_version
+      tags: [crypto]
+      summary: As sign, for one version
+      parameters: [{$ref: '#/components/parameters/name'}, {$ref: '#/components/parameters/version'}, {$ref: '#/components/parameters/apiVersion'}]
+      requestBody: {$ref: '#/components/requestBodies/Operation'}
+      responses:
+        '200': {description: The result, content: {application/json: {schema: {$ref: '#/components/schemas/Result'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '429': {$ref: '#/components/responses/Throttled'}
+        '503': {$ref: '#/components/responses/Unavailable'}
+  /keys/{name}/verify:
+    post:
+      operationId: verify
+      tags: [crypto]
+      summary: Verify an ES256 signature (digest, value) or an HS256/384/512 MAC
+      parameters: [{$ref: '#/components/parameters/name'}, {$ref: '#/components/parameters/apiVersion'}]
+      requestBody: {$ref: '#/components/requestBodies/Operation'}
+      responses:
+        '200': {description: The result, content: {application/json: {schema: {$ref: '#/components/schemas/Result'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '429': {$ref: '#/components/responses/Throttled'}
+        '503': {$ref: '#/components/responses/Unavailable'}
+  /keys/{name}/{version}/verify:
+    post:
+      operationId: verify_version
+      tags: [crypto]
+      summary: As verify, for one version
+      parameters: [{$ref: '#/components/parameters/name'}, {$ref: '#/components/parameters/version'}, {$ref: '#/components/parameters/apiVersion'}]
+      requestBody: {$ref: '#/components/requestBodies/Operation'}
+      responses:
+        '200': {description: The result, content: {application/json: {schema: {$ref: '#/components/schemas/Result'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '429': {$ref: '#/components/responses/Throttled'}
+        '503': {$ref: '#/components/responses/Unavailable'}
+  /keys/{name}/encrypt:
+    post:
+      operationId: encrypt
+      tags: [crypto]
+      summary: Seal under the key (alg A256GCM as the clients name it; the blob is an ecies2 blob in `value`; up to 64 KiB; `aad` is passed as it is)
+      parameters: [{$ref: '#/components/parameters/name'}, {$ref: '#/components/parameters/apiVersion'}]
+      requestBody: {$ref: '#/components/requestBodies/Operation'}
+      responses:
+        '200': {description: The result, content: {application/json: {schema: {$ref: '#/components/schemas/Result'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '429': {$ref: '#/components/responses/Throttled'}
+        '503': {$ref: '#/components/responses/Unavailable'}
+  /keys/{name}/{version}/encrypt:
+    post:
+      operationId: encrypt_version
+      tags: [crypto]
+      summary: As encrypt, for one version
+      parameters: [{$ref: '#/components/parameters/name'}, {$ref: '#/components/parameters/version'}, {$ref: '#/components/parameters/apiVersion'}]
+      requestBody: {$ref: '#/components/requestBodies/Operation'}
+      responses:
+        '200': {description: The result, content: {application/json: {schema: {$ref: '#/components/schemas/Result'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '429': {$ref: '#/components/responses/Throttled'}
+        '503': {$ref: '#/components/responses/Unavailable'}
+  /keys/{name}/decrypt:
+    post:
+      operationId: decrypt
+      tags: [crypto]
+      summary: Open a blob sealed by encrypt (the blob names key and version)
+      parameters: [{$ref: '#/components/parameters/name'}, {$ref: '#/components/parameters/apiVersion'}]
+      requestBody: {$ref: '#/components/requestBodies/Operation'}
+      responses:
+        '200': {description: The result, content: {application/json: {schema: {$ref: '#/components/schemas/Result'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '429': {$ref: '#/components/responses/Throttled'}
+        '503': {$ref: '#/components/responses/Unavailable'}
+  /keys/{name}/{version}/decrypt:
+    post:
+      operationId: decrypt_version
+      tags: [crypto]
+      summary: As decrypt, for one version
+      parameters: [{$ref: '#/components/parameters/name'}, {$ref: '#/components/parameters/version'}, {$ref: '#/components/parameters/apiVersion'}]
+      requestBody: {$ref: '#/components/requestBodies/Operation'}
+      responses:
+        '200': {description: The result, content: {application/json: {schema: {$ref: '#/components/schemas/Result'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '429': {$ref: '#/components/responses/Throttled'}
+        '503': {$ref: '#/components/responses/Unavailable'}
+  /keys/{name}/wrapkey:
+    post:
+      operationId: wrapkey
+      tags: [crypto]
+      summary: As encrypt (alg A256KW)
+      parameters: [{$ref: '#/components/parameters/name'}, {$ref: '#/components/parameters/apiVersion'}]
+      requestBody: {$ref: '#/components/requestBodies/Operation'}
+      responses:
+        '200': {description: The result, content: {application/json: {schema: {$ref: '#/components/schemas/Result'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '429': {$ref: '#/components/responses/Throttled'}
+        '503': {$ref: '#/components/responses/Unavailable'}
+  /keys/{name}/{version}/wrapkey:
+    post:
+      operationId: wrapkey_version
+      tags: [crypto]
+      summary: As wrapkey, for one version
+      parameters: [{$ref: '#/components/parameters/name'}, {$ref: '#/components/parameters/version'}, {$ref: '#/components/parameters/apiVersion'}]
+      requestBody: {$ref: '#/components/requestBodies/Operation'}
+      responses:
+        '200': {description: The result, content: {application/json: {schema: {$ref: '#/components/schemas/Result'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '429': {$ref: '#/components/responses/Throttled'}
+        '503': {$ref: '#/components/responses/Unavailable'}
+  /keys/{name}/unwrapkey:
+    post:
+      operationId: unwrapkey
+      tags: [crypto]
+      summary: As decrypt (alg A256KW)
+      parameters: [{$ref: '#/components/parameters/name'}, {$ref: '#/components/parameters/apiVersion'}]
+      requestBody: {$ref: '#/components/requestBodies/Operation'}
+      responses:
+        '200': {description: The result, content: {application/json: {schema: {$ref: '#/components/schemas/Result'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '429': {$ref: '#/components/responses/Throttled'}
+        '503': {$ref: '#/components/responses/Unavailable'}
+  /keys/{name}/{version}/unwrapkey:
+    post:
+      operationId: unwrapkey_version
+      tags: [crypto]
+      summary: As unwrapkey, for one version
+      parameters: [{$ref: '#/components/parameters/name'}, {$ref: '#/components/parameters/version'}, {$ref: '#/components/parameters/apiVersion'}]
+      requestBody: {$ref: '#/components/requestBodies/Operation'}
+      responses:
+        '200': {description: The result, content: {application/json: {schema: {$ref: '#/components/schemas/Result'}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '429': {$ref: '#/components/responses/Throttled'}
+        '503': {$ref: '#/components/responses/Unavailable'}
+  /rng:
+    post:
+      operationId: rng
+      tags: [random]
+      summary: 1 to 128 bytes of the operating system's generator
+      parameters: [{$ref: '#/components/parameters/apiVersion'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {type: object, properties: {count: {type: integer, minimum: 1, maximum: 128}}, required: [count]}}}
+      responses:
+        '200': {description: The bytes, content: {application/json: {schema: {type: object, properties: {value: {type: string, description: base64url}}}}}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '429': {$ref: '#/components/responses/Throttled'}
+        '503': {$ref: '#/components/responses/Unavailable'}
+components:
+  securitySchemes:
+    bearer: {type: http, scheme: bearer, description: An access token from the token endpoint}
+  parameters:
+    tenant: {name: tenant, in: path, required: true, schema: {type: string}, description: The `kmsrest.tenant` of the configuration}
+    name: {name: name, in: path, required: true, schema: {type: string}, description: The key}
+    version: {name: version, in: path, required: true, schema: {type: string, pattern: '^[0-9a-f]{32}$'}, description: 32 hexadecimal digits; the number of the version of the key}
+    apiVersion: {name: api-version, in: query, required: true, schema: {type: string}, description: Required, not interpreted}
+  requestBodies:
+    Operation:
+      required: true
+      content: {application/json: {schema: {$ref: '#/components/schemas/Operation'}}}
+  responses:
+    BadRequest: {description: 'BadParameter: usage, algorithm, size, damaged ciphertext, bad JSON', content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+    Unauthorized:
+      description: No valid bearer
+      headers: {WWW-Authenticate: {schema: {type: string}, description: 'The challenge the client libraries answer'}}
+      content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}
+    Forbidden: {description: The key is not there, not on the face, or the client has no right: one answer, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+    Throttled: {description: Over the rate limit or a full queue to the token, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+    Unavailable: {description: 'The token is locked or absent, or the audit line cannot be written (ServiceUnavailable)', content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  schemas:
+    Discovery:
+      type: object
+      properties:
+        issuer: {type: string}
+        token_endpoint: {type: string}
+        authorization_endpoint: {type: string}
+        token_endpoint_auth_methods_supported: {type: array, items: {type: string}}
+    TokenRequest:
+      type: object
+      required: [grant_type]
+      properties:
+        grant_type: {type: string, enum: [client_credentials]}
+        client_id: {type: string}
+        client_secret: {type: string}
+        client_assertion_type: {type: string, description: 'urn:ietf:params:oauth:client-assertion-type:jwt-bearer'}
+        client_assertion: {type: string, description: An RS256 JWT, iss and sub the client id, at most 24 hours long}
+        scope: {type: string}
+    TokenResponse:
+      type: object
+      properties:
+        token_type: {type: string, enum: [Bearer]}
+        expires_in: {type: integer}
+        ext_expires_in: {type: integer}
+        access_token: {type: string, description: Opaque}
+    OAuthError:
+      type: object
+      properties: {error: {type: string}, error_description: {type: string}}
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties: {code: {type: string}, message: {type: string}}
+    Attributes:
+      type: object
+      properties:
+        enabled: {type: boolean}
+        created: {type: integer}
+        updated: {type: integer}
+        recoveryLevel: {type: string}
+    KeyBundle:
+      type: object
+      properties:
+        key:
+          type: object
+          properties:
+            kid: {type: string}
+            kty: {type: string, description: 'EC-HSM for a signing key, oct-HSM otherwise'}
+            crv: {type: string, enum: [P-256]}
+            key_ops: {type: array, items: {type: string}}
+            x: {type: string, description: base64url}
+            y: {type: string, description: base64url}
+        attributes: {$ref: '#/components/schemas/Attributes'}
+    KeyList:
+      type: object
+      properties:
+        value:
+          type: array
+          items:
+            type: object
+            properties: {kid: {type: string}, attributes: {$ref: '#/components/schemas/Attributes'}}
+        nextLink: {type: [string, 'null']}
+    Operation:
+      type: object
+      description: The fields a call uses; the others are ignored.
+      properties:
+        alg: {type: string, enum: [ES256, HS256, HS384, HS512, A256GCM, A256KW]}
+        value: {type: string, description: 'base64url: the data to seal, the blob to open, the message of a MAC, a signature to verify'}
+        digest: {type: string, description: 'base64url: a SHA-256 digest (ES256)'}
+        aad: {type: string, description: 'base64url: additional authenticated data, passed as it is'}
+    Result:
+      type: object
+      properties:
+        kid: {type: string}
+        value: {description: 'base64url string; for verify a boolean', oneOf: [{type: string}, {type: boolean}]}

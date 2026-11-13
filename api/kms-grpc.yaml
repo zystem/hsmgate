@@ -1,0 +1,593 @@
+openapi: 3.1.0
+info:
+  title: hsmgate gRPC face (KMS-gRPC)
+  version: 0.1.0
+  summary: 'A subset of the gRPC API of a cloud key service. Optional (kmsgrpc.enabled). Documented as OpenAPI for lack of a better page: it is not REST.'
+  description: 'gRPC unary calls over HTTP/2 on the same listener as the other faces, messages in protobuf. There is no `.proto` file and no gRPC library in the service: the framing and the few messages
+    are written by hand (`internal/face/kmsgrpc/pb.go`); the field numbers are those of the public definitions of the cloud service the clients are written for, and are checked by the black-box test `test/kmsgrpc-sdk`
+    with its official client library. **The face is not that service** and not affiliated with its vendor (docs/specs/kms-grpc.md).
+
+
+    OpenAPI cannot describe gRPC, so each method is shown as a `POST` with `application/grpc`; the messages are listed with their field numbers (`x-protobuf-fields`). **Try it out cannot work here.** The
+    authors of the client libraries use these calls; people usually need only the table of methods and the status codes.
+
+
+    **Authentication**: a service account JWT (RS256), traded at `POST <kmsgrpc.token_path>` (`grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer`) for an opaque access token, or sent as the bearer
+    itself. A client certificate, if shown, must be the client''s; without one the client needs `jwt.no_cert` and a listed address. The token endpoint is shown below.'
+  license:
+    name: MIT
+    identifier: MIT
+servers:
+- url: https://hsmgate.example.org:8443
+  description: Replace with the address of your service.
+tags:
+- name: auth
+  description: Token endpoint
+- name: methods
+  description: KeyManagementService methods that are served
+paths:
+  /oauth2/token:
+    post:
+      operationId: token
+      tags:
+      - auth
+      summary: Trade a JWT assertion (RS256) for an access token (one hour, in memory only)
+      description: The path is `kmsgrpc.token_path` (default `/oauth2/token`).
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required:
+              - grant_type
+              - assertion
+              properties:
+                grant_type:
+                  type: string
+                  const: urn:ietf:params:oauth:grant-type:jwt-bearer
+                assertion:
+                  type: string
+                  description: A JWT, RS256, issuer = jwt.issuer; not expired (5 minutes of skew), not issued in the future, at most 24 hours long
+      responses:
+        '200':
+          description: An opaque bearer token
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  access_token:
+                    type: string
+                  token_type:
+                    type: string
+                  expires_in:
+                    type: integer
+        '400':
+          description: A request the endpoint does not take
+        '401':
+          description: The assertion is not valid
+  /google.cloud.kms.v1.KeyManagementService/GetPublicKey:
+    post:
+      operationId: GetPublicKey
+      tags:
+      - methods
+      summary: Public key of a sign_verify key (PEM, EC_SIGN_P256_SHA256, pem_crc32c)
+      description: 'Unary call over HTTP/2: `POST /google.cloud.kms.v1.KeyManagementService/GetPublicKey`, `Content-Type: application/grpc`, a protobuf message in gRPC framing. Resource names are `projects/P/locations/L/keyRings/R/cryptoKeys/KEY[/cryptoKeyVersions/N]`
+        with P, L, R from the configuration. Status codes: UNAUTHENTICATED (token), PERMISSION_DENIED (key not there, not on the face, or no right: one answer), INVALID_ARGUMENT, RESOURCE_EXHAUSTED, UNAVAILABLE
+        (token locked or absent, audit), INTERNAL.'
+      requestBody:
+        required: true
+        content:
+          application/grpc:
+            schema:
+              $ref: '#/components/schemas/GetPublicKeyRequest'
+      responses:
+        '200':
+          description: OK (grpc-status 0)
+          content:
+            application/grpc:
+              schema:
+                $ref: '#/components/schemas/PublicKey'
+        default:
+          description: A non-zero grpc-status (see the description)
+  /google.cloud.kms.v1.KeyManagementService/AsymmetricSign:
+    post:
+      operationId: AsymmetricSign
+      tags:
+      - methods
+      summary: ECDSA on the token over a SHA-256 digest; a DER signature; digest_crc32c is checked
+      description: 'Unary call over HTTP/2: `POST /google.cloud.kms.v1.KeyManagementService/AsymmetricSign`, `Content-Type: application/grpc`, a protobuf message in gRPC framing. Resource names are `projects/P/locations/L/keyRings/R/cryptoKeys/KEY[/cryptoKeyVersions/N]`
+        with P, L, R from the configuration. Status codes: UNAUTHENTICATED (token), PERMISSION_DENIED (key not there, not on the face, or no right: one answer), INVALID_ARGUMENT, RESOURCE_EXHAUSTED, UNAVAILABLE
+        (token locked or absent, audit), INTERNAL.'
+      requestBody:
+        required: true
+        content:
+          application/grpc:
+            schema:
+              $ref: '#/components/schemas/AsymmetricSignRequest'
+      responses:
+        '200':
+          description: OK (grpc-status 0)
+          content:
+            application/grpc:
+              schema:
+                $ref: '#/components/schemas/AsymmetricSignResponse'
+        default:
+          description: A non-zero grpc-status (see the description)
+  /google.cloud.kms.v1.KeyManagementService/Encrypt:
+    post:
+      operationId: Encrypt
+      tags:
+      - methods
+      summary: Seal under an encrypt_decrypt key (ecies2 blob authenticating name and version); AAD passed as it is; 64 KiB; checksums checked and answered
+      description: 'Unary call over HTTP/2: `POST /google.cloud.kms.v1.KeyManagementService/Encrypt`, `Content-Type: application/grpc`, a protobuf message in gRPC framing. Resource names are `projects/P/locations/L/keyRings/R/cryptoKeys/KEY[/cryptoKeyVersions/N]`
+        with P, L, R from the configuration. Status codes: UNAUTHENTICATED (token), PERMISSION_DENIED (key not there, not on the face, or no right: one answer), INVALID_ARGUMENT, RESOURCE_EXHAUSTED, UNAVAILABLE
+        (token locked or absent, audit), INTERNAL.'
+      requestBody:
+        required: true
+        content:
+          application/grpc:
+            schema:
+              $ref: '#/components/schemas/EncryptRequest'
+      responses:
+        '200':
+          description: OK (grpc-status 0)
+          content:
+            application/grpc:
+              schema:
+                $ref: '#/components/schemas/EncryptResponse'
+        default:
+          description: A non-zero grpc-status (see the description)
+  /google.cloud.kms.v1.KeyManagementService/Decrypt:
+    post:
+      operationId: Decrypt
+      tags:
+      - methods
+      summary: Open a blob
+      description: 'Unary call over HTTP/2: `POST /google.cloud.kms.v1.KeyManagementService/Decrypt`, `Content-Type: application/grpc`, a protobuf message in gRPC framing. Resource names are `projects/P/locations/L/keyRings/R/cryptoKeys/KEY[/cryptoKeyVersions/N]`
+        with P, L, R from the configuration. Status codes: UNAUTHENTICATED (token), PERMISSION_DENIED (key not there, not on the face, or no right: one answer), INVALID_ARGUMENT, RESOURCE_EXHAUSTED, UNAVAILABLE
+        (token locked or absent, audit), INTERNAL.'
+      requestBody:
+        required: true
+        content:
+          application/grpc:
+            schema:
+              $ref: '#/components/schemas/DecryptRequest'
+      responses:
+        '200':
+          description: OK (grpc-status 0)
+          content:
+            application/grpc:
+              schema:
+                $ref: '#/components/schemas/DecryptResponse'
+        default:
+          description: A non-zero grpc-status (see the description)
+  /google.cloud.kms.v1.KeyManagementService/MacSign:
+    post:
+      operationId: MacSign
+      tags:
+      - methods
+      summary: HMAC-SHA-256 (or the key's mac_hash) under a key derived on the token
+      description: 'Unary call over HTTP/2: `POST /google.cloud.kms.v1.KeyManagementService/MacSign`, `Content-Type: application/grpc`, a protobuf message in gRPC framing. Resource names are `projects/P/locations/L/keyRings/R/cryptoKeys/KEY[/cryptoKeyVersions/N]`
+        with P, L, R from the configuration. Status codes: UNAUTHENTICATED (token), PERMISSION_DENIED (key not there, not on the face, or no right: one answer), INVALID_ARGUMENT, RESOURCE_EXHAUSTED, UNAVAILABLE
+        (token locked or absent, audit), INTERNAL.'
+      requestBody:
+        required: true
+        content:
+          application/grpc:
+            schema:
+              $ref: '#/components/schemas/MacSignRequest'
+      responses:
+        '200':
+          description: OK (grpc-status 0)
+          content:
+            application/grpc:
+              schema:
+                $ref: '#/components/schemas/MacSignResponse'
+        default:
+          description: A non-zero grpc-status (see the description)
+  /google.cloud.kms.v1.KeyManagementService/MacVerify:
+    post:
+      operationId: MacVerify
+      tags:
+      - methods
+      summary: Verify a MAC
+      description: 'Unary call over HTTP/2: `POST /google.cloud.kms.v1.KeyManagementService/MacVerify`, `Content-Type: application/grpc`, a protobuf message in gRPC framing. Resource names are `projects/P/locations/L/keyRings/R/cryptoKeys/KEY[/cryptoKeyVersions/N]`
+        with P, L, R from the configuration. Status codes: UNAUTHENTICATED (token), PERMISSION_DENIED (key not there, not on the face, or no right: one answer), INVALID_ARGUMENT, RESOURCE_EXHAUSTED, UNAVAILABLE
+        (token locked or absent, audit), INTERNAL.'
+      requestBody:
+        required: true
+        content:
+          application/grpc:
+            schema:
+              $ref: '#/components/schemas/MacVerifyRequest'
+      responses:
+        '200':
+          description: OK (grpc-status 0)
+          content:
+            application/grpc:
+              schema:
+                $ref: '#/components/schemas/MacVerifyResponse'
+        default:
+          description: A non-zero grpc-status (see the description)
+  /google.cloud.kms.v1.KeyManagementService/GetCryptoKey:
+    post:
+      operationId: GetCryptoKey
+      tags:
+      - methods
+      summary: Metadata of a key (state ENABLED, protection level HSM)
+      description: 'Unary call over HTTP/2: `POST /google.cloud.kms.v1.KeyManagementService/GetCryptoKey`, `Content-Type: application/grpc`, a protobuf message in gRPC framing. Resource names are `projects/P/locations/L/keyRings/R/cryptoKeys/KEY[/cryptoKeyVersions/N]`
+        with P, L, R from the configuration. Status codes: UNAUTHENTICATED (token), PERMISSION_DENIED (key not there, not on the face, or no right: one answer), INVALID_ARGUMENT, RESOURCE_EXHAUSTED, UNAVAILABLE
+        (token locked or absent, audit), INTERNAL.'
+      requestBody:
+        required: true
+        content:
+          application/grpc:
+            schema:
+              type: string
+              format: binary
+              description: protobuf; see docs/specs/kms-grpc.md
+      responses:
+        '200':
+          description: OK (grpc-status 0)
+          content:
+            application/grpc:
+              schema:
+                type: string
+                format: binary
+                description: protobuf; see docs/specs/kms-grpc.md
+        default:
+          description: A non-zero grpc-status (see the description)
+  /google.cloud.kms.v1.KeyManagementService/GetCryptoKeyVersion:
+    post:
+      operationId: GetCryptoKeyVersion
+      tags:
+      - methods
+      summary: Metadata of a version
+      description: 'Unary call over HTTP/2: `POST /google.cloud.kms.v1.KeyManagementService/GetCryptoKeyVersion`, `Content-Type: application/grpc`, a protobuf message in gRPC framing. Resource names are
+        `projects/P/locations/L/keyRings/R/cryptoKeys/KEY[/cryptoKeyVersions/N]` with P, L, R from the configuration. Status codes: UNAUTHENTICATED (token), PERMISSION_DENIED (key not there, not on the
+        face, or no right: one answer), INVALID_ARGUMENT, RESOURCE_EXHAUSTED, UNAVAILABLE (token locked or absent, audit), INTERNAL.'
+      requestBody:
+        required: true
+        content:
+          application/grpc:
+            schema:
+              type: string
+              format: binary
+              description: protobuf; see docs/specs/kms-grpc.md
+      responses:
+        '200':
+          description: OK (grpc-status 0)
+          content:
+            application/grpc:
+              schema:
+                type: string
+                format: binary
+                description: protobuf; see docs/specs/kms-grpc.md
+        default:
+          description: A non-zero grpc-status (see the description)
+  /google.cloud.kms.v1.KeyManagementService/ListCryptoKeys:
+    post:
+      operationId: ListCryptoKeys
+      tags:
+      - methods
+      summary: The keys on the face that the client may see
+      description: 'Unary call over HTTP/2: `POST /google.cloud.kms.v1.KeyManagementService/ListCryptoKeys`, `Content-Type: application/grpc`, a protobuf message in gRPC framing. Resource names are `projects/P/locations/L/keyRings/R/cryptoKeys/KEY[/cryptoKeyVersions/N]`
+        with P, L, R from the configuration. Status codes: UNAUTHENTICATED (token), PERMISSION_DENIED (key not there, not on the face, or no right: one answer), INVALID_ARGUMENT, RESOURCE_EXHAUSTED, UNAVAILABLE
+        (token locked or absent, audit), INTERNAL.'
+      requestBody:
+        required: true
+        content:
+          application/grpc:
+            schema:
+              type: string
+              format: binary
+              description: protobuf; see docs/specs/kms-grpc.md
+      responses:
+        '200':
+          description: OK (grpc-status 0)
+          content:
+            application/grpc:
+              schema:
+                type: string
+                format: binary
+                description: protobuf; see docs/specs/kms-grpc.md
+        default:
+          description: A non-zero grpc-status (see the description)
+  /google.cloud.kms.v1.KeyManagementService/ListCryptoKeyVersions:
+    post:
+      operationId: ListCryptoKeyVersions
+      tags:
+      - methods
+      summary: The versions of a key
+      description: 'Unary call over HTTP/2: `POST /google.cloud.kms.v1.KeyManagementService/ListCryptoKeyVersions`, `Content-Type: application/grpc`, a protobuf message in gRPC framing. Resource names are
+        `projects/P/locations/L/keyRings/R/cryptoKeys/KEY[/cryptoKeyVersions/N]` with P, L, R from the configuration. Status codes: UNAUTHENTICATED (token), PERMISSION_DENIED (key not there, not on the
+        face, or no right: one answer), INVALID_ARGUMENT, RESOURCE_EXHAUSTED, UNAVAILABLE (token locked or absent, audit), INTERNAL.'
+      requestBody:
+        required: true
+        content:
+          application/grpc:
+            schema:
+              type: string
+              format: binary
+              description: protobuf; see docs/specs/kms-grpc.md
+      responses:
+        '200':
+          description: OK (grpc-status 0)
+          content:
+            application/grpc:
+              schema:
+                type: string
+                format: binary
+                description: protobuf; see docs/specs/kms-grpc.md
+        default:
+          description: A non-zero grpc-status (see the description)
+  /google.cloud.kms.v1.KeyManagementService/GenerateRandomBytes:
+    post:
+      operationId: GenerateRandomBytes
+      tags:
+      - methods
+      summary: 1 to 1024 bytes of the operating system's generator
+      description: 'Unary call over HTTP/2: `POST /google.cloud.kms.v1.KeyManagementService/GenerateRandomBytes`, `Content-Type: application/grpc`, a protobuf message in gRPC framing. Resource names are
+        `projects/P/locations/L/keyRings/R/cryptoKeys/KEY[/cryptoKeyVersions/N]` with P, L, R from the configuration. Status codes: UNAUTHENTICATED (token), PERMISSION_DENIED (key not there, not on the
+        face, or no right: one answer), INVALID_ARGUMENT, RESOURCE_EXHAUSTED, UNAVAILABLE (token locked or absent, audit), INTERNAL.'
+      requestBody:
+        required: true
+        content:
+          application/grpc:
+            schema:
+              $ref: '#/components/schemas/GenerateRandomBytesRequest'
+      responses:
+        '200':
+          description: OK (grpc-status 0)
+          content:
+            application/grpc:
+              schema:
+                $ref: '#/components/schemas/GenerateRandomBytesResponse'
+        default:
+          description: A non-zero grpc-status (see the description)
+components:
+  schemas:
+    GetPublicKeyRequest:
+      type: object
+      description: A protobuf message. Fields are listed with their numbers; on the wire the body is protobuf in gRPC framing, not JSON.
+      properties:
+        name:
+          description: 'field 1: string'
+      x-protobuf-fields:
+        name: 1
+    PublicKey:
+      type: object
+      description: A protobuf message. Fields are listed with their numbers; on the wire the body is protobuf in gRPC framing, not JSON.
+      properties:
+        pem:
+          description: 'field 1: string'
+        algorithm:
+          description: 'field 2: enum'
+        pem_crc32c:
+          description: 'field 3: Int64Value'
+        name:
+          description: 'field 4: string'
+        protection_level:
+          description: 'field 5: enum'
+      x-protobuf-fields:
+        pem: 1
+        algorithm: 2
+        pem_crc32c: 3
+        name: 4
+        protection_level: 5
+    AsymmetricSignRequest:
+      type: object
+      description: A protobuf message. Fields are listed with their numbers; on the wire the body is protobuf in gRPC framing, not JSON.
+      properties:
+        name:
+          description: 'field 1: string'
+        digest:
+          description: 'field 3: Digest (sha256 bytes = field 1)'
+        digest_crc32c:
+          description: 'field 4: Int64Value'
+      x-protobuf-fields:
+        name: 1
+        digest: 3
+        digest_crc32c: 4
+    AsymmetricSignResponse:
+      type: object
+      description: A protobuf message. Fields are listed with their numbers; on the wire the body is protobuf in gRPC framing, not JSON.
+      properties:
+        signature:
+          description: 'field 1: bytes'
+        signature_crc32c:
+          description: 'field 2: Int64Value'
+        verified_digest_crc32c:
+          description: 'field 3: bool'
+        name:
+          description: 'field 4: string'
+        protection_level:
+          description: 'field 6: enum'
+      x-protobuf-fields:
+        signature: 1
+        signature_crc32c: 2
+        verified_digest_crc32c: 3
+        name: 4
+        protection_level: 6
+    EncryptRequest:
+      type: object
+      description: A protobuf message. Fields are listed with their numbers; on the wire the body is protobuf in gRPC framing, not JSON.
+      properties:
+        name:
+          description: 'field 1: string'
+        plaintext:
+          description: 'field 2: bytes'
+        additional_authenticated_data:
+          description: 'field 3: bytes'
+        plaintext_crc32c:
+          description: 'field 7: Int64Value'
+        additional_authenticated_data_crc32c:
+          description: 'field 8: Int64Value'
+      x-protobuf-fields:
+        name: 1
+        plaintext: 2
+        additional_authenticated_data: 3
+        plaintext_crc32c: 7
+        additional_authenticated_data_crc32c: 8
+    EncryptResponse:
+      type: object
+      description: A protobuf message. Fields are listed with their numbers; on the wire the body is protobuf in gRPC framing, not JSON.
+      properties:
+        name:
+          description: 'field 1: string'
+        ciphertext:
+          description: 'field 2: bytes'
+        ciphertext_crc32c:
+          description: 'field 4: Int64Value'
+        verified_plaintext_crc32c:
+          description: 'field 5: bool'
+        verified_additional_authenticated_data_crc32c:
+          description: 'field 6: bool'
+        protection_level:
+          description: 'field 7: enum'
+      x-protobuf-fields:
+        name: 1
+        ciphertext: 2
+        ciphertext_crc32c: 4
+        verified_plaintext_crc32c: 5
+        verified_additional_authenticated_data_crc32c: 6
+        protection_level: 7
+    DecryptRequest:
+      type: object
+      description: A protobuf message. Fields are listed with their numbers; on the wire the body is protobuf in gRPC framing, not JSON.
+      properties:
+        name:
+          description: 'field 1: string'
+        ciphertext:
+          description: 'field 2: bytes'
+        additional_authenticated_data:
+          description: 'field 3: bytes'
+        ciphertext_crc32c:
+          description: 'field 5: Int64Value'
+        additional_authenticated_data_crc32c:
+          description: 'field 6: Int64Value'
+      x-protobuf-fields:
+        name: 1
+        ciphertext: 2
+        additional_authenticated_data: 3
+        ciphertext_crc32c: 5
+        additional_authenticated_data_crc32c: 6
+    DecryptResponse:
+      type: object
+      description: A protobuf message. Fields are listed with their numbers; on the wire the body is protobuf in gRPC framing, not JSON.
+      properties:
+        plaintext:
+          description: 'field 1: bytes'
+        plaintext_crc32c:
+          description: 'field 2: Int64Value'
+        used_primary:
+          description: 'field 3: bool'
+        protection_level:
+          description: 'field 4: enum'
+      x-protobuf-fields:
+        plaintext: 1
+        plaintext_crc32c: 2
+        used_primary: 3
+        protection_level: 4
+    MacSignRequest:
+      type: object
+      description: A protobuf message. Fields are listed with their numbers; on the wire the body is protobuf in gRPC framing, not JSON.
+      properties:
+        name:
+          description: 'field 1: string'
+        data:
+          description: 'field 2: bytes'
+        data_crc32c:
+          description: 'field 3: Int64Value'
+      x-protobuf-fields:
+        name: 1
+        data: 2
+        data_crc32c: 3
+    MacSignResponse:
+      type: object
+      description: A protobuf message. Fields are listed with their numbers; on the wire the body is protobuf in gRPC framing, not JSON.
+      properties:
+        name:
+          description: 'field 1: string'
+        mac:
+          description: 'field 2: bytes'
+        mac_crc32c:
+          description: 'field 3: Int64Value'
+        verified_data_crc32c:
+          description: 'field 4: bool'
+        protection_level:
+          description: 'field 5: enum'
+      x-protobuf-fields:
+        name: 1
+        mac: 2
+        mac_crc32c: 3
+        verified_data_crc32c: 4
+        protection_level: 5
+    MacVerifyRequest:
+      type: object
+      description: A protobuf message. Fields are listed with their numbers; on the wire the body is protobuf in gRPC framing, not JSON.
+      properties:
+        name:
+          description: 'field 1: string'
+        data:
+          description: 'field 2: bytes'
+        data_crc32c:
+          description: 'field 3: Int64Value'
+        mac:
+          description: 'field 4: bytes'
+        mac_crc32c:
+          description: 'field 5: Int64Value'
+      x-protobuf-fields:
+        name: 1
+        data: 2
+        data_crc32c: 3
+        mac: 4
+        mac_crc32c: 5
+    MacVerifyResponse:
+      type: object
+      description: A protobuf message. Fields are listed with their numbers; on the wire the body is protobuf in gRPC framing, not JSON.
+      properties:
+        name:
+          description: 'field 1: string'
+        success:
+          description: 'field 2: bool'
+        verified_data_crc32c:
+          description: 'field 3: bool'
+        verified_mac_crc32c:
+          description: 'field 4: bool'
+        verified_success_integrity:
+          description: 'field 5: bool'
+        protection_level:
+          description: 'field 6: enum'
+      x-protobuf-fields:
+        name: 1
+        success: 2
+        verified_data_crc32c: 3
+        verified_mac_crc32c: 4
+        verified_success_integrity: 5
+        protection_level: 6
+    GenerateRandomBytesRequest:
+      type: object
+      description: A protobuf message. Fields are listed with their numbers; on the wire the body is protobuf in gRPC framing, not JSON.
+      properties:
+        location:
+          description: 'field 1: string'
+        length_bytes:
+          description: 'field 2: int32'
+      x-protobuf-fields:
+        location: 1
+        length_bytes: 2
+    GenerateRandomBytesResponse:
+      type: object
+      description: A protobuf message. Fields are listed with their numbers; on the wire the body is protobuf in gRPC framing, not JSON.
+      properties:
+        data:
+          description: 'field 1: bytes'
+        data_crc32c:
+          description: 'field 3: Int64Value'
+      x-protobuf-fields:
+        data: 1
+        data_crc32c: 3

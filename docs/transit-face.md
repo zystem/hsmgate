@@ -78,12 +78,12 @@ every answer the handler gives in its test scenarios (200, 400, 403, 413, 429, 5
 
 hsmgate does **not** serve a Swagger UI or the spec itself: the service answers only clients with a certificate of its CA, and a documentation page does not belong behind that door.
 
-To read the spec as a page, use [api/index.html](../api/index.html): a Swagger UI of `openapi.yaml` that works from any static web server, with "Try it out" switched off. On your machine:
+To read the specifications as a page, use the **API reference**: [api/index.html](../api/index.html) shows the Transit API and the other APIs of the service (KMS-JSON, KMS-REST, KMS-gRPC, the admin socket) with [Scalar](https://scalar.com), read-only, a switch between the five in its top left. It is published by [the Pages workflow](../.github/workflows/pages.yml) whenever a file in `api/` changes on `main` (once the owner has set Settings, Pages, Source to "GitHub Actions"; the address is `https://<owner>.github.io/<repository>/`). Or on your machine:
 
 ```bash
 python3 -m http.server -d api 8081
 ```
 
-Then open `http://localhost:8081/`. The page loads Swagger UI 5.34.1 from jsDelivr (pinned, checked by a hash), so it needs Internet access; opening the file with `file://` does not work, the browser refuses to read `openapi.yaml` that way. Run on 2026-11-13: the page rendered the spec in a browser; the operations were not clicked through one by one.
+Then open `http://localhost:8081/`. The page loads Scalar 1.76.4 from jsDelivr (pinned, checked by a hash), so it needs Internet access; opening the file with `file://` does not work, the browser refuses to read the YAML files that way. Run on 2026-11-13 in a browser: all five specifications load and list their operations; the operations were not clicked through one by one. The page has no "try it" button: the service needs a client certificate, which a browser cannot present.
 
-"Try it out" from a browser cannot reach the service (it needs a client certificate); use `curl --cert --key --cacert` as in the examples of this page. The spec is also in the release archive `hsmgate-deploy.tar.gz`.
+"Try it out" from a browser cannot reach the service; use `curl --cert --key --cacert` as in the examples of this page. The spec is also in the release archive `hsmgate-deploy.tar.gz`.
