@@ -145,6 +145,9 @@ func serve(s *server.Server, cfg *config.Config, path string, listening func(net
 	signal.Notify(hup, syscall.SIGHUP)
 	go func() {
 		for range hup {
+			if err := s.ReopenAudit(); err != nil {
+				fmt.Fprintln(os.Stderr, "hsmgate: audit file not reopened, the old one stays in use:", err)
+			}
 			next, err := config.Load(path)
 			if err == nil {
 				err = s.Reload(next)

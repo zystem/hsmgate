@@ -53,8 +53,16 @@ config:
         demo: {ops: [encrypt, decrypt], per_minute: 120}
 
 # --- the audit log ------------------------------------------------------------------------------------------------------------------------------------
-# The service writes a file (/var/log/hsmgate/audit.log). On an emptyDir it is lost with the pod; a claim keeps it.
+# By default the audit goes to the output of the container only. With file: true it is also a file (/var/log/hsmgate/audit.log); on an emptyDir that is lost with the pod, a claim keeps it.
+# stdout: also write every line to the output of the container (`kubectl logs`, a log collector). Needs an image with `audit.stdout` (after v0.7.3); set false for an older one.
+# file: false (the default) writes no file, only to the output of the container (`kubectl logs`, a log collector; the runtime rotates that and nothing can fill a volume).
+# file: true also writes /var/log/hsmgate/audit.log (persistence below keeps it); stdout then says whether the lines are also on the output. maxSizeMB > 0 makes the service rotate the file
+# (audit.log.1 ... audit.log.<maxFiles>) so that it cannot fill the volume; 0 means it grows without limit.
 audit:
+  file: false
+  stdout: true
+  maxSizeMB: 100
+  maxFiles: 5
   persistence:
     enabled: false
     size: 1Gi

@@ -51,14 +51,15 @@ type Server struct {
 	HTTP     *http.Server
 	Insecure bool
 
-	audit    *audit.Log
-	face     *transit.Face
-	kms      *kmsjson.Face // nil when the second face is off
-	grpc     *kmsgrpc.Face // nil when the gRPC face is off
-	rest     *kmsrest.Face // nil when the REST face is off
-	gate     *gate.Gate
-	maxConns int
-	stats    *metrics.Registry
+	audit     *audit.Log
+	face      *transit.Face
+	kms       *kmsjson.Face // nil when the second face is off
+	grpc      *kmsgrpc.Face // nil when the gRPC face is off
+	rest      *kmsrest.Face // nil when the REST face is off
+	gate      *gate.Gate
+	maxConns  int
+	stats     *metrics.Registry
+	auditFile *audit.File // nil when the audit goes to standard output or to a writer given by a test
 
 	mu  sync.RWMutex
 	gen *generation
@@ -69,20 +70,25 @@ func New(cfg *config.Config, auditOut io.Writer) (*Server, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
+	var auditFile *audit.File
 	if auditOut == nil {
 		auditOut = os.Stdout
 		if cfg.Audit.File != "" {
-			f, err := os.OpenFile(cfg.Audit.File, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o640) // #nosec G302 G304 -- the group may read the log (a shipper); the path is the operator's
+			f, err := audit.OpenFile(cfg.Audit.File, int64(cfg.Audit.MaxSizeMB)<<20, cfg.Audit.MaxFiles)
 			if err != nil {
 				return nil, err
 			}
+			auditFile = f
 			auditOut = f
+			if cfg.Audit.Stdout {
+				auditOut = io.MultiWriter(f, os.Stdout)
+			}
 		}
 	}
 	if err := checkFIPS(cfg); err != nil {
 		return nil, err
 	}
-	s := &Server{audit: audit.New(auditOut)}
+	s := &Server{audit: audit.New(auditOut), auditFile: auditFile}
 	gen, _, fresh, err := s.prepare(cfg, nil)
 	if err != nil {
 		closeTokens(fresh)
@@ -390,8 +396,8 @@ func (s *Server) Reload(cfg *config.Config) error {
 	if cfg.KMSRest.Enabled != oc.KMSRest.Enabled || cfg.KMSRest.Tenant != oc.KMSRest.Tenant {
 		return fmt.Errorf("kmsrest.enabled and kmsrest.tenant cannot change in a reload: restart")
 	}
-	if cfg.Listen != oc.Listen || cfg.AdminSocket != oc.AdminSocket || cfg.Audit.File != oc.Audit.File || cfg.Limits != oc.Limits || cfg.Transit.Mount != oc.Transit.Mount {
-		return fmt.Errorf("listen, admin_socket, audit.file, limits and transit.mount cannot change in a reload: restart")
+	if cfg.Listen != oc.Listen || cfg.AdminSocket != oc.AdminSocket || cfg.Audit.File != oc.Audit.File || cfg.Audit.Stdout != oc.Audit.Stdout || cfg.Audit.MaxSizeMB != oc.Audit.MaxSizeMB || cfg.Audit.MaxFiles != oc.Audit.MaxFiles || cfg.Limits != oc.Limits || cfg.Transit.Mount != oc.Transit.Mount {
+		return fmt.Errorf("listen, admin_socket, audit.*, limits and transit.mount cannot change in a reload: restart")
 	}
 	if err := checkFIPS(cfg); err != nil {
 		return err
@@ -505,6 +511,14 @@ func closeTokens(m map[string]backend.Token) {
 			c.Close()
 		}
 	}
+}
+
+// ReopenAudit opens the audit file again (after logrotate renamed it); nothing to do when the audit is not a file of the service.
+func (s *Server) ReopenAudit() error {
+	if s.auditFile == nil {
+		return nil
+	}
+	return s.auditFile.Reopen()
 }
 
 // Close stops the listener, logs the tokens out and makes them forget their PIN. The signal handler of `serve` calls it.

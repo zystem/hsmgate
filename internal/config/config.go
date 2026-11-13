@@ -76,6 +76,12 @@ type Config struct {
 	Limits Limits `yaml:"limits"`
 	Audit  struct {
 		File string `yaml:"file"`
+		// Stdout: with a file, also write every line to standard output (a log collector of a container reads it there). Without a file the audit is on standard output anyway.
+		Stdout bool `yaml:"stdout"`
+		// MaxSizeMB: rotate the file by the service when it would pass this size (MiB); 0 (the default) means no limit and no rotation by the service. MaxFiles: how many older files
+		// (audit.log.1 is the newest) are kept; 0 means 5. Both need File.
+		MaxSizeMB int `yaml:"max_size_mb"`
+		MaxFiles  int `yaml:"max_files"`
 	} `yaml:"audit"`
 	Tokens  []Token        `yaml:"tokens"`
 	Keys    map[string]Key `yaml:"keys"`
@@ -330,6 +336,15 @@ func (c *Config) Validate() error {
 	}
 	if c.Limits.MaxConcurrent < 0 || c.Limits.QueueSeconds < 0 || c.Limits.MaxConcurrent > 1024 || c.Limits.QueueSeconds > 60 || c.Limits.MaxConnections < 0 || c.Limits.MaxConnections > 65535 {
 		return fmt.Errorf("limits: max_concurrent 0..1024, queue_seconds 0..60 and max_connections 0..65535")
+	}
+	if c.Audit.MaxSizeMB < 0 || c.Audit.MaxFiles < 0 || c.Audit.MaxSizeMB > 1<<20 || c.Audit.MaxFiles > 1000 {
+		return fmt.Errorf("audit: max_size_mb 0..1048576 and max_files 0..1000")
+	}
+	if (c.Audit.MaxSizeMB > 0 || c.Audit.MaxFiles > 0) && c.Audit.File == "" {
+		return fmt.Errorf("audit.max_size_mb and audit.max_files need audit.file")
+	}
+	if c.Audit.MaxSizeMB > 0 && c.Audit.MaxFiles == 0 {
+		c.Audit.MaxFiles = 5
 	}
 	switch c.Metrics.Detail {
 	case "":

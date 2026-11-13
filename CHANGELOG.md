@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **Audit file rotation and reopening**: `audit.max_size_mb` / `audit.max_files` rotate the file in the service (`audit.log.1` ...); the file is reopened on SIGHUP (so `logrotate` with a rename works). Helm chart: `audit.maxSizeMB` (default 100), `audit.maxFiles` (5), `audit.file` (default **false**: the audit goes only to the output of the container, `kubectl logs`; a chart upgrade no longer writes the file unless `audit.file=true`). Tests: rotation, reopen after a rename, the rules of the settings. Not run in a cluster; the signal path of `serve` is not tested.
+- **`audit.stdout: true`**: with `audit.file`, every audit line is also written to standard output (for a log collector of a container). Without a file the audit was already on standard output. Needs a restart. Not tested by a test of its own; not run.
+
+### Changed
+- Helm chart: `audit.file` defaults to **false**; the audit goes only to the output of the container (`kubectl logs`). Set `audit.file=true` to keep the file as before.
+
 ## 0.7.4 — 2026-11-11
 
 ### Added
