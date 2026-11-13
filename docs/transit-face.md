@@ -78,7 +78,7 @@ every answer the handler gives in its test scenarios (200, 400, 403, 413, 429, 5
 
 hsmgate does **not** serve a Swagger UI or the spec itself: the service answers only clients with a certificate of its CA, and a documentation page does not belong behind that door.
 
-To read the specifications as a page, use the **API reference**: [api/index.html](../api/index.html) shows the Transit API and the other APIs of the service (KMS-JSON, KMS-REST, KMS-gRPC, the admin socket) with [Scalar](https://scalar.com), read-only, a switch between the five in its top left. It is published by [the Pages workflow](../.github/workflows/pages.yml) whenever a file in `api/` changes on `main` (once the owner has set Settings, Pages, Source to "GitHub Actions"; the address is `https://<owner>.github.io/<repository>/`). Or on your machine:
+To read the specifications as a page, use the **API reference**: [api/index.html](../api/index.html) shows the Transit API and the other APIs of the service (KMS-JSON, KMS-REST, KMS-gRPC, the admin socket) with [Scalar](https://scalar.com), read-only, a switch between the five in its top left. It is published by [the Pages workflow](../.github/workflows/pages.yml) whenever a file in `api/` changes on `main` (at <https://zystem.github.io/hsmgate/>). Or on your machine:
 
 ```bash
 python3 -m http.server -d api 8081
