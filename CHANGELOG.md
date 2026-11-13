@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.8.0 — 2026-11-13
+
+The audit can be rotated, reopened and sent to the container output; the chart gets a Fluent Bit sidecar, `extraContainers` and `extraVolumes`; every API has an OpenAPI file and a page on GitHub Pages. **The chart no longer writes the audit file by default** ([upgrading.md](docs/upgrading.md)). The number 0.7.4 was prepared but never tagged: what was prepared for it is in this release.
 
 ### Added
 - **Audit file rotation and reopening**: `audit.max_size_mb` / `audit.max_files` rotate the file in the service (`audit.log.1` ...); the file is reopened on SIGHUP (so `logrotate` with a rename works). Helm chart: `audit.maxSizeMB` (default 25; 150 MB at most with `maxFiles` 5, and a pair that does not fit the 256 MiB `emptyDir` is refused), `audit.maxFiles` (5), `audit.file` (default **false**: the audit goes only to the output of the container, `kubectl logs`; a chart upgrade no longer writes the file unless `audit.file=true`). Tests: rotation, reopen after a rename, the rules of the settings. Not run in a cluster; the signal path of `serve` is not tested.
@@ -8,19 +10,13 @@
 - **Helm chart: optional Fluent Bit sidecar** (`fluentbit.enabled`, `fluentbit.outputs`, `fluentbit.filters`, off by default; needs `audit.file=true`) that ships the audit file to any Fluent Bit output. [examples/falco](deploy/helm/hsmgate/examples/falco/README.md): Falco configuration, three rules and a Vector configuration (the Falco collector takes one event per POST, which Fluent Bit cannot send). Run in Docker, not in a cluster.
 - **Helm chart: `extraContainers` and `extraVolumes`** (a Pod-spec list each, empty by default) for sidecars of your own; [examples/vector-sidecar-values.yaml](deploy/helm/hsmgate/examples/vector-sidecar-values.yaml) runs Vector this way. `helm lint` and `kubectl apply --dry-run=client`; not run in a cluster.
 - **API reference**: OpenAPI files for every API of the service in `api/` (`kms-json.yaml`, `kms-rest.yaml`, `kms-grpc.yaml`, `admin.yaml`, next to the Transit `openapi.yaml`), a page that shows them all ([api/index.html](api/index.html), Scalar, read-only), and a workflow that publishes `api/` to GitHub Pages when a file there changes on `main` (the owner sets Settings, Pages, Source to "GitHub Actions" once). `internal/apispec` checks the files against the code. The service itself still serves no UI. gRPC is described as OpenAPI for lack of a better page; the answer fields of the new files are written from the code and are not tested.
-
-### Changed
-- Helm chart: with `audit.file=true` the keys `stdout`, `max_size_mb` and `max_files` are written into the configuration only when they are on, so an image that does not know them (up to v0.7.3) still starts with `audit.stdout=false` and `audit.maxSizeMB=0`. Run in a Talos cluster on 2026-11-13 with `ghcr.io/zystem/hsmgate:v0.7.3`: the audit in `kubectl logs`, the Fluent Bit sidecar, `extraContainers`/`extraVolumes` (details in the chart README).
-- Helm chart: `audit.file` defaults to **false**; the audit goes only to the output of the container (`kubectl logs`). Set `audit.file=true` to keep the file as before.
-
-## 0.7.4 — 2026-11-11
-
-### Added
 - **`hsmgate ping -cert -key -ca [-name]`**: a health check that makes the whole TLS 1.3 handshake (the certificate of the service checked against the CA) with a client certificate that no client of the policy names, so it has no rights, sends no request and leaves no audit line. The Helm chart makes such a certificate (`<release>-probe`, CN `hsmgate-probe`) and its probes use it (`probe.tls`, on by default with the generated certificates; otherwise a TCP connect as before).
 - **[docs/writing-docs.md](docs/writing-docs.md)**: how the pages are written (one of four kinds: tutorial, how-to, reference, explanation; a command with what it prints; what was not run) and which test keeps which page equal to the program. [docs/README.md](docs/README.md) says which kind each page is.
 - **[docs/cli.md](docs/cli.md)**: every command and flag, generated from what `hsmgate <command> -h` prints; a test fails when the page differs from the program (`go test ./cmd/hsmgate -run CLIReference -update` rewrites it). `hsmgate` with no arguments, `hsmgate help` and `-h` list the commands with one line each; `serve` and `check` no longer show the flags of `unlock`; `dev -h` shows its flags. `hsmgate dev` for a listener on every address (`-listen 0.0.0.0:8443`, as in a container) now tells the client `127.0.0.1`, not `[::]`; the README shows how to try it with `docker run` and no Go.
 
 ### Changed
+- Helm chart: with `audit.file=true` the keys `stdout`, `max_size_mb` and `max_files` are written into the configuration only when they are on, so an image that does not know them (up to v0.7.3) still starts with `audit.stdout=false` and `audit.maxSizeMB=0`. Run in a Talos cluster on 2026-11-13 with `ghcr.io/zystem/hsmgate:v0.7.3`: the audit in `kubectl logs`, the Fluent Bit sidecar, `extraContainers`/`extraVolumes` (details in the chart README).
+- Helm chart: `audit.file` defaults to **false**; the audit goes only to the output of the container (`kubectl logs`). Set `audit.file=true` to keep the file as before.
 - The service no longer writes `http: TLS handshake error from <address>: EOF` (a TCP connect that closed without a byte: a Kubernetes TCP probe, a load balancer, a port check). Every other handshake error is still written.
 - Helm chart, tried in a cluster (2026-11-12, chart 0.7.3 and the OpenBao chart): `helm test` passes, OpenBao initialises through hsmgate, restarts and unseals itself. The OpenBao values in `deploy/helm/hsmgate/examples/openbao-helm-values.yaml` were wrong for current OpenBao (no `file` storage) and now use the integrated raft storage; the chart README says what was run and what was not, and that a namespace enforcing the `restricted` Pod Security Standard refuses the pod (uid 0). Troubleshooting and the audit-log page explain the probe handshake noise and OpenBao's periodic seal check.
 
