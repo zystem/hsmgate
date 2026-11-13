@@ -1,0 +1,830 @@
+openapi: 3.1.0
+info:
+  title: hsmgate KMS-JSON face
+  version: 0.1.0
+  summary: A subset of the JSON 1.1 API of a widely implemented cloud key-management service. Optional (kmsjson.enabled).
+  description: 'One endpoint: `POST /` with `X-Amz-Target: TrentService.<Operation>` and `Content-Type: application/x-amz-json-1.1`. OpenAPI has no way to say "same path, the operation is in a header",
+    so each operation is shown under the path `/#TrentService.<Operation>`: **the real path is `/`**, the part after `#` is the value of `X-Amz-Target`. The face is **not** that service and not affiliated
+    with its vendor (docs/specs/kms-json.md §0).
+
+
+    **Authentication**: mutual TLS **and** a SigV4 signature (`AWS4-HMAC-SHA256`, service `kms`, the region from `kmsjson.region`); the certificate''s client and the signature''s client must be the same.
+    A client with `sigv4.no_cert` needs only the signature, a listed address and a secret of 32 bytes or more; it may use only sealing, signing and MAC keys. **Authorisation** per client and key; an unknown
+    key and an ungranted key give the same `AccessDeniedException`.
+
+
+    **Errors**: `{"__type": "<Name>", "message": "..."}`. Details of every operation, the usages of a key (`key_agreement`, `encrypt_decrypt`, `sign_verify`, `generate_verify_mac`) and the limits: docs/specs/kms-json.md.
+    The request and answer fields below are those the code reads; blobs and signatures are base64.'
+  license:
+    name: MIT
+    identifier: MIT
+servers:
+- url: https://hsmgate.example.org:8443
+  description: Replace with the address of your service.
+tags:
+- name: keys
+  description: Look a key up
+- name: agreement
+  description: 'Key agreement: the client seals and opens'
+- name: sealing
+  description: Sealing by the service
+- name: signing
+  description: ECDSA P-256 on the token
+- name: mac
+  description: HMAC with a key derived on the token
+security:
+- sigv4: []
+  mutualTLS: []
+- sigv4: []
+paths:
+  /#TrentService.GetPublicKey:
+    post:
+      operationId: GetPublicKey
+      tags:
+      - keys
+      summary: 'Public key of a key: DER SPKI of a signing or key-agreement key (a sealing key answers UnsupportedOperationException)'
+      parameters:
+      - $ref: '#/components/parameters/TargetGetPublicKey'
+      responses:
+        '200':
+          description: 'Answer: KeyId, PublicKey, KeySpec ECC_NIST_P256, KeyUsage, KeyAgreementAlgorithms or SigningAlgorithms'
+          content:
+            application/x-amz-json-1.1:
+              schema:
+                type: object
+                description: KeyId, PublicKey, KeySpec ECC_NIST_P256, KeyUsage, KeyAgreementAlgorithms or SigningAlgorithms
+        '400': &id001
+          $ref: '#/components/responses/ClientError'
+        '403': &id002
+          $ref: '#/components/responses/AccessDenied'
+        '500': &id003
+          $ref: '#/components/responses/ServerError'
+        '429': &id004
+          $ref: '#/components/responses/Throttled'
+      requestBody:
+        required: true
+        content:
+          application/x-amz-json-1.1:
+            schema:
+              type: object
+              required:
+              - KeyId
+              properties:
+                KeyId:
+                  $ref: '#/components/schemas/Fields/properties/KeyId'
+  /#TrentService.DescribeKey:
+    post:
+      operationId: DescribeKey
+      tags:
+      - keys
+      summary: Metadata of a key (state, usage, CreationDate; extras HsmgateVersion, HsmgateLatestVersion)
+      parameters:
+      - $ref: '#/components/parameters/TargetDescribeKey'
+      responses:
+        '200':
+          description: The answer of the operation
+          content:
+            application/x-amz-json-1.1:
+              schema:
+                type: object
+                description: see docs/specs/kms-json.md
+        '400': *id001
+        '403': *id002
+        '500': *id003
+        '429': *id004
+      requestBody:
+        required: true
+        content:
+          application/x-amz-json-1.1:
+            schema:
+              type: object
+              required:
+              - KeyId
+              properties:
+                KeyId:
+                  $ref: '#/components/schemas/Fields/properties/KeyId'
+  /#TrentService.ListKeys:
+    post:
+      operationId: ListKeys
+      tags:
+      - keys
+      summary: The keys the client may use
+      parameters:
+      - $ref: '#/components/parameters/TargetListKeys'
+      responses:
+        '200':
+          description: The answer of the operation
+          content:
+            application/x-amz-json-1.1:
+              schema:
+                type: object
+                description: see docs/specs/kms-json.md
+        '400': *id001
+        '403': *id002
+        '500': *id003
+        '429': *id004
+      requestBody:
+        required: false
+        content:
+          application/x-amz-json-1.1:
+            schema:
+              type: object
+  /#TrentService.ListAliases:
+    post:
+      operationId: ListAliases
+      tags:
+      - keys
+      summary: The keys as alias/<name>
+      parameters:
+      - $ref: '#/components/parameters/TargetListAliases'
+      responses:
+        '200':
+          description: The answer of the operation
+          content:
+            application/x-amz-json-1.1:
+              schema:
+                type: object
+                description: see docs/specs/kms-json.md
+        '400': *id001
+        '403': *id002
+        '500': *id003
+        '429': *id004
+      requestBody:
+        required: false
+        content:
+          application/x-amz-json-1.1:
+            schema:
+              type: object
+  /#TrentService.DeriveSharedSecret:
+    post:
+      operationId: DeriveSharedSecret
+      tags:
+      - agreement
+      summary: ECDH on the token (key_agreement keys; the client seals and opens). Returns the raw 32-byte X coordinate
+      parameters:
+      - $ref: '#/components/parameters/TargetDeriveSharedSecret'
+      responses:
+        '200':
+          description: 'Answer: KeyId, KeyAgreementAlgorithm ECDH, SharedSecret'
+          content:
+            application/x-amz-json-1.1:
+              schema:
+                type: object
+                description: KeyId, KeyAgreementAlgorithm ECDH, SharedSecret
+        '400': *id001
+        '403': *id002
+        '500': *id003
+        '429': *id004
+      requestBody:
+        required: true
+        content:
+          application/x-amz-json-1.1:
+            schema:
+              type: object
+              required:
+              - KeyId
+              - KeyAgreementAlgorithm
+              - PublicKey
+              properties:
+                KeyId:
+                  $ref: '#/components/schemas/Fields/properties/KeyId'
+                KeyAgreementAlgorithm:
+                  $ref: '#/components/schemas/Fields/properties/KeyAgreementAlgorithm'
+                PublicKey:
+                  $ref: '#/components/schemas/Fields/properties/PublicKey'
+                DryRun:
+                  $ref: '#/components/schemas/Fields/properties/DryRun'
+                Recipient:
+                  $ref: '#/components/schemas/Fields/properties/Recipient'
+  /#TrentService.Encrypt:
+    post:
+      operationId: Encrypt
+      tags:
+      - sealing
+      summary: Seal 1 to 4096 bytes under a key of usage encrypt_decrypt
+      parameters:
+      - $ref: '#/components/parameters/TargetEncrypt'
+      responses:
+        '200':
+          description: 'Answer: CiphertextBlob, KeyId, EncryptionAlgorithm'
+          content:
+            application/x-amz-json-1.1:
+              schema:
+                type: object
+                description: CiphertextBlob, KeyId, EncryptionAlgorithm
+        '400': *id001
+        '403': *id002
+        '500': *id003
+        '429': *id004
+      requestBody:
+        required: true
+        content:
+          application/x-amz-json-1.1:
+            schema:
+              type: object
+              required:
+              - KeyId
+              - Plaintext
+              properties:
+                KeyId:
+                  $ref: '#/components/schemas/Fields/properties/KeyId'
+                Plaintext:
+                  $ref: '#/components/schemas/Fields/properties/Plaintext'
+                EncryptionContext:
+                  $ref: '#/components/schemas/Fields/properties/EncryptionContext'
+                EncryptionAlgorithm:
+                  $ref: '#/components/schemas/Fields/properties/EncryptionAlgorithm'
+                DryRun:
+                  $ref: '#/components/schemas/Fields/properties/DryRun'
+  /#TrentService.Decrypt:
+    post:
+      operationId: Decrypt
+      tags:
+      - sealing
+      summary: 'Open a blob (KeyId optional: the blob names key and version, authenticated with the data)'
+      parameters:
+      - $ref: '#/components/parameters/TargetDecrypt'
+      responses:
+        '200':
+          description: 'Answer: Plaintext, KeyId, EncryptionAlgorithm'
+          content:
+            application/x-amz-json-1.1:
+              schema:
+                type: object
+                description: Plaintext, KeyId, EncryptionAlgorithm
+        '400': *id001
+        '403': *id002
+        '500': *id003
+        '429': *id004
+      requestBody:
+        required: true
+        content:
+          application/x-amz-json-1.1:
+            schema:
+              type: object
+              required:
+              - CiphertextBlob
+              properties:
+                KeyId:
+                  $ref: '#/components/schemas/Fields/properties/KeyId'
+                CiphertextBlob:
+                  $ref: '#/components/schemas/Fields/properties/CiphertextBlob'
+                EncryptionContext:
+                  $ref: '#/components/schemas/Fields/properties/EncryptionContext'
+                EncryptionAlgorithm:
+                  $ref: '#/components/schemas/Fields/properties/EncryptionAlgorithm'
+                DryRun:
+                  $ref: '#/components/schemas/Fields/properties/DryRun'
+  /#TrentService.ReEncrypt:
+    post:
+      operationId: ReEncrypt
+      tags:
+      - sealing
+      summary: Open under the source and seal under the destination (decrypt on the source, encrypt on the destination)
+      parameters:
+      - $ref: '#/components/parameters/TargetReEncrypt'
+      responses:
+        '200':
+          description: 'Answer: CiphertextBlob, SourceKeyId, KeyId'
+          content:
+            application/x-amz-json-1.1:
+              schema:
+                type: object
+                description: CiphertextBlob, SourceKeyId, KeyId
+        '400': *id001
+        '403': *id002
+        '500': *id003
+        '429': *id004
+      requestBody:
+        required: true
+        content:
+          application/x-amz-json-1.1:
+            schema:
+              type: object
+              required:
+              - CiphertextBlob
+              - DestinationKeyId
+              properties:
+                CiphertextBlob:
+                  $ref: '#/components/schemas/Fields/properties/CiphertextBlob'
+                SourceKeyId:
+                  $ref: '#/components/schemas/Fields/properties/SourceKeyId'
+                DestinationKeyId:
+                  $ref: '#/components/schemas/Fields/properties/DestinationKeyId'
+                SourceEncryptionContext:
+                  $ref: '#/components/schemas/Fields/properties/SourceEncryptionContext'
+                DestinationEncryptionContext:
+                  $ref: '#/components/schemas/Fields/properties/DestinationEncryptionContext'
+                DryRun:
+                  $ref: '#/components/schemas/Fields/properties/DryRun'
+  /#TrentService.GenerateDataKey:
+    post:
+      operationId: GenerateDataKey
+      tags:
+      - sealing
+      summary: A random data key and its sealed copy (KeySpec AES_128 or AES_256, or NumberOfBytes 1 to 1024; the right is encrypt)
+      parameters:
+      - $ref: '#/components/parameters/TargetGenerateDataKey'
+      responses:
+        '200':
+          description: 'Answer: KeyId, Plaintext, CiphertextBlob'
+          content:
+            application/x-amz-json-1.1:
+              schema:
+                type: object
+                description: KeyId, Plaintext, CiphertextBlob
+        '400': *id001
+        '403': *id002
+        '500': *id003
+        '429': *id004
+      requestBody:
+        required: true
+        content:
+          application/x-amz-json-1.1:
+            schema:
+              type: object
+              required:
+              - KeyId
+              properties:
+                KeyId:
+                  $ref: '#/components/schemas/Fields/properties/KeyId'
+                KeySpec:
+                  $ref: '#/components/schemas/Fields/properties/KeySpec'
+                NumberOfBytes:
+                  $ref: '#/components/schemas/Fields/properties/NumberOfBytes'
+                EncryptionContext:
+                  $ref: '#/components/schemas/Fields/properties/EncryptionContext'
+                DryRun:
+                  $ref: '#/components/schemas/Fields/properties/DryRun'
+  /#TrentService.GenerateDataKeyWithoutPlaintext:
+    post:
+      operationId: GenerateDataKeyWithoutPlaintext
+      tags:
+      - sealing
+      summary: As GenerateDataKey without the plaintext
+      parameters:
+      - $ref: '#/components/parameters/TargetGenerateDataKeyWithoutPlaintext'
+      responses:
+        '200':
+          description: 'Answer: KeyId, CiphertextBlob'
+          content:
+            application/x-amz-json-1.1:
+              schema:
+                type: object
+                description: KeyId, CiphertextBlob
+        '400': *id001
+        '403': *id002
+        '500': *id003
+        '429': *id004
+      requestBody:
+        required: true
+        content:
+          application/x-amz-json-1.1:
+            schema:
+              type: object
+              required:
+              - KeyId
+              properties:
+                KeyId:
+                  $ref: '#/components/schemas/Fields/properties/KeyId'
+                KeySpec:
+                  $ref: '#/components/schemas/Fields/properties/KeySpec'
+                NumberOfBytes:
+                  $ref: '#/components/schemas/Fields/properties/NumberOfBytes'
+                EncryptionContext:
+                  $ref: '#/components/schemas/Fields/properties/EncryptionContext'
+                DryRun:
+                  $ref: '#/components/schemas/Fields/properties/DryRun'
+  /#TrentService.GenerateRandom:
+    post:
+      operationId: GenerateRandom
+      tags:
+      - sealing
+      summary: 1 to 1024 random bytes from the operating system (not the token)
+      parameters:
+      - $ref: '#/components/parameters/TargetGenerateRandom'
+      responses:
+        '200':
+          description: 'Answer: Plaintext'
+          content:
+            application/x-amz-json-1.1:
+              schema:
+                type: object
+                description: Plaintext
+        '400': *id001
+        '403': *id002
+        '500': *id003
+        '429': *id004
+      requestBody:
+        required: true
+        content:
+          application/x-amz-json-1.1:
+            schema:
+              type: object
+              required: []
+              properties:
+                NumberOfBytes:
+                  $ref: '#/components/schemas/Fields/properties/NumberOfBytes'
+  /#TrentService.Sign:
+    post:
+      operationId: Sign
+      tags:
+      - signing
+      summary: ECDSA P-256 on the token (kmsjson_usage sign_verify); a DER signature
+      parameters:
+      - $ref: '#/components/parameters/TargetSign'
+      responses:
+        '200':
+          description: 'Answer: KeyId, Signature, SigningAlgorithm'
+          content:
+            application/x-amz-json-1.1:
+              schema:
+                type: object
+                description: KeyId, Signature, SigningAlgorithm
+        '400': *id001
+        '403': *id002
+        '500': *id003
+        '429': *id004
+      requestBody:
+        required: true
+        content:
+          application/x-amz-json-1.1:
+            schema:
+              type: object
+              required:
+              - KeyId
+              - Message
+              - SigningAlgorithm
+              properties:
+                KeyId:
+                  $ref: '#/components/schemas/Fields/properties/KeyId'
+                Message:
+                  $ref: '#/components/schemas/Fields/properties/Message'
+                MessageType:
+                  $ref: '#/components/schemas/Fields/properties/MessageType'
+                SigningAlgorithm:
+                  $ref: '#/components/schemas/Fields/properties/SigningAlgorithm'
+                DryRun:
+                  $ref: '#/components/schemas/Fields/properties/DryRun'
+  /#TrentService.Verify:
+    post:
+      operationId: Verify
+      tags:
+      - signing
+      summary: Verify a signature with the public key (an invalid one is KMSInvalidSignatureException)
+      parameters:
+      - $ref: '#/components/parameters/TargetVerify'
+      responses:
+        '200':
+          description: 'Answer: KeyId, SignatureValid, SigningAlgorithm'
+          content:
+            application/x-amz-json-1.1:
+              schema:
+                type: object
+                description: KeyId, SignatureValid, SigningAlgorithm
+        '400': *id001
+        '403': *id002
+        '500': *id003
+        '429': *id004
+      requestBody:
+        required: true
+        content:
+          application/x-amz-json-1.1:
+            schema:
+              type: object
+              required:
+              - KeyId
+              - Message
+              - Signature
+              - SigningAlgorithm
+              properties:
+                KeyId:
+                  $ref: '#/components/schemas/Fields/properties/KeyId'
+                Message:
+                  $ref: '#/components/schemas/Fields/properties/Message'
+                MessageType:
+                  $ref: '#/components/schemas/Fields/properties/MessageType'
+                Signature:
+                  $ref: '#/components/schemas/Fields/properties/Signature'
+                SigningAlgorithm:
+                  $ref: '#/components/schemas/Fields/properties/SigningAlgorithm'
+                DryRun:
+                  $ref: '#/components/schemas/Fields/properties/DryRun'
+  /#TrentService.GenerateMac:
+    post:
+      operationId: GenerateMac
+      tags:
+      - mac
+      summary: HMAC with a key derived on the token (kmsjson_usage generate_verify_mac); message 1 to 4096 bytes
+      parameters:
+      - $ref: '#/components/parameters/TargetGenerateMac'
+      responses:
+        '200':
+          description: 'Answer: Mac, MacAlgorithm, KeyId'
+          content:
+            application/x-amz-json-1.1:
+              schema:
+                type: object
+                description: Mac, MacAlgorithm, KeyId
+        '400': *id001
+        '403': *id002
+        '500': *id003
+        '429': *id004
+      requestBody:
+        required: true
+        content:
+          application/x-amz-json-1.1:
+            schema:
+              type: object
+              required:
+              - KeyId
+              - Message
+              - MacAlgorithm
+              properties:
+                KeyId:
+                  $ref: '#/components/schemas/Fields/properties/KeyId'
+                Message:
+                  $ref: '#/components/schemas/Fields/properties/Message'
+                MacAlgorithm:
+                  $ref: '#/components/schemas/Fields/properties/MacAlgorithm'
+                DryRun:
+                  $ref: '#/components/schemas/Fields/properties/DryRun'
+  /#TrentService.VerifyMac:
+    post:
+      operationId: VerifyMac
+      tags:
+      - mac
+      summary: Verify a MAC (a wrong one is KMSInvalidMacException)
+      parameters:
+      - $ref: '#/components/parameters/TargetVerifyMac'
+      responses:
+        '200':
+          description: 'Answer: KeyId, MacValid, MacAlgorithm'
+          content:
+            application/x-amz-json-1.1:
+              schema:
+                type: object
+                description: KeyId, MacValid, MacAlgorithm
+        '400': *id001
+        '403': *id002
+        '500': *id003
+        '429': *id004
+      requestBody:
+        required: true
+        content:
+          application/x-amz-json-1.1:
+            schema:
+              type: object
+              required:
+              - KeyId
+              - Message
+              - Mac
+              - MacAlgorithm
+              properties:
+                KeyId:
+                  $ref: '#/components/schemas/Fields/properties/KeyId'
+                Message:
+                  $ref: '#/components/schemas/Fields/properties/Message'
+                Mac:
+                  $ref: '#/components/schemas/Fields/properties/Mac'
+                MacAlgorithm:
+                  $ref: '#/components/schemas/Fields/properties/MacAlgorithm'
+                DryRun:
+                  $ref: '#/components/schemas/Fields/properties/DryRun'
+components:
+  securitySchemes:
+    mutualTLS:
+      type: mutualTLS
+      description: A client certificate from the CA of the service
+    sigv4:
+      type: apiKey
+      in: header
+      name: Authorization
+      description: AWS4-HMAC-SHA256, service kms. Signed headers include host, x-amz-date, x-amz-target; clock skew at most five minutes; X-Amz-Content-Sha256 must be the real hash of the body
+  parameters:
+    TargetGetPublicKey:
+      name: X-Amz-Target
+      in: header
+      required: true
+      schema:
+        type: string
+        const: TrentService.GetPublicKey
+    TargetDescribeKey:
+      name: X-Amz-Target
+      in: header
+      required: true
+      schema:
+        type: string
+        const: TrentService.DescribeKey
+    TargetListKeys:
+      name: X-Amz-Target
+      in: header
+      required: true
+      schema:
+        type: string
+        const: TrentService.ListKeys
+    TargetListAliases:
+      name: X-Amz-Target
+      in: header
+      required: true
+      schema:
+        type: string
+        const: TrentService.ListAliases
+    TargetDeriveSharedSecret:
+      name: X-Amz-Target
+      in: header
+      required: true
+      schema:
+        type: string
+        const: TrentService.DeriveSharedSecret
+    TargetEncrypt:
+      name: X-Amz-Target
+      in: header
+      required: true
+      schema:
+        type: string
+        const: TrentService.Encrypt
+    TargetDecrypt:
+      name: X-Amz-Target
+      in: header
+      required: true
+      schema:
+        type: string
+        const: TrentService.Decrypt
+    TargetReEncrypt:
+      name: X-Amz-Target
+      in: header
+      required: true
+      schema:
+        type: string
+        const: TrentService.ReEncrypt
+    TargetGenerateDataKey:
+      name: X-Amz-Target
+      in: header
+      required: true
+      schema:
+        type: string
+        const: TrentService.GenerateDataKey
+    TargetGenerateDataKeyWithoutPlaintext:
+      name: X-Amz-Target
+      in: header
+      required: true
+      schema:
+        type: string
+        const: TrentService.GenerateDataKeyWithoutPlaintext
+    TargetGenerateRandom:
+      name: X-Amz-Target
+      in: header
+      required: true
+      schema:
+        type: string
+        const: TrentService.GenerateRandom
+    TargetSign:
+      name: X-Amz-Target
+      in: header
+      required: true
+      schema:
+        type: string
+        const: TrentService.Sign
+    TargetVerify:
+      name: X-Amz-Target
+      in: header
+      required: true
+      schema:
+        type: string
+        const: TrentService.Verify
+    TargetGenerateMac:
+      name: X-Amz-Target
+      in: header
+      required: true
+      schema:
+        type: string
+        const: TrentService.GenerateMac
+    TargetVerifyMac:
+      name: X-Amz-Target
+      in: header
+      required: true
+      schema:
+        type: string
+        const: TrentService.VerifyMac
+  responses:
+    ClientError:
+      description: ValidationException, InvalidCiphertextException, InvalidKeyUsageException, UnsupportedOperationException, DryRunOperationException, KMSInvalidSignatureException, KMSInvalidMacException,
+        a signature error
+      content:
+        application/x-amz-json-1.1:
+          schema:
+            $ref: '#/components/schemas/Error'
+    AccessDenied:
+      description: 'AccessDeniedException: the key is not there, not on the face, or the client has no right (one answer)'
+      content:
+        application/x-amz-json-1.1:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Throttled:
+      description: 'ThrottlingException: over the rate limit or a full line to the token'
+      content:
+        application/x-amz-json-1.1:
+          schema:
+            $ref: '#/components/schemas/Error'
+    ServerError:
+      description: KeyUnavailableException (the token is locked or absent; retryable) or KMSInternalException (the audit line cannot be written)
+      content:
+        application/x-amz-json-1.1:
+          schema:
+            $ref: '#/components/schemas/Error'
+  schemas:
+    Fields:
+      type: object
+      description: The fields of the requests and answers, by name
+      properties:
+        KeyId:
+          type: string
+          description: name, alias/name, our ARN form (arn:hsmgate:kms:REGION:000000000000:key/NAME), or name@N for version N
+        Plaintext: &id005
+          type: string
+          format: byte
+          description: base64
+        CiphertextBlob:
+          type: string
+          format: byte
+          description: base64; the blob is ours (ecies2) and opaque
+        EncryptionContext:
+          type: object
+          additionalProperties:
+            type: string
+          description: the additional data; a key in aad.mode fixed takes none
+        EncryptionAlgorithm:
+          type: string
+          enum:
+          - SYMMETRIC_DEFAULT
+        DryRun:
+          type: boolean
+          description: answers DryRunOperationException after the policy check
+        KeySpec:
+          type: string
+          enum:
+          - AES_128
+          - AES_256
+        NumberOfBytes:
+          type: integer
+          minimum: 1
+          maximum: 1024
+        SourceKeyId:
+          type: string
+        DestinationKeyId:
+          type: string
+        SourceEncryptionContext:
+          type: object
+          additionalProperties:
+            type: string
+        DestinationEncryptionContext:
+          type: object
+          additionalProperties:
+            type: string
+        Message:
+          type: string
+          format: byte
+          description: base64; 1 to 4096 bytes (RAW) or 32 bytes (DIGEST)
+        MessageType:
+          type: string
+          enum:
+          - RAW
+          - DIGEST
+        SigningAlgorithm:
+          type: string
+          enum:
+          - ECDSA_SHA_256
+        MacAlgorithm:
+          type: string
+          enum:
+          - HMAC_SHA_256
+          - HMAC_SHA_384
+          - HMAC_SHA_512
+          description: the one the key makes (mac_hash)
+        Mac: *id005
+        Signature:
+          type: string
+          format: byte
+          description: base64 of an ASN.1 DER ECDSA signature
+        KeyAgreementAlgorithm:
+          type: string
+          enum:
+          - ECDH
+        PublicKey:
+          type: string
+          format: byte
+          description: base64 of the peer public key, a P-256 DER SubjectPublicKeyInfo, checked to be on the curve
+        Recipient:
+          description: 'Refused: not supported'
+        NumberOfBytesRandom:
+          type: integer
+          minimum: 1
+          maximum: 1024
+    Error:
+      type: object
+      properties:
+        __type:
+          type: string
+        message:
+          type: string

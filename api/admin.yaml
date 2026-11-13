@@ -1,0 +1,58 @@
+openapi: 3.1.0
+info:
+  title: hsmgate admin socket
+  version: 0.1.0
+  summary: Unlock, status and metrics on a unix socket (admin_socket). Local, not on the network.
+  description: |
+    A small HTTP API on a **unix socket** (`admin_socket` of the configuration, created with mode 0600). It is not on the listener of the faces and not reachable over the network.
+    **There is no authentication other than the file mode of the socket**: whoever can open it can unlock a token. Do not put it on a shared volume.
+    `hsmgate unlock` is the client of `POST /unlock`; `GET /metrics` exists only with `metrics.enabled` (docs/operations.md, "Metrics").
+    Every unlock is in the audit log (`face: admin`, `op: unlock`, `result: attempt` and then `ok` or `refused`): the attempt is written before the card is touched.
+  license: {name: MIT, identifier: MIT}
+servers:
+  - url: http://localhost
+    description: 'Over the unix socket: curl --unix-socket /run/hsmgate/admin.sock http://localhost/status'
+tags:
+  - {name: tokens, description: State and unlock}
+  - {name: metrics, description: Counters}
+paths:
+  /status:
+    get:
+      operationId: status
+      tags: [tokens]
+      summary: The state of every token
+      responses:
+        '200':
+          description: A map from token name to its state (`ready`, `locked` or `absent`)
+          content: {application/json: {schema: {type: object, additionalProperties: {type: string}}}}
+  /unlock:
+    post:
+      operationId: unlock
+      tags: [tokens]
+      summary: Give the PIN to a token that waits for it
+      description: The PIN is never an argument of a command and is zeroed in memory after the try. With no audit log there is no unlock.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, pin]
+              properties:
+                token: {type: string, description: The name of the token in the configuration}
+                pin: {type: string}
+      responses:
+        '200': {description: Unlocked, content: {application/json: {schema: {type: object, properties: {state: {type: string}}}}}}
+        '400': {description: 'Bad request, or this token takes no PIN (a software token, or an unknown name)', content: {text/plain: {schema: {type: string}}}}
+        '403': {description: The card refused the PIN (the service does not try again), content: {text/plain: {schema: {type: string}}}}
+        '500': {description: Unlocked, but the audit log could not record the result, content: {text/plain: {schema: {type: string}}}}
+        '503': {description: 'The audit log is unavailable: nothing was tried', content: {text/plain: {schema: {type: string}}}}
+  /metrics:
+    get:
+      operationId: metrics
+      tags: [metrics]
+      summary: The counters in the text format of Prometheus (only with metrics.enabled)
+      description: What is counted tells when secrets are used and how much is refused, so it is treated as sensitive (docs/threat-model.md).
+      responses:
+        '200': {description: The text exposition format, content: {text/plain: {schema: {type: string}}}}
+        '404': {description: metrics.enabled is off}

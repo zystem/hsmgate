@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>hsmgate API reference</title>
+  <!-- All the APIs of hsmgate (the YAML files next to this page), shown with Scalar. The script comes from jsDelivr, pinned to a version and checked by a hash.
+       Serve this directory over HTTP: python3 -m http.server -d api 8081 (GitHub Pages does it: .github/workflows/pages.yml). -->
+</head>
+<body>
+  <div id="app"></div>
+  <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference@1.76.4/dist/browser/standalone.js" integrity="sha384-hwB9WroDTpZaI38gr+u9CXA6ksz5gUYgD2GxXazKl/agT1L2GWUiRFWGJYNiFu4Q" crossorigin="anonymous"></script>
+  <script>
+    Scalar.createApiReference('#app', {
+      sources: [
+        {title: 'Transit (Vault / OpenBao compatible)', slug: 'transit', url: 'openapi.yaml', default: true},
+        {title: 'KMS-JSON', slug: 'kms-json', url: 'kms-json.yaml'},
+        {title: 'KMS-REST', slug: 'kms-rest', url: 'kms-rest.yaml'},
+        {title: 'KMS-gRPC', slug: 'kms-grpc', url: 'kms-grpc.yaml'},
+        {title: 'Admin socket', slug: 'admin', url: 'admin.yaml'}
+      ],
+      hideClientButton: true,        // the service needs a client certificate: a browser cannot call it
+      hideTestRequestButton: true,
+      showDeveloperTools: 'never',
+      persistAuth: false
+    })
+  </script>
+</body>
+</html>
