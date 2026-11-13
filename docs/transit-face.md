@@ -76,11 +76,14 @@ A certificate from the CA that the policy does not know is refused at `auth/toke
 The API is described in [api/openapi.yaml](../api/openapi.yaml) (OpenAPI 3.1, with the `mutualTLS` security scheme). It is a contract, not decoration: `internal/face/transit/openapi_test.go` checks that the spec lists the routes the service has and that
 every answer the handler gives in its test scenarios (200, 400, 403, 413, 429, 503) is documented for that operation, with `X-Hsmgate-Retryable` and `Retry-After`.
 
-hsmgate does **not** serve a Swagger UI or the spec itself: the service answers only clients with a certificate of its CA, and a documentation page does not belong behind that door. To read the spec as a page, run a Swagger UI on your machine
-(not tried here), for example:
+hsmgate does **not** serve a Swagger UI or the spec itself: the service answers only clients with a certificate of its CA, and a documentation page does not belong behind that door.
+
+To read the spec as a page, use [api/index.html](../api/index.html): a Swagger UI of `openapi.yaml` that works from any static web server, with "Try it out" switched off. On your machine:
 
 ```bash
-docker run --rm -p 8081:8080 -e SWAGGER_JSON=/spec/openapi.yaml -v "$PWD/api":/spec:ro swaggerapi/swagger-ui
+python3 -m http.server -d api 8081
 ```
 
-"Try it out" from a browser will not reach the service (it needs a client certificate); use `curl --cert --key --cacert` as in the examples of this page. The spec is also in the release archive `hsmgate-deploy.tar.gz`.
+Then open `http://localhost:8081/`. The page loads Swagger UI 5.34.1 from jsDelivr (pinned, checked by a hash), so it needs Internet access; opening the file with `file://` does not work, the browser refuses to read `openapi.yaml` that way. Run on 2026-11-13: the page rendered the spec in a browser; the operations were not clicked through one by one.
+
+"Try it out" from a browser cannot reach the service (it needs a client certificate); use `curl --cert --key --cacert` as in the examples of this page. The spec is also in the release archive `hsmgate-deploy.tar.gz`.

@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>hsmgate Transit API</title>
+  <!-- Swagger UI of openapi.yaml (next to this file). The scripts come from jsDelivr, pinned to a version and checked by hash. Serve the directory over HTTP: python3 -m http.server -d api 8081 -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.34.1/swagger-ui.css" integrity="sha384-4c3vsE5f+trhFyHrFrLM1fFGUn531NIaC7dcqEWIJdoRQJ5CkJbSuSCwXLpaS1KF" crossorigin="anonymous">
+  <style>body{margin:0}.note{font:14px/1.5 system-ui,sans-serif;max-width:1460px;margin:0 auto;padding:12px 20px;background:#fff8e1;border-bottom:1px solid #e0c97a;color:#4a3b00}</style>
+</head>
+<body>
+  <div class="note"><b>Read-only.</b> "Try it out" is off: the service answers only a client with a certificate of its CA, which a browser page cannot present. Use <code>curl --cert --key --cacert</code> (docs/guides/clients.md).</div>
+  <div id="ui"></div>
+  <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.34.1/swagger-ui-bundle.js" integrity="sha384-XFYN47VzPiDY6qPtxYKg0nqUeW/upo20xf1j2SUE7gT/i35FJB4cuS/71Iegzk8Z" crossorigin="anonymous"></script>
+  <script>
+    window.ui = SwaggerUIBundle({
+      url: "openapi.yaml",
+      dom_id: "#ui",
+      supportedSubmitMethods: [],
+      docExpansion: "list",
+      deepLinking: true
+    });
+  </script>
+</body>
+</html>
