@@ -90,6 +90,13 @@ fluentbit:
     requests: {cpu: 25m, memory: 32Mi}
     limits: {memory: 128Mi}
 
+# Containers and volumes of your own in the pod (a log agent other than Fluent Bit, a metrics exporter ...), written as in a Pod spec and added as they are, so the chart
+# does not check them. They can mount the volume named `audit` (the audit file, /var/log/hsmgate in hsmgate), `run` (the admin socket, mode 0600 owned by root) and the
+# volumes you add. A container that reads the audit file runs as uid 0 (the file is 0640, owned by root); mount it readOnly. A name that is already used (hsmgate, fluent-bit, config, tls,
+# soft, run, audit, fluentbit-config, fluentbit-state) makes the pod invalid.
+extraContainers: []
+extraVolumes: []
+
 service:
   type: ClusterIP
   port: 8443

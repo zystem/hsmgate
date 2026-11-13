@@ -7,6 +7,7 @@
 - **`audit.stdout: true`**: with `audit.file`, every audit line is also written to standard output (for a log collector of a container). Without a file the audit was already on standard output. Needs a restart. Not tested by a test of its own; not run.
 
 - **Helm chart: optional Fluent Bit sidecar** (`fluentbit.enabled`, `fluentbit.outputs`, `fluentbit.filters`, off by default; needs `audit.file=true`) that ships the audit file to any Fluent Bit output. [examples/falco](deploy/helm/hsmgate/examples/falco/README.md): Falco configuration, three rules and a Vector configuration (the Falco collector takes one event per POST, which Fluent Bit cannot send). Run in Docker, not in a cluster.
+- **Helm chart: `extraContainers` and `extraVolumes`** (a Pod-spec list each, empty by default) for sidecars of your own; [examples/vector-sidecar-values.yaml](deploy/helm/hsmgate/examples/vector-sidecar-values.yaml) runs Vector this way. `helm lint` and `kubectl apply --dry-run=client`; not run in a cluster.
 
 ### Changed
 - Helm chart: `audit.file` defaults to **false**; the audit goes only to the output of the container (`kubectl logs`). Set `audit.file=true` to keep the file as before.

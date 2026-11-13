@@ -79,6 +79,9 @@ spec:
             - {name: audit, mountPath: /var/log/hsmgate, readOnly: true}
             - {name: fluentbit-state, mountPath: /var/lib/fluent-bit}
         {{- end }}
+        {{- with .Values.extraContainers }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
       volumes:
         - name: config
           configMap: {name: {{ include "hsmgate.fullname" . }}}
@@ -94,6 +97,9 @@ spec:
           configMap: {name: {{ include "hsmgate.fullname" . }}-fluentbit}
         - name: fluentbit-state
           emptyDir: {sizeLimit: 16Mi}   # the offset of the reading: lost with the pod, then the file is read again from the start
+        {{- end }}
+        {{- with .Values.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
         {{- end }}
         - name: audit
           {{- if $audit.enabled }}

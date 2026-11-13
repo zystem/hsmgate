@@ -1,0 +1,22 @@
+# A Vector sidecar through extraContainers / extraVolumes (no support for Vector in the chart itself). It reads the audit file and POSTs every line on its own
+# to the collector of Falco (see falco/README.md). Not run in a cluster; the Vector configuration itself was run in Docker on 2026-11-13.
+audit:
+  file: true
+extraVolumes:
+  - name: vector-config
+    configMap: {name: hsmgate-vector}     # a ConfigMap of yours with the key vector.yaml (examples/falco/vector.yaml)
+  - name: vector-data
+    emptyDir: {sizeLimit: 16Mi}
+extraContainers:
+  - name: vector
+    image: docker.io/timberio/vector:0.61.0-alpine    # the version tried in Docker on 2026-11-13
+    args: [--config, /etc/vector/vector.yaml]
+    securityContext:
+      runAsUser: 0
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      capabilities: {drop: [ALL]}
+    volumeMounts:
+      - {name: vector-config, mountPath: /etc/vector, readOnly: true}
+      - {name: audit, mountPath: /var/log/hsmgate, readOnly: true}
+      - {name: vector-data, mountPath: /var/lib/vector}
