@@ -1,9 +1,13 @@
 {{- $soft := dict }}
 {{- range .Values.softToken.labels }}{{ $_ := set $soft . (printf "/etc/hsmgate/soft/%s" .) }}{{ end }}
 {{- $audit := dict }}
+{{- $files := int .Values.audit.maxFiles | default 5 }}
+{{- if and .Values.audit.file (not .Values.audit.persistence.enabled) .Values.audit.maxSizeMB (gt (mul (int .Values.audit.maxSizeMB) (add1 $files)) 256) }}
+{{ fail (printf "audit.maxSizeMB x (maxFiles + 1) = %d MB does not fit the 256 MiB emptyDir of the audit volume: lower them or set audit.persistence.enabled" (mul (int .Values.audit.maxSizeMB) (add1 $files))) }}
+{{- end }}
 {{- if .Values.audit.file }}
 {{- $_ := set $audit "file" "/var/log/hsmgate/audit.log" }}
-{{- $_ := set $audit "stdout" .Values.audit.stdout }}
+{{- if .Values.audit.stdout }}{{ $_ := set $audit "stdout" true }}{{ end }}
 {{- if .Values.audit.maxSizeMB }}{{ $_ := set $audit "max_size_mb" .Values.audit.maxSizeMB }}{{ $_ := set $audit "max_files" .Values.audit.maxFiles }}{{ end }}
 {{- end }}
 {{- $base := dict

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"sync"
+	"time"
 )
 
 // File is the audit file: opened for append (mode 0640, so that a log shipper in the group can read it), reopened on request (after an outside tool such as logrotate
@@ -15,6 +16,9 @@ type File struct {
 	size     int64
 	maxBytes int64
 	keep     int
+	// Warn, when set, is told (at most once a minute) that a rotation failed and the file is still in use: the file then grows past its limit until the cause is gone.
+	Warn     func(error)
+	lastWarn time.Time
 }
 
 // OpenFile opens (creating if needed) the file. maxBytes 0 means no rotation by the service; keep is how many older files are kept when it rotates (at least 1).
@@ -66,8 +70,14 @@ func (a *File) Write(p []byte) (int, error) {
 		}
 	}
 	if a.maxBytes > 0 && a.size > 0 && a.size+int64(len(p)) > a.maxBytes {
-		if err := a.rotate(); err != nil && a.f == nil {
-			return 0, err
+		if err := a.rotate(); err != nil {
+			if a.f == nil {
+				return 0, err
+			}
+			if a.Warn != nil && time.Since(a.lastWarn) > time.Minute {
+				a.lastWarn = time.Now()
+				a.Warn(err)
+			}
 		}
 	}
 	n, err := a.f.Write(p)

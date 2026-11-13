@@ -1,0 +1,20 @@
+# The collector of Falco has no authentication: whoever can reach its port can send Falco a false audit line. This policy lets only the pods of hsmgate (the sidecar or the
+# agent that reads the audit file) reach it. Put it in the namespace of Falco; change the labels to those of your Falco pods and of the hsmgate namespace.
+# Not run in a cluster.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: falco-collector-from-hsmgate
+  namespace: falco
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: falco}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: hsmgate}
+          podSelector:
+            matchLabels: {app.kubernetes.io/name: hsmgate}
+      ports:
+        - {protocol: TCP, port: 54827}

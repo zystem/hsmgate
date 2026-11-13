@@ -70,20 +70,9 @@ func New(cfg *config.Config, auditOut io.Writer) (*Server, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
-	var auditFile *audit.File
-	if auditOut == nil {
-		auditOut = os.Stdout
-		if cfg.Audit.File != "" {
-			f, err := audit.OpenFile(cfg.Audit.File, int64(cfg.Audit.MaxSizeMB)<<20, cfg.Audit.MaxFiles)
-			if err != nil {
-				return nil, err
-			}
-			auditFile = f
-			auditOut = f
-			if cfg.Audit.Stdout {
-				auditOut = io.MultiWriter(f, os.Stdout)
-			}
-		}
+	auditFile, auditOut, err := openAudit(cfg, auditOut, os.Stdout)
+	if err != nil {
+		return nil, err
 	}
 	if err := checkFIPS(cfg); err != nil {
 		return nil, err
@@ -511,6 +500,28 @@ func closeTokens(m map[string]backend.Token) {
 			c.Close()
 		}
 	}
+}
+
+// openAudit says where the audit goes: out when a test gives one; otherwise the file of the configuration (also to stdout with audit.stdout), or stdout alone.
+// The *audit.File (nil when there is no file) is what a SIGHUP reopens.
+func openAudit(cfg *config.Config, out, stdout io.Writer) (*audit.File, io.Writer, error) {
+	if out != nil {
+		return nil, out, nil
+	}
+	if cfg.Audit.File == "" {
+		return nil, stdout, nil
+	}
+	f, err := audit.OpenFile(cfg.Audit.File, int64(cfg.Audit.MaxSizeMB)<<20, cfg.Audit.MaxFiles)
+	if err != nil {
+		return nil, nil, err
+	}
+	f.Warn = func(err error) {
+		fmt.Fprintln(os.Stderr, "hsmgate: audit rotation failed, the file stays in use and grows:", err)
+	}
+	if cfg.Audit.Stdout {
+		return f, io.MultiWriter(f, stdout), nil
+	}
+	return f, f, nil
 }
 
 // ReopenAudit opens the audit file again (after logrotate renamed it); nothing to do when the audit is not a file of the service.
