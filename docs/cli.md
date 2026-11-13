@@ -18,7 +18,7 @@ usage: hsmgate <command> [flags]       (hsmgate <command> -h shows the flags of 
   encrypt   seal a value (or the files of a directory) with a key of the service
   decrypt   open what encrypt sealed
   ca        make the certificates: the authority, the service, the clients (init, setup, server, client, list)
-  ping      connect to the listener (a container health check; needs no certificate)
+  ping      connect to the listener (a container health check; a TCP connect, or the whole TLS handshake with a certificate that has no rights)
   version   print the version
 
 Documentation: https://github.com/zystem/hsmgate#readme
@@ -218,9 +218,22 @@ Usage of ca setup:
 ## hsmgate ping
 
 ```text
-Usage of ping:
+usage: hsmgate ping [-addr host:port] [-cert file -key file -ca file [-name server-name]]
+
+Connects to the listener and exits 0 when it answers: a health check (a container, a Kubernetes probe) that never touches a token. Without -cert it is a TCP connect and needs no certificate. With -cert, -key and -ca it makes the whole TLS 1.3 handshake (the certificate of the service checked against the CA, a client certificate shown) and sends no request: use a certificate of the CA that no entry of clients: names, so that the probe has no rights and leaves no audit line.
+
   -addr string
     	address to connect to (default "127.0.0.1:8443")
+  -ca string
+    	TLS mode: the CA that signed the certificate of the service
+  -cert string
+    	TLS mode: the certificate of the probe (a certificate of the CA that no client of the policy uses)
+  -key string
+    	TLS mode: the key of that certificate
+  -name string
+    	TLS mode: the name the certificate of the service must carry (default: the host of -addr)
+  -timeout duration
+    	give up after this long (default 3s)
 ```
 
 ## hsmgate version

@@ -140,7 +140,7 @@ func New(cfg *config.Config, auditOut io.Writer) (*Server, error) {
 			inner.ServeHTTP(w, r)
 		})
 	}
-	s.HTTP = &http.Server{Addr: cfg.Listen, Handler: handler, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, MaxHeaderBytes: 16 << 10, HTTP2: &http.HTTP2Config{MaxConcurrentStreams: 16}}
+	s.HTTP = &http.Server{Addr: cfg.Listen, Handler: handler, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, MaxHeaderBytes: 16 << 10, ErrorLog: newErrorLog(nil), HTTP2: &http.HTTP2Config{MaxConcurrentStreams: 16}}
 	if cfg.InsecureLoopbackClient != "" {
 		if !loopback(cfg.Listen) {
 			closeTokens(gen.tokens)
