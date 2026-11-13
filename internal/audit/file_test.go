@@ -83,3 +83,35 @@ func TestFileReopenAfterRename(t *testing.T) {
 		t.Errorf("new %q old %q", read(t, p), read(t, p+".1"))
 	}
 }
+
+// A rotation that cannot rename leaves the file in use, writes still succeed, and the failure is reported (once in a minute, not for every line).
+func TestFileRotationFailureIsReportedAndWritesGoOn(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can rename in a read-only directory")
+	}
+	dir := t.TempDir()
+	p := filepath.Join(dir, "audit.log")
+	f, err := OpenFile(p, 10, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	var warned []error
+	f.Warn = func(err error) { warned = append(warned, err) }
+	f.Write([]byte("aaaaaaaaaaaaaaa\n"))
+	if err := os.Chmod(dir, 0o500); err != nil { // no rename possible
+		t.Fatal(err)
+	}
+	defer os.Chmod(dir, 0o700)
+	for i := 0; i < 3; i++ {
+		if _, err := f.Write([]byte("bbbbbbbbbbbbbbb\n")); err != nil {
+			t.Fatalf("a failed rotation stopped a write: %v", err)
+		}
+	}
+	if len(warned) != 1 {
+		t.Errorf("warned %d times, want once", len(warned))
+	}
+	if got := read(t, p); strings.Count(got, "\n") != 4 {
+		t.Errorf("lines in the file: %q", got)
+	}
+}
