@@ -1,4 +1,4 @@
-// hsmgate: a policy-checked network door in front of a key token. Subcommands: serve, check, unlock, dev (a throw-away service to try it), ca, encrypt, decrypt, ping, version.
+// hsmgate: a policy-checked network door in front of a key token. Subcommands: serve, check, unlock, dev (a throw-away service to try it), ca, encrypt, decrypt, setup, ping, version.
 package main
 
 import (
@@ -36,6 +36,7 @@ usage: hsmgate <command> [flags]       (hsmgate <command> -h shows the flags of 
   encrypt   seal a value (or the files of a directory) with a key of the service
   decrypt   open what encrypt sealed
   ca        make the certificates: the authority, the service, the clients (init, setup, server, client, list)
+  setup     the terminal tool: menus for keys, clients and settings, and a quick setup (a separate program: hsmgate-setup)
   ping      connect to the listener (a container health check; a TCP connect, or the whole TLS handshake with a certificate that has no rights)
   version   print the version
 
@@ -63,6 +64,9 @@ func main() {
 	}
 	if len(os.Args) >= 2 && os.Args[1] == "ca" {
 		os.Exit(runCA(os.Args[2:], os.Stdout, os.Stderr))
+	}
+	if len(os.Args) >= 2 && os.Args[1] == "setup" {
+		os.Exit(runSetup(os.Args[2:], os.Stdout, os.Stderr))
 	}
 	if len(os.Args) >= 2 && os.Args[1] == "ping" {
 		os.Exit(runPing(os.Args[2:], os.Stderr))

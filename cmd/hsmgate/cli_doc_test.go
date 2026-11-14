@@ -41,6 +41,7 @@ One binary, several commands. This page is what ` + "`hsmgate <command> -h`" + `
 		{"hsmgate decrypt", "", []string{"decrypt", "-h"}},
 		{"hsmgate ca", "The commands that make certificates. `hsmgate ca` alone prints this; the flags below are shared by `setup`, `init`, `server`, `client` and `list` (each uses the ones its line above names).", []string{"ca"}},
 		{"hsmgate ca: the flags", "", []string{"ca", "setup", "-h"}},
+		{"hsmgate setup", "The terminal tool. It is a separate program (`hsmgate-setup`, [setup-tool.md](setup-tool.md)) so that the service does not carry a terminal library.", []string{"setup", "-h"}},
 		{"hsmgate ping", "", []string{"ping", "-h"}},
 	}
 	for _, s := range sections {

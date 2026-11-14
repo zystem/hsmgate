@@ -1,0 +1,73 @@
+# deb and rpm of hsmgate, made by nfpm (pinned in packaging/build.sh). Needs the programs in ${BUILD_DIR} (hsmgate, hsmgate-setup) and the environment VERSION (without the v) and ARCH (amd64).
+name: hsmgate
+arch: ${ARCH}
+platform: linux
+version: ${VERSION}
+section: admin
+priority: optional
+maintainer: zystem <10708003+zystem@users.noreply.github.com>
+description: |
+  A policy-checked network door in front of a key token.
+  hsmgate keeps private keys on a smart card or an HSM (or, for tests, in files) and lets
+  only clients with a certificate of its CA use them, each for the keys, operations and
+  contexts the policy gives it. It speaks the Vault/OpenBao Transit API and, optionally,
+  three cloud key-service APIs. Every decision is written down before the answer goes out.
+  .
+  After the installation run "sudo hsmgate-setup": menus for keys, clients and settings,
+  and a quick setup that makes a first key, a first client and its certificate.
+vendor: hsmgate
+homepage: https://github.com/zystem/hsmgate
+license: MIT
+
+contents:
+  - src: ${BUILD_DIR}/hsmgate
+    dst: /usr/bin/hsmgate
+    file_info: {mode: 0755}
+  - src: ${BUILD_DIR}/hsmgate-setup
+    dst: /usr/bin/hsmgate-setup
+    file_info: {mode: 0755}
+  - src: packaging/hsmgate.service
+    dst: /usr/lib/systemd/system/hsmgate.service
+    file_info: {mode: 0644}
+    packager: rpm
+  - src: packaging/hsmgate.service
+    dst: /lib/systemd/system/hsmgate.service
+    file_info: {mode: 0644}
+    packager: deb
+  # the directories are the package's, so that they have the right owner and mode from the first moment (the configuration is read by the service through its group, nobody else)
+  - dst: /etc/hsmgate
+    type: dir
+    file_info: {mode: 0750, owner: root, group: hsmgate}
+  - dst: /var/log/hsmgate
+    type: dir
+    file_info: {mode: 0750, owner: hsmgate, group: hsmgate}
+  - src: deploy/hsmgate.example.yaml
+    dst: /usr/share/doc/hsmgate/hsmgate.example.yaml
+  - src: deploy/hsmgate.minimal.yaml
+    dst: /usr/share/doc/hsmgate/hsmgate.minimal.yaml
+  - src: README.md
+    dst: /usr/share/doc/hsmgate/README.md
+  - src: CHANGELOG.md
+    dst: /usr/share/doc/hsmgate/CHANGELOG.md
+  - src: LICENSE
+    dst: /usr/share/doc/hsmgate/copyright
+
+scripts:
+  preinstall: packaging/scripts/preinstall.sh
+  postinstall: packaging/scripts/postinstall.sh
+  preremove: packaging/scripts/preremove.sh
+  postremove: packaging/scripts/postremove.sh
+
+overrides:
+  deb:
+    depends:
+      - libc6
+    recommends:
+      - pcscd
+      - opensc
+  rpm:
+    depends:
+      - glibc
+    recommends:
+      - pcsc-lite
+      - opensc

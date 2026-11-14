@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **`hsmgate-setup`, a terminal tool** in the manner of the installers of Debian and YaST ([setup-tool.md](docs/setup-tool.md)): menus to look at and change the tokens, keys (create, rotate, delete), clients and their rights, the faces, the audit settings, to read the audit log and to unlock a card; every change is made in the document, shown as a diff, checked with the loader of the service and written atomically with a backup. It edits `hsmgate.yaml`, which stays the one source of truth ([why not SQLite](docs/why-yaml-not-sqlite.md)). It is a program of its own (a module, `tui/`), so that the service does not carry a terminal library. `hsmgate setup` starts it.
+- **A quick setup** (a wizard of six pages, or `hsmgate-setup -auto` with no screen): a configuration, a key file or a card, the authority and the certificates of the service and of the first client, the check as the service account, the unit, and the commands that work now.
+- **Packages**: a `.deb`, an `.rpm` and an AppImage ([installing-packages.md](docs/installing-packages.md)), built by `packaging/build.sh` (nfpm and appimagetool, pinned), signed and attested with the other assets of a release. The package makes the account and the directories, installs the unit (it starts only when a configuration exists), and offers the quick setup after a first installation: by itself at a terminal, with `HSMGATE_SETUP_AUTO=1` with no screen, otherwise it says what to do. It never starts or restarts the service, and removal keeps the configuration, the keys and the audit log. The Packages workflow builds them and installs them in clean containers on every change to `packaging/` or `tui/`.
+- CI: a `tui` job (tests under the race detector, a coverage floor, govulncheck, staticcheck, gosec) for the new module; Dependabot watches it.
+
 ## 0.8.0 — 2026-11-13
 
 The audit can be rotated, reopened and sent to the container output; the chart gets a Fluent Bit sidecar, `extraContainers` and `extraVolumes`; every API has an OpenAPI file and a page on GitHub Pages. **The chart no longer writes the audit file by default** ([upgrading.md](docs/upgrading.md)). The number 0.7.4 was prepared but never tagged: what was prepared for it is in this release.

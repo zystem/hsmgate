@@ -1,0 +1,19 @@
+#!/bin/sh
+# The entry of the AppImage.
+#   hsmgate-X.Y.Z-x86_64.AppImage                  no arguments: the quick setup on a first run (no configuration yet), the menus afterwards
+#   hsmgate-X.Y.Z-x86_64.AppImage setup [flags]    the terminal tool (hsmgate-setup) with its flags
+#   hsmgate-X.Y.Z-x86_64.AppImage serve|check|ca|encrypt|decrypt|dev|ping|version ...   the program (hsmgate) itself
+# Run as root it uses the system layout (/etc/hsmgate, /var/log/hsmgate); run as an ordinary user it keeps everything in the home directory and listens on the loopback only: a way to try it
+# or to run it without installing anything. Nothing is written inside the AppImage.
+set -eu
+here="$(dirname "$(readlink -f "$0")")"
+export PATH="$here/usr/bin:$PATH"
+export HSMGATE_BIN="$here/usr/bin/hsmgate"
+export HSMGATE_SETUP="$here/usr/bin/hsmgate-setup"
+if [ "$#" -eq 0 ]; then
+    exec "$here/usr/bin/hsmgate-setup" -first-run
+fi
+case "$1" in
+    setup) shift; exec "$here/usr/bin/hsmgate-setup" "$@" ;;
+    *) exec "$here/usr/bin/hsmgate" "$@" ;;
+esac

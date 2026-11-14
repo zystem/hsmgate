@@ -18,6 +18,7 @@ usage: hsmgate <command> [flags]       (hsmgate <command> -h shows the flags of 
   encrypt   seal a value (or the files of a directory) with a key of the service
   decrypt   open what encrypt sealed
   ca        make the certificates: the authority, the service, the clients (init, setup, server, client, list)
+  setup     the terminal tool: menus for keys, clients and settings, and a quick setup (a separate program: hsmgate-setup)
   ping      connect to the listener (a container health check; a TCP connect, or the whole TLS handshake with a certificate that has no rights)
   version   print the version
 
@@ -213,6 +214,24 @@ Usage of ca setup:
     	the token of the configuration (default: the one the authority was made with)
   -uri string
     	client: URI names, comma separated (a SPIFFE id for example)
+```
+
+## hsmgate setup
+
+The terminal tool. It is a separate program (`hsmgate-setup`, [setup-tool.md](setup-tool.md)) so that the service does not carry a terminal library.
+
+```text
+usage: hsmgate setup [flags of hsmgate-setup]
+
+Opens hsmgate-setup, the terminal tool: menus to look at and change the tokens, keys, clients, faces and audit settings of the configuration (it edits hsmgate.yaml and checks every change
+with the same rules as the service), and a quick setup that goes from nothing to a running service with a first key, a first client and its certificate.
+
+  hsmgate setup                   the menus
+  hsmgate setup -first-run        the quick setup when there is no configuration (what a package runs after the installation)
+  hsmgate setup -auto             the quick setup with no screen: the defaults and the flags (for unattended installations)
+
+hsmgate-setup is a separate program, installed next to hsmgate by the packages (deb, rpm, AppImage) and the release archive; "hsmgate-setup -h" lists its flags. It is a program of its own so
+that the service does not carry a terminal library.
 ```
 
 ## hsmgate ping

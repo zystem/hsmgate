@@ -1,0 +1,114 @@
+name: Packages
+
+# The deb, the rpm and the AppImage are built (packaging/build.sh) and then installed and used in clean containers: the account and the directories, the quick setup (by itself on a terminal, with
+# HSMGATE_SETUP_AUTO=1, or not at all), the service as its own user, a client sealing and opening a text, and what removal keeps. The release workflow builds the same files from the same script.
+on:
+  pull_request:
+    paths: ["packaging/**", "tui/**", ".github/workflows/packages.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    # Debian bookworm, as for the release: the programs are linked against its glibc
+    container: golang:1.26.11-bookworm
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Build the programs
+        run: |
+          mkdir -p build
+          CGO_ENABLED=1 go build -buildmode=pie -trimpath -buildvcs=false -ldflags "-s -w -linkmode=external -extldflags '-Wl,-z,relro,-z,now' -X main.version=v0.0.0-ci" -o build/hsmgate ./cmd/hsmgate
+          cd tui && CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags "-s -w -X main.version=v0.0.0-ci" -o ../build/hsmgate-setup ./cmd/hsmgate-setup
+      - name: Build the packages
+        run: sh packaging/build.sh 0.0.0
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: packages
+          path: dist/
+          retention-days: 3
+
+  deb:
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ["debian:12", "debian:13", "ubuntu:24.04"]
+        mode: [plain, auto]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: packages
+          path: dist
+      - run: docker run --rm -v "$PWD/dist:/t:ro" -v "$PWD/packaging/test:/p:ro" ${{ matrix.image }} sh /p/test-deb.sh ${{ matrix.mode }}
+
+  wizard:
+    # somebody at a terminal: the quick setup starts by itself during `apt install`
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: packages
+          path: dist
+      - run: docker run --rm -v "$PWD/dist:/t:ro" -v "$PWD/packaging/test:/p:ro" debian:13 sh /p/test-deb.sh wizard
+
+  card:
+    # the card path of the quick setup, on SoftHSM2 (a software token that speaks PKCS#11)
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: packages
+          path: dist
+      - run: docker run --rm -v "$PWD/dist:/t:ro" -v "$PWD/packaging/test:/p:ro" debian:13 sh /p/test-card.sh
+
+  rpm:
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [plain, auto]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: packages
+          path: dist
+      - run: docker run --rm -v "$PWD/dist:/t:ro" -v "$PWD/packaging/test:/p:ro" fedora:latest sh /p/test-rpm.sh ${{ matrix.mode }}
+
+  appimage:
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ["debian:13", "ubuntu:24.04"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: packages
+          path: dist
+      - run: docker run --rm -v "$PWD/dist:/t:ro" -v "$PWD/packaging/test:/p:ro" ${{ matrix.image }} sh /p/test-appimage.sh

@@ -31,13 +31,20 @@ jobs:
           name: hsmgate-linux-amd64
           path: build
       - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
 
       - name: Package
         run: |
           mkdir -p dist
           cp build/hsmgate dist/hsmgate-linux-amd64
           cp build/hsmgate-fips dist/hsmgate-linux-amd64-fips
-          chmod 755 dist/hsmgate-linux-amd64 dist/hsmgate-linux-amd64-fips
+          cp build/hsmgate-setup dist/hsmgate-setup-linux-amd64
+          chmod 755 dist/hsmgate-linux-amd64 dist/hsmgate-linux-amd64-fips dist/hsmgate-setup-linux-amd64
+          sha256sum dist/hsmgate-setup-linux-amd64 > dist/hsmgate-setup-linux-amd64.sha256
+          # the deb, the rpm and the AppImage (the same script as the Packages workflow; nfpm and appimagetool are pinned in it)
+          BUILD_DIR=build DIST_DIR=dist sh packaging/build.sh "${GITHUB_REF_NAME#v}"
           sha256sum dist/hsmgate-linux-amd64 > dist/hsmgate-linux-amd64.sha256
           sha256sum dist/hsmgate-linux-amd64-fips > dist/hsmgate-linux-amd64-fips.sha256
           tar -czf dist/hsmgate-deploy.tar.gz LICENSE README.md api deploy docs
@@ -56,7 +63,7 @@ jobs:
 
       - name: Sign the files
         run: |
-          for f in dist/hsmgate-linux-amd64 dist/hsmgate-linux-amd64-fips dist/hsmgate-deploy.tar.gz dist/hsmgate-*.tgz dist/hsmgate.spdx.json dist/hsmgate.openvex.json; do
+          for f in dist/hsmgate-linux-amd64 dist/hsmgate-linux-amd64-fips dist/hsmgate-setup-linux-amd64 dist/hsmgate_*.deb dist/hsmgate-*.rpm dist/hsmgate-*.AppImage dist/hsmgate-deploy.tar.gz dist/hsmgate-*.tgz dist/hsmgate.spdx.json dist/hsmgate.openvex.json; do
             cosign sign-blob --yes --bundle "$f.sigstore.json" "$f"
           done
 
@@ -66,6 +73,10 @@ jobs:
           subject-path: |
             dist/hsmgate-linux-amd64
             dist/hsmgate-linux-amd64-fips
+            dist/hsmgate-setup-linux-amd64
+            dist/hsmgate_*.deb
+            dist/hsmgate-*.rpm
+            dist/hsmgate-*.AppImage
             dist/hsmgate-deploy.tar.gz
             dist/hsmgate-*.tgz
 

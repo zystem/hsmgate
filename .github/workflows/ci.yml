@@ -50,6 +50,28 @@ jobs:
       - run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 -checks all ./...
       - run: go run github.com/securego/gosec/v2/cmd/gosec@v2.29.0 -quiet -exclude=G104 -exclude-dir=test -exclude-dir=tools -exclude-generated ./...
 
+  tui:
+    # the terminal tool, hsmgate-setup (tui/ is a module of its own, so that the service does not carry tview and tcell): the same checks as the program, and a floor for the coverage that is
+    # raised as the screens get tests (the logic under the screens, store, actions and setup, is above 70 %)
+    runs-on: ubuntu-latest
+    container: golang:1.26.11-bookworm
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - run: cd tui && go vet ./...
+      - run: cd tui && go test -race -count=1 -coverprofile=cover.out ./...
+      - name: Statement coverage of the tool must stay at 55% or more
+        run: |
+          cd tui
+          total=$(go tool cover -func=cover.out | awk '/^total:/ {gsub("%","",$3); print $3}')
+          echo "statement coverage: ${total}%"
+          awk -v t="$total" 'BEGIN { exit (t >= 55) ? 0 : 1 }'
+      - run: cd tui && go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+      - run: cd tui && go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 -checks all ./...
+      - run: cd tui && go run github.com/securego/gosec/v2/cmd/gosec@v2.29.0 -quiet -exclude=G104 -exclude-generated ./...
+
   softhsm:
     # the PKCS#11 backend against SoftHSM2 (a software token); the card itself is run by hand with tools/card-decrypt-test.sh
     needs: test
@@ -96,6 +118,13 @@ jobs:
           CGO_ENABLED=1 go build -buildmode=pie -trimpath -buildvcs=false -ldflags "-s -w -linkmode=external -extldflags '-Wl,-z,relro,-z,now' -X main.version=${VERSION}" -o build/hsmgate ./cmd/hsmgate
           readelf -h build/hsmgate | grep -q "DYN" && readelf -d build/hsmgate | grep -q "BIND_NOW"
           build/hsmgate version
+      - name: Build the setup tool (tui/, a module of its own; no cgo, so it is a static program)
+        env:
+          VERSION: ${{ inputs.version || 'dev' }}
+        run: |
+          cd tui
+          CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags "-s -w -X main.version=${VERSION}" -o ../build/hsmgate-setup ./cmd/hsmgate-setup
+          ../build/hsmgate-setup -version
       - name: Build the FIPS variant (the frozen Go cryptographic module, fips140=on by default)
         env:
           VERSION: ${{ inputs.version || 'dev' }}
@@ -111,6 +140,7 @@ jobs:
           path: |
             build/hsmgate
             build/hsmgate-fips
+            build/hsmgate-setup
           retention-days: 7
 
   fips:
