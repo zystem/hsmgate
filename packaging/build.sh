@@ -26,9 +26,10 @@ done
 mkdir -p "$DIST_DIR"
 
 echo "== deb and rpm"
-export VERSION ARCH
+# nfpm expands environment variables only in some fields (not in the paths of the files), so the three placeholders are filled in here and the configuration goes to nfpm on its standard input
 for kind in deb rpm; do
-    go run "github.com/goreleaser/nfpm/v2/cmd/nfpm@${NFPM_VERSION}" package --config packaging/nfpm.yaml --packager "$kind" --target "$DIST_DIR/"
+    sed -e "s|\${BUILD_DIR}|$BUILD_DIR|g" -e "s|\${VERSION}|$VERSION|g" -e "s|\${ARCH}|$ARCH|g" packaging/nfpm.yaml |
+        go run "github.com/goreleaser/nfpm/v2/cmd/nfpm@${NFPM_VERSION}" package --config /dev/stdin --packager "$kind" --target "$DIST_DIR/"
 done
 
 echo "== AppImage"

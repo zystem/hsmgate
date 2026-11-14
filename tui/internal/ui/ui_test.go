@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gdamore/tcell/v2"
+	"github.com/rivo/tview"
 )
 
 const sample = `listen: 127.0.0.1:8443
@@ -265,6 +266,59 @@ func TestDeletingAKeyAsksForItsName(t *testing.T) {
 		cfg, _ := r.app.doc.Config()
 		if _, ok := cfg.Keys["orders"]; !ok {
 			t.Error("the key was deleted by a wrong word")
+		}
+	})
+}
+
+// Every section of the menu draws, also the ones that read the disk (the audit log) or build a long form (the settings).
+func TestEverySectionDraws(t *testing.T) {
+	dir := t.TempDir()
+	log := filepath.Join(dir, "audit.log")
+	os.WriteFile(log, []byte(`{"time":"2026-11-14T10:00:00Z","client":"shop","face":"transit","key":"orders","op":"encrypt","result":"ok"}
+{"time":"2026-11-14T10:00:01Z","client":"shop","face":"transit","key":"orders","op":"encrypt","result":"forbidden"}
+`), 0o640)
+	r := start(t, sample+"audit: {file: "+log+"}\n", false)
+	r.waitFor("Overview")
+	for key, want := range map[rune][]string{
+		'5': {"Settings and faces", "Listen (restart)", "Apply to the document"},
+		'6': {"Audit log", "ok", "forbidden"},
+		'1': {"The configuration is good"},
+	} {
+		r.key(tcell.KeyRune, key)
+		r.waitFor(want...)
+	}
+	// the filter of the audit page: only the problems
+	r.key(tcell.KeyRune, '6')
+	r.waitFor("forbidden")
+	r.tabs(3) // the text, All, Problems
+	r.key(tcell.KeyEnter, 0)
+	scr := r.waitFor("forbidden")
+	if strings.Contains(scr, "10:00:00 ok") {
+		t.Errorf("the problems filter shows an ok line:\n%s", scr)
+	}
+}
+
+func TestSettingsFormChangesTheDocument(t *testing.T) {
+	r := start(t, sample, false)
+	r.waitFor("Overview")
+	r.key(tcell.KeyRune, '5')
+	r.waitFor("Apply to the document")
+	r.do(func() {
+		a := r.app
+		a.show("settings")
+		f := a.content.(*tview.Form)
+		f.GetFormItemByLabel("Listen (restart)").(*tview.InputField).SetText("0.0.0.0:9443")
+		f.GetFormItemByLabel("Rotate the audit file at MB (0: never) (restart)").(*tview.InputField).SetText("not a number")
+		a.applySettings(f)
+	})
+	r.waitFor("must be a number")
+	r.do(func() {
+		a := r.app
+		f := a.content.(*tview.Form)
+		f.GetFormItemByLabel("Rotate the audit file at MB (0: never) (restart)").(*tview.InputField).SetText("0")
+		a.applySettings(f)
+		if got := a.doc.Value("listen"); got != "0.0.0.0:9443" {
+			t.Errorf("listen = %q", got)
 		}
 	})
 }
