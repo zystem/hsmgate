@@ -18,12 +18,16 @@ FROM debian:bookworm-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 # (the versions of the packages are not pinned on purpose: the base is pinned by digest, the packages are the current security updates of it)
 # hadolint ignore=DL3008
-RUN apt-get update && apt-get install -y --no-install-recommends opensc-pkcs11 libpcsclite1 && rm -rf /var/lib/apt/lists/* \
+RUN apt-get update && apt-get install -y --no-install-recommends opensc-pkcs11 libpcsclite1 libssl3 && rm -rf /var/lib/apt/lists/* \
  && mkdir -p /rootfs \
  && cp --parents -L /usr/lib/x86_64-linux-gnu/opensc-pkcs11.so /usr/lib/x86_64-linux-gnu/libpcsclite.so.1 /rootfs/ \
  && for lib in $(ldd /usr/lib/x86_64-linux-gnu/opensc-pkcs11.so /usr/lib/x86_64-linux-gnu/libpcsclite.so.1 | awk '/=>/ {print $3}' | sort -u); do \
       case "$lib" in */libc.so.6|*/libm.so.6|*/libdl.so.2|*/libpthread.so.0|*/librt.so.1) ;; *) cp --parents -L "$lib" /rootfs/ ;; esac; \
     done \
+ && cp --parents -L /usr/lib/x86_64-linux-gnu/libssl.so.3 /usr/lib/x86_64-linux-gnu/libcrypto.so.3 /rootfs/ \
+ && mkdir -p /rootfs/var/lib/dpkg/status.d \
+ && awk -v RS= -v ORS='\n\n' '/^Package: libssl3\n/ {print}' /var/lib/dpkg/status | sed '/^Description:/,$d' > /rootfs/var/lib/dpkg/status.d/libssl3 \
+ && grep -q '^Version: 3.0.2[2-9]\|^Version: 3.0.[3-9]' /rootfs/var/lib/dpkg/status.d/libssl3 \
  && test -s /rootfs/usr/lib/x86_64-linux-gnu/opensc-pkcs11.so && test -s /rootfs/usr/lib/x86_64-linux-gnu/libpcsclite.so.1 && test -n "$(find /rootfs -name 'libopensc.so*' -print -quit)" && test -n "$(find /rootfs -name 'libcrypto.so*' -print -quit)"
 
 FROM gcr.io/distroless/base-debian12@sha256:fabbf1c0c357a3d42550111351daed089b20a2c954df13ee2fcff60602515e84
