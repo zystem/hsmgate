@@ -33,6 +33,7 @@ for kind in deb rpm; do
 done
 
 echo "== AppImage"
+command -v file >/dev/null || { echo "the AppImage needs the file(1) command (apt install file)" >&2; exit 1; }
 tool="${TMPDIR:-/tmp}/appimagetool-1.9.1-x86_64.AppImage"
 if [ ! -x "$tool" ]; then
     curl -fsSL -o "$tool" "$APPIMAGETOOL_URL"

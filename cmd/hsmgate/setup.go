@@ -36,7 +36,7 @@ func runSetup(args []string, stdout, stderr io.Writer) int {
 	if self, err := os.Executable(); err == nil {
 		env = append(env, "HSMGATE_BIN="+self) // the tool runs this very program for the certificates
 	}
-	if err := syscall.Exec(path, append([]string{path}, args...), env); err != nil { // #nosec G204 -- the tool next to this program
+	if err := syscall.Exec(path, append([]string{path}, args...), env); err != nil { // #nosec G204 G702 -- the tool next to this program, or the path the operator set in HSMGATE_SETUP; the arguments are the operator's own
 		fmt.Fprintln(stderr, "hsmgate:", err)
 		return 1
 	}
