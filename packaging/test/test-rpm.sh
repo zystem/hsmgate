@@ -3,6 +3,8 @@
 set -eu
 . "$(dirname "$0")/lib.sh"
 RPM=$(ls /t/hsmgate-*.rpm | head -n1)
+# the minimal Fedora image has no runuser (the tests run the service as its own user with it)
+dnf install -y -q util-linux >/dev/null 2>&1 || true
 case "${1:?plain or auto}" in
 plain)
     dnf install -y -q "$RPM" >/tmp/a.log 2>&1 || { cat /tmp/a.log; fail "dnf install"; }

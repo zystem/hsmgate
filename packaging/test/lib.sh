@@ -1,14 +1,14 @@
 # Shared by the package tests. Source it. Every check says what it checks and stops the test at the first failure.
 fail() { echo "FAIL: $*" >&2; exit 1; }
 ok()   { echo "  ok: $*"; }
-expect() { # expect "what" command...
+expect() { # expect "what" command...  (what the command printed is shown when it fails)
     what="$1"; shift
-    if "$@" >/dev/null 2>&1; then ok "$what"; else fail "$what"; fi
+    if out=$("$@" 2>&1); then ok "$what"; else echo "$out" | sed 's/^/      | /' >&2; fail "$what"; fi
 }
 
 # What a client of the service does with the commands the setup printed: the first "export HSMGATE_ADDR=..." line is run, then a text is sealed and opened.
 roundtrip() { # roundtrip LOGFILE
-    line=$(grep -m1 'export HSMGATE_ADDR' "$1" | tr -d '\r' | sed 's/^ *//')
+    line=$(grep -m1 'export HSMGATE_ADDR' "$1" | tr -d '\r' | sed -e 's/^>>> //' -e 's/^ *//')  # rpm prefixes what a scriptlet prints with '>>> '
     [ -n "$line" ] || fail "the setup printed no try-it commands ($1)"
     eval "$line"
     echo 'my secret' | hsmgate encrypt > /tmp/sealed.txt || fail "hsmgate encrypt"

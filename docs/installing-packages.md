@@ -62,13 +62,14 @@ As an **ordinary user** it keeps everything in your home directory (`~/.config/h
 
 ## What was run, and what was not
 
-Run on 2026-11-14 with a package made by `dpkg-deb` from the same files, scripts and unit that the packaging uses, in clean containers of **Debian 13** and **Ubuntu 24.04** (`packaging/test/test-deb.sh`):
+Run on 2026-11-14 by the Packages workflow (`.github/workflows/packages.yml`) on the files that `packaging/build.sh` made with **nfpm v2.48.0** and **appimagetool 1.9.1**, each in a clean container (the tests are in `packaging/test/`):
 
-- *plain*: the account is a system account with no login, `/etc/hsmgate` is `root:hsmgate 0750`, no configuration is made, the installation says what to do, the unit has the condition;
-- *auto*: the quick setup makes the configuration (`root:hsmgate 0640`), the key file (owned by the service, 0400), the authority (root, 0600), `hsmgate check` passes **as the service user**, the service runs as `hsmgate`, a client seals and opens a text with the certificate the setup made, the audit file is the service's; removal and purge keep the data;
-- *card*: with SoftHSM2 and `hsmgate-setup -auto -mode card` (`packaging/test/test-card.sh`): the service opens the token with the PIN file and a client seals and opens a text;
-- *wizard*: `apt-get install` on a terminal (made with `script`) starts the quick setup by itself and its keys were pressed to the end (Debian 13 only).
+- *deb*, on **Debian 12, Debian 13 and Ubuntu 24.04**: `plain` (the account is a system account with no login, `/etc/hsmgate` is `root:hsmgate 0750`, no configuration is made, the installation says what to do, the unit has the condition) and `auto` (the quick setup makes the configuration `root:hsmgate 0640`, the key file owned by the service with mode 0400, the authority private to root; `hsmgate check` passes **as the service user**; the service runs as `hsmgate`; a client seals and opens a text with the certificate the setup made; the audit file is the service's; removal and purge keep the data);
+- *wizard*, Debian 13: `apt-get install` on a terminal (made with `script`) starts the quick setup by itself and its keys were pressed to the end;
+- *card*, Debian 13, with **SoftHSM2** and `hsmgate-setup -auto -mode card`: the service opens the token with the PIN file and a client seals and opens a text, with no key file made;
+- *rpm*, on **Fedora (latest)**: `plain` and `auto` as for the deb, and removal keeps the configuration and the authority;
+- *AppImage*, on **Debian 13 and Ubuntu 24.04**, as an ordinary user, with no FUSE: the program and the tool run, the quick setup keeps everything in the home directory, the service listens on the loopback and a client seals and opens a text.
 
-Found by this run and fixed before release: a configuration written by root was not readable by the service, and `hsmgate check` run by root refused a key file owned by the service.
+Found by these runs and fixed: a configuration written by root was not readable by the service; `hsmgate check` run by root refused a key file owned by the service; `nfpm` does not expand variables in the paths of files; `appimagetool` needs `file(1)`; the test of the rpm needed `runuser`, and rpm prefixes what a scriptlet prints with `>>> `.
 
-**Not run:** the deb and the rpm **as made by nfpm** (the files are described in `packaging/nfpm.yaml`; the Packages workflow builds and tests them on every change to the packaging), the rpm on Fedora or Rocky, the AppImage, Debian 12, arm64, an upgrade from an older package, `systemctl enable --now` on a machine with systemd, and a real card or HSM. The release workflow's packaging step has not run on a tag yet.
+**Not run:** a real card or HSM (SoftHSM2 only), `systemctl enable --now` on a machine with systemd (the containers have none), an upgrade from an older package, the rpm on Rocky, Alma or RHEL (their glibc may be older than the 2.36 the programs need), arm64, and the packaging step of the **release** workflow (it has not run on a tag; it is the same script, with signing and attestation added).
