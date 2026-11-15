@@ -1,6 +1,8 @@
 # Changelog
 
-## 0.9.0 — 2026-11-15
+## 0.9.1 — 2026-11-15
+
+The number 0.9.0 was tagged but never released: its release run stopped before anything was published (the packaging step lost the execute bit of the downloaded programs, fixed in the workflow), so there is no 0.9.0 release and no 0.9.0 image. What was made for it is in this release.
 
 A terminal tool for operators (`hsmgate-setup`) with a quick setup, and packages for Debian, Fedora and AppImage. The configuration stays YAML ([why](docs/why-yaml-not-sqlite.md)). The image carries a fixed `libssl3`.
 
