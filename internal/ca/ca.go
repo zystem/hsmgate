@@ -380,10 +380,16 @@ func Load(dir string, tok backend.Token) (*CA, error) {
 	return c, nil
 }
 
+// parseKey reads the private key of the authority. The key written by this program is PKCS#8 (the PEM block "PRIVATE KEY"); the key of an authority made with OpenSSL
+// (`openssl ecparam -genkey`) is SEC1 (the block "EC PRIVATE KEY"). Both hold the same key and both are read; the curve must be P-256 either way.
 func parseKey(der []byte, where string) (*ecdsa.PrivateKey, error) {
 	pk, err := x509.ParsePKCS8PrivateKey(der)
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", where, err)
+		var sec1 *ecdsa.PrivateKey
+		if sec1, err = x509.ParseECPrivateKey(der); err != nil {
+			return nil, fmt.Errorf("%s: not a PKCS#8 and not a SEC1 (EC PRIVATE KEY) private key: %w", where, err)
+		}
+		pk = sec1
 	}
 	key, ok := pk.(*ecdsa.PrivateKey)
 	if !ok || key.Curve != elliptic.P256() {

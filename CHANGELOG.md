@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Added
+- **`hsmgate ca` reads an authority key in SEC1 form** (`BEGIN EC PRIVATE KEY`, as `openssl ecparam -genkey` writes it) as well as PKCS#8; before, `ca client` and `ca server` on such a `ca.key` failed with `x509: failed to parse private key (use ParseECPrivateKey instead ...)`. P-256 only, as before; a test signs with a SEC1 key and refuses a damaged one and a P-384 one. Run 2026-11-15: a client certificate made with an OpenSSL-made authority key verifies with `openssl verify`. Not run: the key on the host that showed it (it was not copied).
+
 ### Changed
 - Documentation: the SBOM and the VEX document carry the `cosign` signature only, no build provenance attestation ([verifying-releases.md](docs/verifying-releases.md), what was run on v0.9.1); the AppImage does not start inside a container on a machine that registers AppImages with a launcher ([installing-packages.md](docs/installing-packages.md), [troubleshooting.md](docs/troubleshooting.md)); what was run on the files of 0.9.1, and on a real card.
 
