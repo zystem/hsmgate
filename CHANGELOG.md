@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+- Documentation: the SBOM and the VEX document carry the `cosign` signature only, no build provenance attestation ([verifying-releases.md](docs/verifying-releases.md), what was run on v0.9.1); the AppImage does not start inside a container on a machine that registers AppImages with a launcher ([installing-packages.md](docs/installing-packages.md), [troubleshooting.md](docs/troubleshooting.md)); what was run on the files of 0.9.1, and on a real card.
+
 ## 0.9.1 — 2026-11-15
 
 The number 0.9.0 was tagged but never released: its release run stopped before anything was published (the packaging step lost the execute bit of the downloaded programs, fixed in the workflow), so there is no 0.9.0 release and no 0.9.0 image. What was made for it is in this release.

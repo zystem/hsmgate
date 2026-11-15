@@ -61,6 +61,7 @@ Run `check` as the user the service runs as (`runuser -u hsmgate -- hsmgate chec
 | `the certificates were not made (the configuration and the key file are written: remove ... and ... to start again)` | The quick setup wrote the configuration and the key, and `hsmgate ca setup` failed; its message follows | Remove the two files it names and run the setup again |
 | `hsmgate check does not accept what was written: ... is owned by another user` | A secret file of the service is not the service account's, or the configuration cannot be read by its group | `chown hsmgate` the key file (mode 0400); the configuration is `root:hsmgate`, mode 0640 |
 | `hsmgate: upgraded. The running service still has the old program: restart it when you are ready` | A package was upgraded while the service runs; it is not restarted, because a card without a `pin_file` would start locked | `sudo systemctl restart hsmgate`, then `hsmgate unlock` if the card has no PIN file |
+| `./hsmgate-….AppImage: not found` (or `No such file or directory`) with the file there and executable, inside a container or a chroot | The machine registers the AppImage format with the kernel for a launcher (AppImageLauncher: `ls /proc/sys/fs/binfmt_misc/` shows `appimage-type2`), and the launcher is not in the container | Run the AppImage outside the container, or on a machine without that registration; the way to test a copy in a container is in [installing-packages.md](installing-packages.md#appimage) |
 
 ## In a container or a cluster
 

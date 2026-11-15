@@ -60,9 +60,11 @@ chmod +x hsmgate-X.Y.Z-x86_64.AppImage
 
 As an **ordinary user** it keeps everything in your home directory (`~/.config/hsmgate`, `~/.local/state/hsmgate`), listens on `127.0.0.1:8443` and does not touch systemd: a way to try it or to run a pilot without installing. As **root** it uses the system layout like the packages. Nothing is written inside the AppImage. Without FUSE: `APPIMAGE_EXTRACT_AND_RUN=1 ./hsmgate-….AppImage`.
 
+**On a machine that has a launcher for AppImages** (AppImageLauncher and the like register the AppImage format with the kernel, `ls /proc/sys/fs/binfmt_misc/`: `appimage-type2`), the file is started through that launcher. Inside a container or a chroot of such a machine the launcher is not there, and the start fails with `not found` (the system call says `ENOENT`) although the file is there and executable. Run the AppImage outside the container, or in a container on a machine without that registration. To test the file in a container on such a machine, clear bytes 8 to 10 of a **copy** (`printf '\000\000\000' | dd of=COPY bs=1 seek=8 conv=notrunc`): the kernel then does not hand it to the launcher. That copy no longer matches its signature: verify the original first ([verifying-releases.md](verifying-releases.md)).
+
 ## What was run, and what was not
 
-Run on 2026-11-14 by the Packages workflow (`.github/workflows/packages.yml`) on the files that `packaging/build.sh` made with **nfpm v2.48.0** and **appimagetool 1.9.1**, each in a clean container (the tests are in `packaging/test/`):
+Run on 2026-11-14 and 2026-11-15 by the Packages workflow (`.github/workflows/packages.yml`) on the files that `packaging/build.sh` made with **nfpm v2.48.0** and **appimagetool 1.9.1**, each in a clean container (the tests are in `packaging/test/`):
 
 - *deb*, on **Debian 12, Debian 13 and Ubuntu 24.04**: `plain` (the account is a system account with no login, `/etc/hsmgate` is `root:hsmgate 0750`, no configuration is made, the installation says what to do, the unit has the condition) and `auto` (the quick setup makes the configuration `root:hsmgate 0640`, the key file owned by the service with mode 0400, the authority private to root; `hsmgate check` passes **as the service user**; the service runs as `hsmgate`; a client seals and opens a text with the certificate the setup made; the audit file is the service's; removal and purge keep the data);
 - *wizard*, Debian 13: `apt-get install` on a terminal (made with `script`) starts the quick setup by itself and its keys were pressed to the end;
@@ -72,4 +74,8 @@ Run on 2026-11-14 by the Packages workflow (`.github/workflows/packages.yml`) on
 
 Found by these runs and fixed: a configuration written by root was not readable by the service; `hsmgate check` run by root refused a key file owned by the service; `nfpm` does not expand variables in the paths of files; `appimagetool` needs `file(1)`; the test of the rpm needed `runuser`, and rpm prefixes what a scriptlet prints with `>>> `.
 
-**Not run:** a real card or HSM (SoftHSM2 only), `systemctl enable --now` on a machine with systemd (the containers have none), an upgrade from an older package, the rpm on Rocky, Alma or RHEL (their glibc may be older than the 2.36 the programs need), arm64, and the packaging step of the **release** workflow (it has not run on a tag; it is the same script, with signing and attestation added).
+**Run on the files of the release v0.9.1 (2026-11-15):** the tests of the deb (`plain`, `auto`, Debian 13) and the rpm (`plain`, `auto`, Fedora latest) passed on the downloaded files, and the AppImage test passed on Debian 13 and Ubuntu 24.04 with the copy described above (the machine that ran it has AppImageLauncher). The packaging step of the release workflow ran for the first time on the tag v0.9.1; the tag v0.9.0 stopped at it (the downloaded programs had lost their execute bit) and was never released.
+
+**A real card:** the binary of 0.9.1 was run on 2026-11-15 on a development host with a SmartCard-HSM (`hsmgate check` on its configuration, then a second instance on a loopback port: a text sealed and opened with the key on the card, and a context outside the policy refused). Not through a package, and not by the setup tool.
+
+**Not run:** a package with a real card or HSM (SoftHSM2 only), `systemctl enable --now` on a machine with systemd (the containers have none), an upgrade from an older package, the rpm on Rocky, Alma or RHEL (their glibc may be older than the 2.36 the programs need), and arm64.
