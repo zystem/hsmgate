@@ -4,7 +4,11 @@ The latest release is supported, and the previous minor release for 30 days ([SE
 
 General steps: read the notes; run `hsmgate check -config …` with the new binary (it needs no PIN); replace the binary or the image (pin the digest); restart; `hsmgate unlock`; look at the audit log. A configuration that the new version refuses is refused at the start, not at the first request. SIGHUP reloads the configuration without a restart for what a reload may change (not the listener, the admin socket, the audit file, the limits, the enabled faces).
 
-## 0.8 to 0.9 (0.9.1)
+## 0.9.1 to 0.9.2
+
+- Nothing to do. `hsmgate ca` now also reads an authority key in the SEC1 form (`BEGIN EC PRIVATE KEY`), and `hsmgate-setup` no longer shows an untouched file as "unsaved". A package replaces the files in `/usr/bin` and does not restart the service.
+
+## 0.8 to 0.9 (0.9.1, 0.9.2)
 
 - Nothing in the configuration or the formats changed: `hsmgate check -config …` with the new binary is enough to know.
 - New and optional: the terminal tool `hsmgate-setup` and the packages (deb, rpm, AppImage), [installing-packages.md](installing-packages.md). A package puts the program in `/usr/bin` and its unit in `/usr/lib/systemd/system`, never restarts the service and never touches `/etc/hsmgate` or the keys. A binary you placed in `/usr/local/bin` and a unit of your own in `/etc/systemd/system` come first and keep working: check `command -v hsmgate` and `systemctl cat hsmgate` after installing one. Not run: an upgrade from 0.8.0 by a package (0.9.1 is the first release that has one; 0.9.0 was never released).

@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.9.2 — 2026-11-15
+
+Two fixes found by trying 0.9.1 on a real host: `hsmgate ca` reads an authority key made with OpenSSL, and the setup tool no longer calls an untouched configuration "unsaved". Documentation of what was run on 0.9.1 and of the signatures of the SBOM and the VEX document.
 
 ### Added
 - **`hsmgate ca` reads an authority key in SEC1 form** (`BEGIN EC PRIVATE KEY`, as `openssl ecparam -genkey` writes it) as well as PKCS#8; before, `ca client` and `ca server` on such a `ca.key` failed with `x509: failed to parse private key (use ParseECPrivateKey instead ...)`. P-256 only, as before; a test signs with a SEC1 key and refuses a damaged one and a P-384 one. Run 2026-11-15: a client certificate made with an OpenSSL-made authority key verifies with `openssl verify`. Not run: the key on the host that showed it (it was not copied).
