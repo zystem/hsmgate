@@ -3,6 +3,8 @@ package ca
 import (
 	"bytes"
 	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
@@ -356,5 +358,42 @@ func TestInitRefusesWhatNeedsATokenWithoutOne(t *testing.T) {
 	}
 	if err := Init(filepath.Join(t.TempDir(), "ca"), Options{Mode: ModeToken, Token: softToken(t, "0b"), TokenName: "t", Label: "nope"}, now); err == nil {
 		t.Error("a key the token does not have")
+	}
+}
+
+// An authority made with OpenSSL has its key as SEC1 ("EC PRIVATE KEY"); it is read, and what it signs verifies. Other kinds of keys are refused with a message that says why.
+func TestLoadReadsASEC1Key(t *testing.T) {
+	c, dir := newCA(t)
+	kp := filepath.Join(dir, "ca.key")
+	der, err := x509.MarshalECPrivateKey(c.signer.(*ecdsa.PrivateKey))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(kp, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: der}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c2, err := Load(dir, nil)
+	if err != nil {
+		t.Fatalf("a SEC1 key: %v", err)
+	}
+	iss, err := c2.Issue(Request{Kind: Client, CN: "demo", Days: 30}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool := x509.NewCertPool()
+	pool.AddCert(c2.Cert)
+	if _, err := parse(t, iss.CertPEM).Verify(x509.VerifyOptions{Roots: pool, CurrentTime: now, KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}}); err != nil {
+		t.Errorf("a certificate signed with the SEC1 key does not verify: %v", err)
+	}
+	// not a key at all, and a key of another curve
+	os.WriteFile(kp, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: []byte("junk")}), 0o600)
+	if _, err := Load(dir, nil); err == nil || !strings.Contains(err.Error(), "SEC1") {
+		t.Errorf("a damaged key: %v", err)
+	}
+	p384, _ := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+	der, _ = x509.MarshalECPrivateKey(p384)
+	os.WriteFile(kp, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: der}), 0o600)
+	if _, err := Load(dir, nil); err == nil || !strings.Contains(err.Error(), "P-256") {
+		t.Errorf("a P-384 key: %v", err)
 	}
 }

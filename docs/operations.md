@@ -44,6 +44,8 @@ The authority's key signs every certificate, so who holds it can make a client t
 | `sealed` | made in memory, written only **sealed** to the public key of an ECDH key of the token (`ca.key.sealed`, the `ecies2` format) | no secret: the sealed file opens only with that token | each `server` or `client` command needs the token and its PIN: the token opens the key for the time of one command |
 | `token` | a **signing key of the token** (`-label` names it); the token makes the signatures | no secret, and no key at all: it never leaves the token | each `server` or `client` command needs the token and its PIN |
 
+The `ca.key` of mode `file` is read in either of two forms: PKCS#8 (`BEGIN PRIVATE KEY`, what `hsmgate ca init` writes) or SEC1 (`BEGIN EC PRIVATE KEY`, what `openssl ecparam -genkey` writes), so an authority made with OpenSSL can be used with `ca client` and `ca server` as it is. The curve must be P-256; another curve or another kind of key is refused with a message that says so. (Releases up to 0.9.1 read only PKCS#8.)
+
 With `-mode sealed` or `token` the command needs the token: `-config` names the configuration, `-token` the token in it (the first time; it is recorded in `ca.json` and found again by itself), `-label` the key of the token. The PIN is read from the terminal without echo (or from standard input with `-pin-stdin`; never an argument), tried once, and the command logs out when it ends.
 
 **Sealed to the token** (no new key on the card: the ECDH key that already serves the service, here the label `master`):
