@@ -171,7 +171,7 @@ func (d *Doc) Save() (string, error) {
 		_ = df.Sync()
 		df.Close()
 	}
-	d.orig = b
+	d.orig, d.canon = b, b
 	pruneBackups(d.Path)
 	return backup, nil
 }

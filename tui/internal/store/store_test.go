@@ -301,3 +301,40 @@ func TestCardTokenAndGrantRemoval(t *testing.T) {
 		t.Error("Value or Original for what is not there")
 	}
 }
+
+// A file written by hand has aligned comments and blank lines that the writer does not keep: opened and left alone it is not "changed"; an edit is, and putting the value back is not.
+func TestAnUntouchedHandWrittenFileIsNotChanged(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "hsmgate.yaml")
+	text := "listen: 0.0.0.0:8443       # where\n\ntls:\n  cert: /c.pem          # the certificate\n  key: /k.pem\n  client_ca: /ca.pem\n\ntokens:\n  - {name: soft, type: soft, keys: {m1: /m1.hex}}    # a key\n"
+	if err := os.WriteFile(p, []byte(text), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	d, err := Open(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Changed() {
+		t.Fatal("a file nobody touched counts as changed")
+	}
+	if err := d.Set("127.0.0.1:9000", "listen"); err != nil {
+		t.Fatal(err)
+	}
+	if !d.Changed() {
+		t.Error("an edit does not count as changed")
+	}
+	if err := d.Set("0.0.0.0:8443", "listen"); err != nil {
+		t.Fatal(err)
+	}
+	if d.Changed() {
+		t.Error("the value put back still counts as changed")
+	}
+	// after a save the document is what is on disk
+	if err := d.Set("127.0.0.1:9000", "listen"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Save(); err == nil {
+		if d.Changed() {
+			t.Error("a saved document counts as changed")
+		}
+	}
+}

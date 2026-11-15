@@ -15,9 +15,10 @@ import (
 
 // Doc is a configuration file open for editing.
 type Doc struct {
-	Path string
-	root *yaml.Node // the mapping at the top of the document
-	orig []byte     // what was read (nil when the file did not exist)
+	Path  string
+	root  *yaml.Node // the mapping at the top of the document
+	orig  []byte     // what was read (nil when the file did not exist)
+	canon []byte     // what was read, written again by Bytes() with nothing changed: the same text without the spacing and blank lines a person kept
 }
 
 // Open reads the file. A file that does not exist is an empty document (Save then creates it).
@@ -34,6 +35,7 @@ func Open(path string) (*Doc, error) {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	d.Path, d.orig = path, raw
+	d.canon, _ = d.Bytes()
 	return d, nil
 }
 
@@ -89,13 +91,20 @@ func (d *Doc) Config() (*config.Config, error) {
 	return c, nil
 }
 
-// Changed says whether the text differs from what was read.
+// Changed says whether the document differs from what was read. A file is compared with itself written again (canon), not with its own text: the writer does not keep the
+// alignment of comments or the blank lines, and a file that nobody touched must not count as changed.
 func (d *Doc) Changed() bool {
 	if d.orig == nil && len(d.root.Content) == 0 {
 		return false // a file that is not there and nothing written to it
 	}
 	b, err := d.Bytes()
-	return err != nil || !bytes.Equal(b, d.orig)
+	if err != nil {
+		return true
+	}
+	if d.orig == nil {
+		return true
+	}
+	return !bytes.Equal(b, d.canon)
 }
 
 // ---- nodes -------------------------------------------------------------------------------------------------------------------------------------------------
