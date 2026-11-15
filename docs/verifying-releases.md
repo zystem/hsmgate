@@ -2,7 +2,7 @@
 
 Every release (a tag `v*`) is built by [`.github/workflows/release.yml`](../.github/workflows/release.yml) on a GitHub-hosted runner, never by hand. The files, the image, the SBOM and their signatures are produced in that one run. Verify before you run: a release that fails any of these checks must not be used; report it as in [SECURITY.md](../SECURITY.md).
 
-The assets of release `vX.Y.Z` (https://github.com/zystem/hsmgate/releases): `hsmgate-linux-amd64` (the binary), `hsmgate-linux-amd64-fips` (the same program built with the frozen Go cryptographic module, see below) with a `.sha256` file for each, `hsmgate-deploy.tar.gz` (the deployment files and the docs), `hsmgate.spdx.json` (the software bill of materials, SPDX), `hsmgate.openvex.json` (the VEX document: which known vulnerabilities do or do not affect the release), `hsmgate-setup-linux-amd64` (the terminal tool, with a `.sha256` file), the packages `hsmgate_X.Y.Z_amd64.deb`, `hsmgate-X.Y.Z-1.x86_64.rpm` and `hsmgate-X.Y.Z-x86_64.AppImage` ([installing-packages.md](installing-packages.md)), and a `*.sigstore.json` bundle for the binaries, the packages, the archive and the SBOM (verified as the binary is, with `cosign verify-blob` and `gh attestation verify`). The images are `ghcr.io/zystem/hsmgate:vX.Y.Z` and `ghcr.io/zystem/hsmgate:vX.Y.Z-fips`.
+The assets of release `vX.Y.Z` (https://github.com/zystem/hsmgate/releases): `hsmgate-linux-amd64` (the binary), `hsmgate-linux-amd64-fips` (the same program built with the frozen Go cryptographic module, see below) with a `.sha256` file for each, `hsmgate-deploy.tar.gz` (the deployment files and the docs), `hsmgate.spdx.json` (the software bill of materials, SPDX), `hsmgate.openvex.json` (the VEX document: which known vulnerabilities do or do not affect the release), `hsmgate-setup-linux-amd64` (the terminal tool, with a `.sha256` file), the packages `hsmgate_X.Y.Z_amd64.deb`, `hsmgate-X.Y.Z-1.x86_64.rpm` and `hsmgate-X.Y.Z-x86_64.AppImage` ([installing-packages.md](installing-packages.md)), and a `*.sigstore.json` bundle for every file above except the `.sha256` files (verified with `cosign verify-blob`). **The build provenance attestation (`gh attestation verify`) covers the binaries, the three packages, the chart `hsmgate-X.Y.Z.tgz` and `hsmgate-deploy.tar.gz`; it does not cover the SBOM and the VEX document**, which carry the `cosign` signature only (their `gh attestation verify` says "Not Found", and that is expected). The images are `ghcr.io/zystem/hsmgate:vX.Y.Z` and `ghcr.io/zystem/hsmgate:vX.Y.Z-fips`.
 
 ## Integrity (the content is what was built)
 
@@ -24,11 +24,13 @@ cosign verify-blob \
   hsmgate-linux-amd64
 ```
 
-The same for `hsmgate-linux-amd64-fips`, `hsmgate-deploy.tar.gz`, `hsmgate.spdx.json` and `hsmgate.openvex.json` with their own bundles. The build provenance attestation (SLSA) says from which commit and workflow run the file was built:
+The same for every other file with its own bundle: `hsmgate-linux-amd64-fips`, `hsmgate-setup-linux-amd64`, the deb, the rpm, the AppImage, `hsmgate-X.Y.Z.tgz`, `hsmgate-deploy.tar.gz`, `hsmgate.spdx.json` (the SBOM) and `hsmgate.openvex.json` (the VEX document). The SBOM and the VEX document are checked **only** this way: the signature says that this release workflow made them, and there is no provenance attestation for them. The build provenance attestation (SLSA) of the other files says from which commit and workflow run the file was built:
 
 ```bash
 gh attestation verify hsmgate-linux-amd64 -R zystem/hsmgate
 ```
+
+Run on 2026-11-15 on the release v0.9.1: `cosign verify-blob` passed for all 10 files that have a bundle (the three binaries are among them, the three packages, the chart, the archive, the SBOM and the VEX document), `gh attestation verify` passed for the 8 files that have an attestation and answered "Not Found" for the SBOM and the VEX document, `cosign verify` and `gh attestation verify oci://` passed for both images and the chart. Not run: the same for an older release.
 
 ## The FIPS variant
 
