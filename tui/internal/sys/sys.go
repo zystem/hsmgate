@@ -65,12 +65,18 @@ func RunAs(ctx context.Context, name string, prog string, args ...string) (strin
 	if err != nil {
 		return Run(ctx, prog, args...)
 	}
-	uid, _ := strconv.Atoi(u.Uid)
-	gid, _ := strconv.Atoi(u.Gid)
+	uid, err := strconv.ParseUint(u.Uid, 10, 32)
+	if err != nil {
+		return Run(ctx, prog, args...)
+	}
+	gid, err := strconv.ParseUint(u.Gid, 10, 32)
+	if err != nil {
+		return Run(ctx, prog, args...)
+	}
 	var out bytes.Buffer
 	cmd := exec.CommandContext(ctx, prog, args...) // #nosec G204 -- made by this tool
 	cmd.Stdout, cmd.Stderr = &out, &out
-	cmd.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: uint32(uid), Gid: uint32(gid)}} // #nosec G115 -- ids of an account
+	cmd.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: uint32(uid), Gid: uint32(gid)}} // #nosec G115 -- the ids were parsed with a 32-bit limit above
 	if err := cmd.Run(); err != nil {
 		return out.String(), fmt.Errorf("%s %s (as %s): %w\n%s", filepath.Base(prog), strings.Join(args, " "), name, err, strings.TrimSpace(out.String()))
 	}
