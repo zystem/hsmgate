@@ -40,6 +40,8 @@ jobs:
           mkdir -p dist
           cp build/hsmgate dist/hsmgate-linux-amd64
           cp build/hsmgate-fips dist/hsmgate-linux-amd64-fips
+          # the artifact download does not keep the execute bit, and packaging/build.sh checks for it
+          chmod 755 build/hsmgate build/hsmgate-fips build/hsmgate-setup
           cp build/hsmgate-setup dist/hsmgate-setup-linux-amd64
           chmod 755 dist/hsmgate-linux-amd64 dist/hsmgate-linux-amd64-fips dist/hsmgate-setup-linux-amd64
           sha256sum dist/hsmgate-setup-linux-amd64 > dist/hsmgate-setup-linux-amd64.sha256
