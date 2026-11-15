@@ -73,6 +73,7 @@ curl --cacert demo/clients/ca.pem --cert demo/clients/demo.pem --key demo/client
 | You have | Use | Token | Start here |
 |---|---|---|---|
 | A machine (or VM) and a SmartCard-HSM or another PKCS#11 token | the binary from a [release](https://github.com/zystem/hsmgate/releases) (verify it: [verifying-releases.md](docs/verifying-releases.md)) and the systemd unit in [deploy/](deploy/) | the card | [operations.md](docs/operations.md), [smartcard-hsm.md](docs/tokens/smartcard-hsm.md) |
+| Debian, Ubuntu or Fedora, and you want it installed | the `.deb` or `.rpm` of a [release](https://github.com/zystem/hsmgate/releases): it makes the account and the directories and offers the **quick setup** (`sudo hsmgate-setup`: menus for keys, clients and settings) | the card, or files for a pilot | [installing-packages.md](docs/installing-packages.md), [setup-tool.md](docs/setup-tool.md) |
 | Docker on that machine | the image `ghcr.io/zystem/hsmgate` ([compose.yaml](deploy/docker/compose.yaml)) | the card (a reader passed through) | [operations.md, "Running in Docker"](docs/operations.md) |
 | Kubernetes, for tests, development or a pilot | the Helm chart `oci://ghcr.io/zystem/charts/hsmgate`: `helm install` makes its own certificates | software (a key in a Secret: whoever reads the Secret has the key) | [the chart](deploy/helm/hsmgate/README.md) |
 | Only curiosity | `hsmgate dev` | software | above |

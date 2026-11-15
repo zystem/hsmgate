@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=hsmgate
+GenericName=Key door setup
+Comment=A policy-checked network door in front of a key token: setup and tools
+Exec=hsmgate
+Icon=hsmgate
+Terminal=true
+Categories=System;Security;

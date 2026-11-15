@@ -3,6 +3,7 @@ updates:
   - package-ecosystem: gomod
     directories:
       - "/"
+      - "/tui"
       - "/test/kmsjson-sdk"
       - "/test/kmsgrpc-sdk"
       - "/test/kmsrest-sdk"

@@ -48,6 +48,20 @@ Run `check` as the user the service runs as (`runuser -u hsmgate -- hsmgate chec
 | `hsmgate: reload refused, nothing changed: ...` (after SIGHUP) | The new configuration does not load; the old one is still in use | Fix the file and send SIGHUP again |
 | `ConfigurationDirectory 'hsmgate' already exists but the mode is different` (systemd) | A warning about the mode of `/etc/hsmgate` (750 against 755 in the unit) | Harmless; set `ConfigurationDirectoryMode=0750` in the unit to silence it |
 
+## The setup tool and the packages
+
+| Message | Meaning | What to do |
+|---|---|---|
+| `hsmgate: installed, not configured. Run 'sudo hsmgate-setup' ...` (after `apt install`) | The package was installed with nobody at a terminal, so no quick setup ran. The service does not start without a configuration | `sudo hsmgate-setup` at a terminal, or `sudo hsmgate-setup -auto` for the defaults ([installing-packages.md](installing-packages.md)) |
+| `hsmgate: the automatic setup did not finish: run 'sudo hsmgate-setup' to see why.` | `HSMGATE_SETUP_AUTO=1` was set and the quick setup stopped; its own message is just above | Read that message; remove the files it names and run `sudo hsmgate-setup -auto` again |
+| `hsmgate-setup needs a terminal; for an unattended setup use -auto` | The tool was started with its input or output not on a terminal (a pipe, a script, a CI job) | Use `-auto` with its flags, or run it in a terminal ([setup-tool.md](setup-tool.md)) |
+| `hsmgate: hsmgate-setup is not installed (it is next to hsmgate ...)` | `hsmgate setup` did not find the tool: a binary taken alone from a release has no tool beside it | Install the package, or take `hsmgate-setup-linux-amd64` from the release and put it next to `hsmgate`; `HSMGATE_SETUP` names its path |
+| `.../hsmgate.yaml exists: the quick setup makes the first configuration and does not write over one` | There already is a configuration | Change it in the menus (`sudo hsmgate-setup`), or move the file away to start again |
+| `not saved, the service would refuse it: ...` | The change made in the menus gives a file that the service would not load; the reason follows | Fix the value, or discard the changes (Review and save); nothing was written |
+| `the certificates were not made (the configuration and the key file are written: remove ... and ... to start again)` | The quick setup wrote the configuration and the key, and `hsmgate ca setup` failed; its message follows | Remove the two files it names and run the setup again |
+| `hsmgate check does not accept what was written: ... is owned by another user` | A secret file of the service is not the service account's, or the configuration cannot be read by its group | `chown hsmgate` the key file (mode 0400); the configuration is `root:hsmgate`, mode 0640 |
+| `hsmgate: upgraded. The running service still has the old program: restart it when you are ready` | A package was upgraded while the service runs; it is not restarted, because a card without a `pin_file` would start locked | `sudo systemctl restart hsmgate`, then `hsmgate unlock` if the card has no PIN file |
+
 ## In a container or a cluster
 
 - **The pod does not start, `owned by another user` or `must not be readable`**: the files of a Secret volume must be mode 0400 and owned by the user that runs the service. The chart runs it as root (every capability dropped, read-only root file system) with `defaultMode: 256`; do not add `fsGroup` (it adds a group bit and the service refuses the file). With Docker the owner of the file must be the user of the container.

@@ -11,6 +11,7 @@ What hsmgate is, and a one-minute try: [the README](../README.md). The rest, by 
 
 ## I install and run it
 - **[production.md](production.md): the checklist before it holds real keys** (token, PIN, policy, certificates, network, audit, software, drills)
+- **[installing-packages.md](installing-packages.md): the deb, the rpm and the AppImage**, and [setup-tool.md](setup-tool.md): the terminal tool (menus for keys, clients and settings, and the quick setup)
 - [Helm chart](../deploy/helm/hsmgate/README.md) (Kubernetes, software token, for tests and pilots), [systemd unit and Docker](../deploy/), [building.md](building.md)
 - [operations.md](operations.md): certificates (`hsmgate ca`), unlock, reload, rotation, spare card, lost card, Docker
 - [tokens/smartcard-hsm.md](tokens/smartcard-hsm.md): the SmartCard-HSM
@@ -43,8 +44,8 @@ Pages are written as one of four kinds ([Diátaxis](https://diataxis.fr/)), and 
 | Kind | Answers | Pages |
 |---|---|---|
 | **Tutorial** (learn by doing) | "Show me it works" | [README, "Try it in a minute"](../README.md#try-it-in-a-minute-no-hardware-nothing-to-prepare) |
-| **How-to** (do a task) | "How do I ...?" | [production.md](production.md), [operations.md](operations.md), [troubleshooting.md](troubleshooting.md), [guides/](guides/clients.md), [the Helm chart](../deploy/helm/hsmgate/README.md), [upgrading.md](upgrading.md), [verifying-releases.md](verifying-releases.md), [building.md](building.md), [releasing.md](releasing.md) |
+| **How-to** (do a task) | "How do I ...?" | [installing-packages.md](installing-packages.md), [setup-tool.md](setup-tool.md), [production.md](production.md), [operations.md](operations.md), [troubleshooting.md](troubleshooting.md), [guides/](guides/clients.md), [the Helm chart](../deploy/helm/hsmgate/README.md), [upgrading.md](upgrading.md), [verifying-releases.md](verifying-releases.md), [building.md](building.md), [releasing.md](releasing.md) |
 | **Reference** (look it up) | "What exactly does X do, and what is its default?" | [cli.md](cli.md), [configuration.md](configuration.md), [audit-log.md](audit-log.md), [specs/](specs/README.md), [openapi.yaml](../api/openapi.yaml) ([the API reference page](https://zystem.github.io/hsmgate/): all the APIs, rebuilt from `api/` on every change), [supported-versions.md](supported-versions.md) |
-| **Explanation** (understand why) | "Why is it like this? Is it right for me?" | [faq.md](faq.md), [architecture.md](architecture.md), [threat-model.md](threat-model.md), [compliance.md](compliance.md), [key-management.md](key-management.md), [transit-face.md](transit-face.md), [security-requirements.md](security-requirements.md), [assurance-case.md](assurance-case.md), [roadmap.md](roadmap.md) |
+| **Explanation** (understand why) | "Why is it like this? Is it right for me?" | [why-yaml-not-sqlite.md](why-yaml-not-sqlite.md), [faq.md](faq.md), [architecture.md](architecture.md), [threat-model.md](threat-model.md), [compliance.md](compliance.md), [key-management.md](key-management.md), [transit-face.md](transit-face.md), [security-requirements.md](security-requirements.md), [assurance-case.md](assurance-case.md), [roadmap.md](roadmap.md) |
 
 How these pages are written, for someone who adds one: [writing-docs.md](writing-docs.md).
