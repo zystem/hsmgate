@@ -1,12 +1,18 @@
 # Changelog
 
-## Unreleased
+## 0.9.0 — 2026-11-15
+
+A terminal tool for operators (`hsmgate-setup`) with a quick setup, and packages for Debian, Fedora and AppImage. The configuration stays YAML ([why](docs/why-yaml-not-sqlite.md)). The image carries a fixed `libssl3`.
 
 ### Added
 - **`hsmgate-setup`, a terminal tool** in the manner of the installers of Debian and YaST ([setup-tool.md](docs/setup-tool.md)): menus to look at and change the tokens, keys (create, rotate, delete), clients and their rights, the faces, the audit settings, to read the audit log and to unlock a card; every change is made in the document, shown as a diff, checked with the loader of the service and written atomically with a backup. It edits `hsmgate.yaml`, which stays the one source of truth ([why not SQLite](docs/why-yaml-not-sqlite.md)). It is a program of its own (a module, `tui/`), so that the service does not carry a terminal library. `hsmgate setup` starts it.
 - **A quick setup** (a wizard of six pages, or `hsmgate-setup -auto` with no screen): a configuration, a key file or a card, the authority and the certificates of the service and of the first client, the check as the service account, the unit, and the commands that work now.
 - **Packages**: a `.deb`, an `.rpm` and an AppImage ([installing-packages.md](docs/installing-packages.md)), built by `packaging/build.sh` (nfpm and appimagetool, pinned), signed and attested with the other assets of a release. The package makes the account and the directories, installs the unit (it starts only when a configuration exists), and offers the quick setup after a first installation: by itself at a terminal, with `HSMGATE_SETUP_AUTO=1` with no screen, otherwise it says what to do. It never starts or restarts the service, and removal keeps the configuration, the keys and the audit log. The Packages workflow builds them and installs them in clean containers on every change to `packaging/` or `tui/`.
 - CI: a `tui` job (tests under the race detector, a coverage floor, govulncheck, staticcheck, gosec) for the new module; Dependabot watches it.
+
+### Security
+- The image carries `libssl3` 3.0.22 (CVE-2026-84782, a DTLS retransmission read in OpenSSL; the code is not used by hsmgate, [VEX](vex/hsmgate.openvex.json)): the distroless base still holds 3.0.20, so the Debian stage supplies the library and the package record, and the build fails if the record is older. Trivy on the image: none (run 2026-11-15).
+- The setup tool parses the ids of an account with a 32-bit limit (CodeQL `go/incorrect-integer-conversion`).
 
 ## 0.8.0 — 2026-11-13
 
