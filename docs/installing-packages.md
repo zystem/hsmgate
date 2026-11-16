@@ -8,7 +8,7 @@
 | Fedora, RHEL-like | `hsmgate-X.Y.Z-1.x86_64.rpm` | the same |
 | Any Linux, nothing to install, or a quick look | `hsmgate-X.Y.Z-x86_64.AppImage` | a single file; as an ordinary user it keeps everything in the home directory |
 
-The programs are linked against the glibc of Debian 12 (bookworm), so a machine needs glibc 2.36 or newer. A card needs the OpenSC module and `pcscd` (`apt install pcscd opensc`; the deb recommends them; the rpm too).
+The programs are built on Debian 12 (bookworm), but the newest glibc symbol that `hsmgate` and `hsmgate-fips` ask for is `GLIBC_2.34` (`objdump -T`, checked on the release v0.9.2) and `hsmgate-setup` asks for none, so a machine needs **glibc 2.34 or newer** (Debian 12, Ubuntu 22.04, RHEL and Rocky 9 and newer). The packages do not name a version of glibc; a later release may need a newer one, so check it with `objdump -T` on the file you install. A card needs the OpenSC module and `pcscd` (`apt install pcscd opensc`; the deb recommends them; the rpm too).
 
 ## deb and rpm
 
@@ -78,4 +78,11 @@ Found by these runs and fixed: a configuration written by root was not readable 
 
 **A real card:** the binary of 0.9.1 was run on 2026-11-15 on a development host with a SmartCard-HSM (`hsmgate check` on its configuration, then a second instance on a loopback port: a text sealed and opened with the key on the card, and a context outside the policy refused). Not through a package, and not by the setup tool.
 
-**Not run:** a package with a real card or HSM (SoftHSM2 only), `systemctl enable --now` on a machine with systemd (the containers have none), an upgrade from an older package, the rpm on Rocky, Alma or RHEL (their glibc may be older than the 2.36 the programs need), and arm64.
+**Run on the files of the release v0.9.2 (2026-11-16), on machines with systemd** (the files were downloaded from the release and verified first, [verifying-releases.md](verifying-releases.md)):
+
+- *deb, a development host (Debian 13) with a SmartCard-HSM*: the package 0.9.2 was installed over 0.9.1 with `apt install`, the hand-made unit and the program in `/usr/local/bin` of the earlier installation were taken away first, and `systemctl enable --now hsmgate` started the unit of the package (`/usr/lib/systemd/system/hsmgate.service`, the program `/usr/bin/hsmgate`). The card and the key file were `ready` (the PIN file was used), `hsmgate check` run as the service user said `configuration ok`, `systemctl reload` and `restart` worked, and a text was sealed and opened with a key on the card and with a key in a file (a context outside the policy was refused and is in the audit file). `dpkg -V` reported no change. Not by the setup tool: the configuration was the one that machine already had;
+- *rpm, AlmaLinux 10 (an LXC container with systemd, no SELinux)*: `dnf install`, the unit stays off without a configuration (the start condition), `hsmgate-setup -auto` made the configuration and started the service, a client sealed and opened a text with the commands the setup printed, `reload` and `restart` worked, `rpm -V` was clean, and `dnf remove` kept the configuration;
+- *rpm, AlmaLinux 10.2 (a virtual machine) with SELinux in the **enforcing** mode*: the same steps passed and `/var/log/audit/audit.log` held no `avc: denied` line. **The process runs in the domain `unconfined_service_t`** (the program is `bin_t` and the package has no SELinux policy), so SELinux does not confine it: "no denial" says that, not that a policy was tested. `/etc/hsmgate` is `etc_t` and `/var/log/hsmgate` is `var_log_t`;
+- *rpm, Rocky Linux 9 (a container, glibc 2.34)*: the package installs and `hsmgate version` and `hsmgate-setup --version` print `v0.9.2`. The service was not started there. The highest glibc symbol that `hsmgate-linux-amd64` asks for is `GLIBC_2.34` (`objdump -T`), the tool needs none.
+
+**Not run:** a package with a real card through the setup tool (the card test above used a configuration made earlier), the reboot of a machine (that the enabled unit starts by itself), an upgrade of an rpm from an older rpm (the deb went 0.9.1 to 0.9.2), the rpm on Rocky, Alma or RHEL with a systemd and a card, a SELinux policy for the service (there is none), and arm64.
