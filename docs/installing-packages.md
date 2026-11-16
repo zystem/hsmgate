@@ -8,7 +8,7 @@
 | Fedora, RHEL-like | `hsmgate-X.Y.Z-1.x86_64.rpm` | the same |
 | Any Linux, nothing to install, or a quick look | `hsmgate-X.Y.Z-x86_64.AppImage` | a single file; as an ordinary user it keeps everything in the home directory |
 
-The programs are linked against the glibc of Debian 12 (bookworm), so a machine needs glibc 2.36 or newer. A card needs the OpenSC module and `pcscd` (`apt install pcscd opensc`; the deb recommends them; the rpm too).
+The programs are built on Debian 12 (bookworm), but the newest glibc symbol that `hsmgate` and `hsmgate-fips` ask for is `GLIBC_2.34` (`objdump -T`, checked on the release v0.9.2) and `hsmgate-setup` asks for none, so a machine needs **glibc 2.34 or newer** (Debian 12, Ubuntu 22.04, RHEL and Rocky 9 and newer). The packages do not name a version of glibc; a later release may need a newer one, so check it with `objdump -T` on the file you install. A card needs the OpenSC module and `pcscd` (`apt install pcscd opensc`; the deb recommends them; the rpm too).
 
 ## deb and rpm
 
