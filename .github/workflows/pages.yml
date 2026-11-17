@@ -1,11 +1,12 @@
 name: API reference (GitHub Pages)
 
-# The page of api/ (index.html and the OpenAPI files next to it) is published when a file there changes on main, or by hand. One-time setup by the owner:
-# Settings -> Pages -> Source: "GitHub Actions". The page is static: the service itself serves no UI.
+# The site is published when README.md, api/ or tools/site/ change on main, or by hand: the first page is the README (made by tools/site/build.py, which asks GitHub's
+# markdown service for the HTML), the API reference (index.html and the OpenAPI files of api/) is at /api/. One-time setup by the owner:
+# Settings -> Pages -> Source: "GitHub Actions". The pages are static: the service itself serves no UI.
 on:
   push:
     branches: [main]
-    paths: ["api/**", ".github/workflows/pages.yml"]
+    paths: ["README.md", "api/**", "tools/site/**", ".github/workflows/pages.yml"]
   workflow_dispatch:
 
 permissions:
@@ -28,9 +29,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Build the site (the README as the first page, the API reference in api/)
+        run: python3 tools/site/build.py _site
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
       - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
-          path: api
+          path: _site
       - id: deployment
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
