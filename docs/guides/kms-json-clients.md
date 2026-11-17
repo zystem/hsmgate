@@ -102,6 +102,45 @@ Same `seal "awskms"` block as for OpenBao (above), but Vault's wrapper hands its
 
 `cosign sign-blob` and `verify-blob` with `--key awskms://<host>:<port>/alias/<name>` work, signing through the face and verifying with the public key from `GetPublicKey`. Two things to know: cosign accepts a key **id** only as a UUID, so name the key by **alias** (`alias/<name>`), which hsmgate keys always have; and it builds `https://<host>:<port>` itself, so the endpoint must be TLS, trusted with `SSL_CERT_FILE`. Signing needs no certificate when the client has `sigv4.no_cert: true` with a `sign_verify` key (tried straight at hsmgate with a `no_cert` client and an alias: `sign-blob`, `verify-blob`, and a changed file refused; the first test used a TLS front that presents a certificate, a few lines of Go with `httputil.ReverseProxy` that keeps the `Host` header; a front is still the way for a client that must be held to mutual TLS but cannot show a certificate).
 
+### Signing an image with a key in a file (tried, cosign 3.0.2, hsmgate 0.9.2, 2026-11-17)
+
+A signing key does not need a card: a key on a **software token** (a file) does the same, and the policy, the budget and the audit line are the same. The key is the `sign_verify` key of the face; cosign signs the digest of the image and hsmgate signs that digest with ECDSA P-256. The configuration of what was run (a test service on a loopback port; the paths are yours):
+
+```yaml
+listen: 127.0.0.1:8443
+tls: {cert: server.pem, key: server.key, client_ca: ca.pem}
+kmsjson: {enabled: true, region: local}
+tokens: [{name: soft, type: soft, keys: {s1: /etc/hsmgate/release-sign.hex}}]   # 64 hex digits, mode 0400, made for this key only
+keys:
+  cinim-release: {kmsjson: true, kmsjson_usage: sign_verify, versions: [{token: soft, label: s1}], aad: {mode: fixed}}
+clients:
+  - name: cinim-ci
+    sigv4: {access_key_id: AKIDCOSIGNTESTKEY001, secret_file: /etc/hsmgate/ci.sigv4, no_cert: true, allow_from: [127.0.0.1/32]}   # secret: 32 bytes or more, mode 0600
+    keys:
+      cinim-release: {ops: [sign, verify], per_minute: 60}
+```
+
+The key file must not be used by any other key (the configuration refuses it: a `sign_verify` key needs a label of its own). With `no_cert` the client needs no certificate; use `allow_from` to name the machines. cosign was run here only with `no_cert`; for a client that must be held to mutual TLS the way is the front described above (not run for signing).
+
+```bash
+export AWS_ACCESS_KEY_ID=AKIDCOSIGNTESTKEY001 AWS_SECRET_ACCESS_KEY="$(cat ci.sigv4)" AWS_REGION=local SSL_CERT_FILE=ca.pem
+KEY=awskms://127.0.0.1:8443/alias/cinim-release
+cosign sign --yes --key $KEY --tlog-upload=false REGISTRY/NAME@sha256:<digest>
+```
+
+It prints `Signing artifact...` and nothing else. The audit file has the lines `describekey` and `sign`, both `ok`. Sign the **digest**, not a tag: a tag can move. `--tlog-upload=false` keeps the signature out of the public transparency log (Rekor); leave it out if you want the log, and then do not pass `--insecure-ignore-tlog` when verifying.
+
+```bash
+cosign public-key --key $KEY > cinim-cosign.pub       # prints -----BEGIN PUBLIC KEY----- … (a P-256 key); one `getpublickey` line in the audit
+cosign verify --key cinim-cosign.pub --insecure-ignore-tlog=true REGISTRY/NAME@sha256:<digest>
+```
+
+`verify` with the file prints `Verification for … --` and a JSON line with the image reference and its digest, and exits 0. **A verifier needs only the public key file**, not the service and not a credential. `cosign verify --key $KEY …` (through the service, with the three variables above) gives the same answer.
+
+What was refused: a different public key (`Error: no matching attestations: failed to verify signature: could not verify envelope: accepted signatures do not match threshold, Found: 0, Expected 1`) and an image that was never signed (`Error: no signatures found`).
+
+How it was run: a registry (`registry:2`) on the loopback, an image copied into it with `skopeo` (`docker push` treated `127.0.0.1:5055` as a registry with TLS), and `--allow-insecure-registry` for cosign; a registry with TLS needs neither. **Not run:** the key on a card (only the `token` of the version changes; the signatures of the new key are verified with the **new** public key, so give it to the verifiers), a client with a certificate through a TLS front, a registry with TLS, signing with the log (Rekor), and any other version of cosign. A software key is a file: whoever reads it signs without the service and without an audit line, so give it the protection of the master key of the service.
+
 ## Terraform (tried, 1.16.6, provider aws)
 
 The data sources and resources that only use keys work against the face: `data "aws_kms_key"` (`DescribeKey`), `resource "aws_kms_ciphertext"` (`Encrypt`), `data "aws_kms_secrets"` (`Decrypt`), `data "aws_kms_public_key"` (`GetPublicKey`); a second `plan` shows no changes. Provider settings: `endpoints { kms = "https://…" }`, `custom_ca_bundle`, `skip_credentials_validation`, `skip_requesting_account_id`, `skip_metadata_api_check`, `skip_region_validation`. Resources that **make or manage** keys (`aws_kms_key`, `aws_kms_alias`, grants, policies, rotation) do not work: keys here are made in the configuration and on the token.
