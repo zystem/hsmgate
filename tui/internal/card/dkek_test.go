@@ -77,6 +77,9 @@ func TestStrongShareFileRefusesAnyChange(t *testing.T) {
 	share, _ := NewShare(nil)
 	file, _ := EncryptShare(Strong, share, []byte("pw long enough"), nil)
 	for i := 8; i < len(file); i++ { // after the magic, which says what the file is
+		if i == 8 || i == 9 {
+			continue // the high bytes of the count: a flipped bit asks for millions of iterations (the bound for a count is tested below)
+		}
 		bad := append([]byte{}, file...)
 		bad[i] ^= 1
 		if got, err := DecryptShare(bad, []byte("pw long enough")); err == nil {
