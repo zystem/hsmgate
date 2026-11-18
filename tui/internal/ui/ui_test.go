@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +11,8 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
+
+	"github.com/zystem/hsmgate/tui/internal/card/cardtest"
 )
 
 const sample = `listen: 127.0.0.1:8443
@@ -35,7 +39,10 @@ type rig struct {
 	done   chan error
 }
 
-func start(t *testing.T, cfg string, first bool) *rig {
+func start(t *testing.T, cfg string, first bool) *rig { return startWith(t, cfg, first, nil) }
+
+// startWith is start with a change to the options (a card made of bytes, for one).
+func startWith(t *testing.T, cfg string, first bool, mod func(*Options)) *rig {
 	t.Helper()
 	p := filepath.Join(t.TempDir(), "hsmgate.yaml")
 	if cfg != "" {
@@ -46,7 +53,11 @@ func start(t *testing.T, cfg string, first bool) *rig {
 		t.Fatal(err)
 	}
 	s.SetSize(130, 40)
-	a, err := New(Options{ConfigPath: p, Screen: s, FirstRun: first, Version: "test"})
+	opt := Options{ConfigPath: p, Screen: s, FirstRun: first, Version: "test"}
+	if mod != nil {
+		mod(&opt)
+	}
+	a, err := New(opt)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +129,7 @@ func (r *rig) key(k tcell.Key, ch rune) {
 
 func TestShowsTheSectionsAndTheFile(t *testing.T) {
 	r := start(t, sample, false)
-	scr := r.waitFor("Overview", "Tokens", "Keys", "Clients", "Settings and faces", "Audit log", "Review and save", "The configuration is good", "1 token(s)", "1 client(s)")
+	scr := r.waitFor("Overview", "Tokens", "Card", "Keys", "Clients", "Settings and faces", "Audit log", "Review and save", "The configuration is good", "1 token(s)", "1 client(s)")
 	if !strings.Contains(scr, "hsmgate.yaml") {
 		t.Errorf("the header does not name the file:\n%s", scr)
 	}
@@ -129,16 +140,16 @@ func TestSectionsListWhatTheFileHolds(t *testing.T) {
 	r.waitFor("Overview")
 	r.key(tcell.KeyRune, '2')
 	r.waitFor("Tokens: where the private keys are", "soft", "m1")
-	r.key(tcell.KeyRune, '3')
-	r.waitFor("orders", "none (fixed)", "shop")
 	r.key(tcell.KeyRune, '4')
+	r.waitFor("orders", "none (fixed)", "shop")
+	r.key(tcell.KeyRune, '5')
 	r.waitFor("shop", "CN shop", "orders: encrypt/decrypt")
 }
 
 func TestReviewShowsNoChangesThenTheDiff(t *testing.T) {
 	r := start(t, sample, false)
 	r.waitFor("Overview")
-	r.key(tcell.KeyRune, '7')
+	r.key(tcell.KeyRune, '8')
 	r.waitFor("The service accepts this file", "No changes")
 	r.do(func() {
 		r.app.doc.Set(25, "audit", "max_size_mb")
@@ -230,7 +241,7 @@ func (r *rig) tabs(n int) {
 func TestCreatingAKeyWithTheKeyboard(t *testing.T) {
 	r := start(t, sample, false)
 	r.waitFor("Overview")
-	r.key(tcell.KeyRune, '3')
+	r.key(tcell.KeyRune, '4')
 	r.waitFor("orders")
 	r.tabs(2) // the table, then the first button: Create key
 	r.key(tcell.KeyEnter, 0)
@@ -253,7 +264,7 @@ func TestCreatingAKeyWithTheKeyboard(t *testing.T) {
 func TestDeletingAKeyAsksForItsName(t *testing.T) {
 	r := start(t, sample, false)
 	r.waitFor("Overview")
-	r.key(tcell.KeyRune, '3')
+	r.key(tcell.KeyRune, '4')
 	r.waitFor("orders")
 	r.tabs(4) // table, Create key, Rotate, Delete
 	r.key(tcell.KeyEnter, 0)
@@ -280,15 +291,15 @@ func TestEverySectionDraws(t *testing.T) {
 	r := start(t, sample+"audit: {file: "+log+"}\n", false)
 	r.waitFor("Overview")
 	for key, want := range map[rune][]string{
-		'5': {"Settings and faces", "Listen (restart)", "Apply to the document"},
-		'6': {"Audit log", "ok", "forbidden"},
+		'6': {"Settings and faces", "Listen (restart)", "Apply to the document"},
+		'7': {"Audit log", "ok", "forbidden"},
 		'1': {"The configuration is good"},
 	} {
 		r.key(tcell.KeyRune, key)
 		r.waitFor(want...)
 	}
 	// the filter of the audit page: only the problems
-	r.key(tcell.KeyRune, '6')
+	r.key(tcell.KeyRune, '7')
 	r.waitFor("forbidden")
 	r.tabs(3) // the text, All, Problems
 	r.key(tcell.KeyEnter, 0)
@@ -301,7 +312,7 @@ func TestEverySectionDraws(t *testing.T) {
 func TestSettingsFormChangesTheDocument(t *testing.T) {
 	r := start(t, sample, false)
 	r.waitFor("Overview")
-	r.key(tcell.KeyRune, '5')
+	r.key(tcell.KeyRune, '6')
 	r.waitFor("Apply to the document")
 	r.do(func() {
 		a := r.app
@@ -321,4 +332,151 @@ func TestSettingsFormChangesTheDocument(t *testing.T) {
 			t.Errorf("listen = %q", got)
 		}
 	})
+}
+
+// The Card page: nothing is sent to the card until it is asked; then the tree is drawn as a card manager draws it, and the selected line is explained.
+func TestCardPageShowsTheTree(t *testing.T) {
+	c := cardtest.New(t)
+	r := startWith(t, sample, false, func(o *Options) { o.CardRun = c.Run })
+	r.waitFor("Overview")
+	r.screen.SetSize(170, 40) // the lines of the tree are long
+	r.key(tcell.KeyRune, '3')
+	r.waitFor("Card: what a SmartCard-HSM holds", "Read the card", "No PIN is sent")
+	if len(c.Calls) != 0 {
+		t.Fatalf("the card was asked before the person asked: %v", c.Calls)
+	}
+	r.key(tcell.KeyTab, 0) // into the tree
+	r.key(tcell.KeyRune, 'r')
+	scr := r.waitFor("demo (DECC1800263)", "User PIN not verified, 3 tries remaining (63C3)", "SO PIN not verified, 15 tries remaining (63CF)",
+		"DKEK with KCV AA02030405060708 (first)", "signer (1, EC-256)", "DKEK set-up in progress with 1 of 2 shares missing (second)", "rsa key (2, RSA-4096)",
+		"Key domain 2 not created", "Key domain 3 not created", "version 4.1")
+	if strings.Contains(scr, "Key domain 4") {
+		t.Errorf("a domain that the card does not have:\n%s", scr)
+	}
+	// the arrow keys move down the tree and the right side explains the line
+	r.key(tcell.KeyDown, 0)
+	r.waitFor("the PIN that opens the card for use", "3")
+	r.key(tcell.KeyDown, 0)
+	r.key(tcell.KeyDown, 0)
+	r.waitFor("Key check value (KCV)", "AA02030405060708")
+	r.key(tcell.KeyDown, 0)
+	r.waitFor("CKA_ID", "Not in the configuration")
+}
+
+// A key of the card that the configuration names says so.
+func TestCardKeyIsMatchedWithTheConfiguration(t *testing.T) {
+	c := cardtest.New(t)
+	cfg := "tokens:\n  - {name: card, type: pkcs11, module: /m.so, token_label: x, keys: {c1: \"0100000000000000000000000000000000000000\"}}\nkeys:\n  k: {versions: [{token: card, label: c1}], aad: {mode: fixed}}\n"
+	r := startWith(t, cfg, false, func(o *Options) { o.CardRun = c.Run })
+	r.waitFor("Overview")
+	r.screen.SetSize(170, 40)
+	r.key(tcell.KeyRune, '3')
+	r.key(tcell.KeyTab, 0)
+	r.key(tcell.KeyRune, 'r')
+	r.waitFor("signer (1, EC-256)")
+	for i := 0; i < 4; i++ {
+		r.key(tcell.KeyDown, 0)
+	}
+	r.waitFor("In the configuration: token", "card", "label", "c1")
+}
+
+// No reader, no tool, no card: each is said in words and the tree is not drawn.
+func TestCardPageSaysWhyItCannotRead(t *testing.T) {
+	for name, tc := range map[string]struct {
+		run  func(context.Context, string, ...string) (string, error)
+		want string
+	}{
+		"no reader": {func(context.Context, string, ...string) (string, error) { return "No smart card readers found.\n", nil }, "PC/SC shows no card reader"},
+		"no tool": {func(context.Context, string, ...string) (string, error) {
+			return "", fmt.Errorf(`exec: "opensc-tool": executable file not found in $PATH`)
+		}, "apt install opensc"},
+		"no card": {func(context.Context, string, ...string) (string, error) {
+			return "# Detected readers (pcsc)\nNr.  Card  Features  Name\n0    No              R 00 00\n", nil
+		}, "none of the 1 reader(s) has a card in it"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := startWith(t, sample, false, func(o *Options) { o.CardRun = tc.run })
+			r.waitFor("Overview")
+			r.key(tcell.KeyRune, '3')
+			r.key(tcell.KeyTab, 0)
+			r.key(tcell.KeyRune, 'r')
+			r.waitFor("the card could not be read", tc.want)
+		})
+	}
+}
+
+// With more than one card in readers the page does not guess: it shows the menu of the readers. The Reader button shows it again, with the reader in use marked, and a reader
+// with no card is refused in words.
+func TestCardReaderMenu(t *testing.T) {
+	c := cardtest.New(t)
+	c.Readers = []cardtest.ReaderInfo{{Name: "Reader A 00 00", HasCard: true, Label: "first-card"}, {Name: "Reader B 01 00", HasCard: true, Label: "second-card"}, {Name: "Reader C 02 00"}}
+	r := startWith(t, sample, false, func(o *Options) { o.CardRun = c.Run })
+	r.waitFor("Overview")
+	r.screen.SetSize(170, 40)
+	r.key(tcell.KeyRune, '3')
+	r.key(tcell.KeyTab, 0)
+	r.key(tcell.KeyRune, 'r')
+	r.waitFor("Choose the reader", "automatic: the only reader that has a card", "0  card", "Reader A", "1  card", "Reader B", "2  no card", "Reader C")
+	for _, call := range c.Calls {
+		t.Errorf("a card was read before a reader was chosen: %v", call)
+	}
+	r.key(tcell.KeyDown, 0) // from "automatic" to A, then B
+	r.key(tcell.KeyDown, 0)
+	r.key(tcell.KeyEnter, 0)
+	r.waitFor("second-card (DECC1800263)", "the card (reader 1)")
+
+	// the Reader button: the reader in use is marked
+	r.key(tcell.KeyTab, 0) // Read the card
+	r.key(tcell.KeyTab, 0) // Reader
+	r.key(tcell.KeyEnter, 0)
+	r.waitFor("Choose the reader", "* 1  card")
+	r.key(tcell.KeyUp, 0) // B to A, then to "automatic" (the list wraps round after that)
+	r.key(tcell.KeyUp, 0)
+	r.key(tcell.KeyEnter, 0) // automatic again: two cards, so the menu comes up
+	r.waitFor("Choose the reader", "* automatic")
+	r.key(tcell.KeyEsc, 0)
+
+	// a reader with no card
+	r.key(tcell.KeyTab, 0)
+	r.key(tcell.KeyTab, 0)
+	r.key(tcell.KeyEnter, 0)
+	r.waitFor("Choose the reader")
+	for i := 0; i < 3; i++ { // automatic, A, B, C
+		r.key(tcell.KeyDown, 0)
+	}
+	r.key(tcell.KeyEnter, 0)
+	r.waitFor("the card could not be read", "there is no card in the reader 2")
+}
+
+// One card among the readers is the one that is meant: no menu.
+func TestCardOneCardAmongReadersNeedsNoMenu(t *testing.T) {
+	c := cardtest.New(t)
+	c.Readers = []cardtest.ReaderInfo{{Name: "Empty 00 00"}, {Name: "Full 01 00", HasCard: true, Label: "only-card"}}
+	r := startWith(t, sample, false, func(o *Options) { o.CardRun = c.Run })
+	r.waitFor("Overview")
+	r.screen.SetSize(170, 40)
+	r.key(tcell.KeyRune, '3')
+	r.key(tcell.KeyTab, 0)
+	r.key(tcell.KeyRune, 'r')
+	scr := r.waitFor("only-card (DECC1800263)", "the card (reader 1)")
+	if strings.Contains(scr, "Choose the reader") {
+		t.Errorf("the menu came up for one card:\n%s", scr)
+	}
+}
+
+// A key domain with an XKEK and a DKEK that is still being set up are worded as the card manager words them.
+func TestCardShowsXKEKDomain(t *testing.T) {
+	c := cardtest.New(t)
+	c.Domains[2] = []byte{0, 0, 0xCC, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8}
+	r := startWith(t, sample, false, func(o *Options) { o.CardRun = c.Run })
+	r.waitFor("Overview")
+	r.screen.SetSize(170, 40)
+	r.key(tcell.KeyRune, '3')
+	r.key(tcell.KeyTab, 0)
+	r.key(tcell.KeyRune, 'r')
+	r.waitFor("XKEK with KCV CC02030405060708 in key domain 0102030405060708", "DKEK set-up in progress with 1 of 2 shares missing (second)", "DKEK with KCV AA02030405060708 (first)")
+	for i := 0; i < 7; i++ { // the card, 2 PINs, domain 0 and its key, domain 1 and its key: the next line is the XKEK domain
+		r.key(tcell.KeyDown, 0)
+	}
+	r.waitFor("exchange key encryption key", "0102030405060708")
 }
