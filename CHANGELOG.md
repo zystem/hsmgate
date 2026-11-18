@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **The Card page of `hsmgate-setup`**: the tree of a SmartCard-HSM as a card manager shows it (the User PIN and SO PIN with the tries left, the key domains with the key check value of their DKEK, the keys in them, and whether the configuration names a key), with a line on the right that says what each line means. It reads only: no PIN is sent and nothing is written. It needs `opensc-tool` (the package opensc) and `pcscd`. The sections of the menu are now numbered 1 to 8 (Card is 3, the ones after it moved by one). Making keys, changing a PIN, key domains and the copy to a spare card are not on this page yet ([docs/setup-tool.md](docs/setup-tool.md)).
+
 ## 0.9.2 — 2026-11-15
 
 Two fixes found by trying 0.9.1 on a real host: `hsmgate ca` reads an authority key made with OpenSSL, and the setup tool no longer calls an untouched configuration "unsaved". Documentation of what was run on 0.9.1 and of the signatures of the SBOM and the VEX document.

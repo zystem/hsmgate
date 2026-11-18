@@ -14,6 +14,7 @@ import (
 	"github.com/rivo/tview"
 
 	"github.com/zystem/hsmgate/internal/config"
+	"github.com/zystem/hsmgate/tui/internal/card"
 	"github.com/zystem/hsmgate/tui/internal/store"
 	"github.com/zystem/hsmgate/tui/internal/sys"
 )
@@ -27,6 +28,7 @@ type Options struct {
 	FirstRun   bool         // start with the quick setup when there is no configuration
 	Screen     tcell.Screen // for tests: a simulation screen
 	Bin        string       // the hsmgate program (found when empty)
+	CardRun    card.Run     // runs opensc-tool for the Card page (sys.Run when nil; tests give a card made of bytes)
 	Now        func() time.Time
 }
 
@@ -42,6 +44,7 @@ type App struct {
 	bar     *tview.TextView
 	head    *tview.TextView
 	doc     *store.Doc
+	card    cardState // the Card page
 
 	section  string
 	sections []section
@@ -65,7 +68,7 @@ func New(opt Options) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	a := &App{opt: opt, app: tview.NewApplication(), pages: tview.NewPages(), doc: doc}
+	a := &App{opt: opt, app: tview.NewApplication(), pages: tview.NewPages(), doc: doc, card: cardState{reader: -1}}
 	if opt.Screen != nil {
 		a.app.SetScreen(opt.Screen)
 	}
@@ -74,6 +77,7 @@ func New(opt Options) (*App, error) {
 	a.sections = []section{
 		{"dashboard", "Overview", (*App).dashboard},
 		{"tokens", "Tokens", (*App).tokens},
+		{"card", "Card", (*App).cardView},
 		{"keys", "Keys", (*App).keys},
 		{"clients", "Clients", (*App).clients},
 		{"settings", "Settings and faces", (*App).settings},
@@ -171,7 +175,7 @@ func (a *App) show(key string) {
 			a.body.AddItem(a.content, 0, 1, false)
 		}
 	}
-	a.setBar("Tab: next field   Enter: choose   Esc: back   F10 or Ctrl-C: quit   1-7: sections")
+	a.setBar(fmt.Sprintf("Tab: next field   Enter: choose   Esc: back   F10 or Ctrl-C: quit   1-%d: sections", len(a.sections)))
 	a.refresh()
 }
 
