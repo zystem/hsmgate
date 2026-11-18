@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gdamore/tcell/v2"
@@ -90,8 +91,14 @@ func New(opt Options) (*App, error) {
 	return a, nil
 }
 
+// themeOnce: the colours are settings of the whole library, the same for every screen; they are set the first time a program is made. (A second program in a test, made while the
+// screen of an earlier one is still being drawn, would write what the other reads.)
+var themeOnce sync.Once
+
 // theme: a blue desktop, grey dialogs with black text, as the installers have.
-func theme() {
+func theme() { themeOnce.Do(setTheme) }
+
+func setTheme() {
 	tview.Styles.PrimitiveBackgroundColor = tcell.ColorSilver
 	tview.Styles.ContrastBackgroundColor = tcell.ColorNavy
 	tview.Styles.MoreContrastBackgroundColor = tcell.ColorTeal

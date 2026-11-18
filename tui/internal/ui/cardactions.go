@@ -233,9 +233,9 @@ func (a *App) actCreateDomain(n int) {
 		f.AddInputField("Label", "", 30, nil, nil)
 		f.AddPasswordField("User PIN", "", 20, '*', nil)
 	}, "Create", func(f *tview.Form) {
-		shares, err := strconv.Atoi(strings.TrimSpace(fieldText(f, "Number of shares")))
+		shares64, err := strconv.ParseUint(strings.TrimSpace(fieldText(f, "Number of shares")), 10, 8) // 0 to 255 by the size
 		label := strings.TrimSpace(fieldText(f, "Label"))
-		if err != nil || shares < 1 || shares > 255 {
+		if err != nil || shares64 < 1 {
 			a.fail(errors.New("the number of shares is 1 to 255: nothing was done"))
 			return
 		}
@@ -243,10 +243,11 @@ func (a *App) actCreateDomain(n int) {
 			a.fail(errors.New("a label of more than 60 characters: nothing was done"))
 			return
 		}
+		shares := byte(shares64) // #nosec G115 -- parsed with a limit of 8 bits
 		pin := []byte(fieldText(f, "User PIN"))
 		a.cardClose()
 		a.cardWork("Create the key domain", pin, func(s *card.Session) (string, error) {
-			d, err := s.CreateDKEKDomain(byte(n), byte(shares), label) // #nosec G115 -- checked above
+			d, err := s.CreateDKEKDomain(byte(n), shares, label) // #nosec G115 -- a key domain number
 			if err != nil {
 				return "", err
 			}
