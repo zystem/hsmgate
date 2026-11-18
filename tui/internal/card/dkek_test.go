@@ -21,40 +21,85 @@ func TestShareKeyIsEVPBytesToKey(t *testing.T) {
 	}
 }
 
-func TestShareFileRoundTrip(t *testing.T) {
-	defer func(c int) { kdfCount = c }(kdfCount)
-	kdfCount = 50
-	share, err := NewShare(nil)
-	if err != nil || len(share) != ShareLen {
-		t.Fatal(err)
+func TestShareFileRoundTripInBothFormats(t *testing.T) {
+	defer SetKDFCount(50)()
+	for _, format := range []ShareFormat{Strong, Compatible} {
+		t.Run(format.String(), func(t *testing.T) {
+			share, err := NewShare(nil)
+			if err != nil || len(share) != ShareLen {
+				t.Fatal(err)
+			}
+			file, err := EncryptShare(format, share, []byte("a password"), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got, ok := FormatOf(file); !ok || got != format {
+				t.Fatalf("the format of the file: %v %v", got, ok)
+			}
+			wantLen, magic := 88, "HGDKEKS1"
+			if format == Compatible {
+				wantLen, magic = 64, "Salted__"
+			}
+			if len(file) != wantLen || !bytes.HasPrefix(file, []byte(magic)) {
+				t.Fatalf("%d bytes, starts with %q", len(file), file[:8])
+			}
+			got, err := DecryptShare(file, []byte("a password"))
+			if err != nil || !bytes.Equal(got, share) {
+				t.Fatalf("%v", err)
+			}
+			if _, err := DecryptShare(file, []byte("another")); err != ErrWrongPassword {
+				t.Errorf("a wrong password: %v", err)
+			}
+			if _, err := DecryptShare(file[:len(file)-1], []byte("a password")); err == nil {
+				t.Error("a short file was opened")
+			}
+			if _, err := DecryptShare(append([]byte("X"), file[1:]...), []byte("a password")); err == nil {
+				t.Error("a file without the mark was opened")
+			}
+			// two files of the same share differ (the salt), and neither shows the share
+			f2, _ := EncryptShare(format, share, []byte("a password"), nil)
+			if bytes.Equal(file, f2) || bytes.Contains(file, share) {
+				t.Error("the file is not salted or shows the share")
+			}
+			if _, err := EncryptShare(format, share[:31], []byte("x"), nil); err == nil {
+				t.Error("a share of 31 bytes was accepted")
+			}
+			if _, err := EncryptShare(format, share, nil, nil); err == nil {
+				t.Error("no password was accepted")
+			}
+		})
 	}
-	file, err := EncryptShare(share, []byte("a password"), nil)
-	if err != nil || len(file) != 64 || !bytes.HasPrefix(file, []byte("Salted__")) {
-		t.Fatalf("%v %d", err, len(file))
+}
+
+// The strong format authenticates its header: a changed byte anywhere, in the number of iterations, the salt, the nonce, the text or the tag, is refused and nothing is opened.
+func TestStrongShareFileRefusesAnyChange(t *testing.T) {
+	defer SetKDFCount(50)()
+	share, _ := NewShare(nil)
+	file, _ := EncryptShare(Strong, share, []byte("pw long enough"), nil)
+	for i := 8; i < len(file); i++ { // after the magic, which says what the file is
+		bad := append([]byte{}, file...)
+		bad[i] ^= 1
+		if got, err := DecryptShare(bad, []byte("pw long enough")); err == nil {
+			t.Fatalf("a file changed at byte %d was opened: %x", i, got)
+		}
 	}
-	got, err := DecryptShare(file, []byte("a password"))
-	if err != nil || !bytes.Equal(got, share) {
-		t.Fatalf("%v", err)
+	// the number of iterations a file may ask for is bounded
+	bad := append([]byte{}, file...)
+	bad[8], bad[9], bad[10], bad[11] = 0xFF, 0xFF, 0xFF, 0xFF
+	if _, err := DecryptShare(bad, []byte("pw long enough")); err == nil || err == ErrWrongPassword {
+		t.Errorf("an absurd count: %v", err)
 	}
-	if _, err := DecryptShare(file, []byte("another")); err != ErrWrongPassword {
-		t.Errorf("a wrong password: %v", err)
+	bad[8], bad[9], bad[10], bad[11] = 0, 0, 0, 0
+	if _, err := DecryptShare(bad, []byte("pw long enough")); err == nil || err == ErrWrongPassword {
+		t.Errorf("a zero count: %v", err)
 	}
-	if _, err := DecryptShare(file[:60], []byte("a password")); err == nil {
-		t.Error("a short file was opened")
-	}
-	if _, err := DecryptShare(append([]byte("Xalted__"), file[8:]...), []byte("a password")); err == nil {
-		t.Error("a file without the mark was opened")
-	}
-	// two files of the same share differ (the salt), and neither shows the share
-	f2, _ := EncryptShare(share, []byte("a password"), nil)
-	if bytes.Equal(file, f2) || bytes.Contains(file, share) {
-		t.Error("the file is not salted or shows the share")
-	}
-	if _, err := EncryptShare(share[:31], []byte("x"), nil); err == nil {
-		t.Error("a share of 31 bytes was accepted")
-	}
-	if _, err := EncryptShare(share, nil, nil); err == nil {
-		t.Error("no password was accepted")
+}
+
+// A new strong file asks for the count that is used for real: a million iterations of PBKDF2-HMAC-SHA-256, and the compatible one for ten million (the counts are variables, so a
+// test of the format can use small ones; this reads what they are when nothing changed them). Making a file with them takes seconds, more under the race detector: not done here.
+func TestTheCountsUsedForReal(t *testing.T) {
+	if pbkdf2Iter != 1_000_000 || kdfCount != 10_000_000 {
+		t.Errorf("PBKDF2 %d iterations, MD5 count %d", pbkdf2Iter, kdfCount)
 	}
 }
 

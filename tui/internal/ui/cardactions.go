@@ -256,18 +256,36 @@ func (a *App) actCreateDomain(n int) {
 	})
 }
 
+// the formats of a share file as the form offers them (the first is the default)
+var shareFormats = []struct {
+	label  string
+	format card.ShareFormat
+}{
+	{"strong: AES-256-GCM, PBKDF2-SHA-256 (only this program reads it)", card.Strong},
+	{"compatible: Smart Card Shell and sc-hsm-tool read it (MD5 key derivation, weak for a password)", card.Compatible},
+}
+
 func (a *App) actMakeShare() {
-	a.cardForm("Make a DKEK share file", "A share is 32 random bytes in a file that a password protects. The file is the one the vendor's card managers write and read. Keep the file and its password in different places: with all the shares of a DKEK both are needed to make it again on another card.\nMaking it takes a few seconds (the key derivation is slow on purpose). Nothing is sent to the card.", 3, func(f *tview.Form) {
+	a.cardForm("Make a DKEK share file", "A share is 32 random bytes in a file that a password protects. Keep the file and its password in different places: with all the shares of a DKEK both are needed to make it again on another card.\nThe default format is the strong one; choose the compatible one only when another tool (the vendor's card manager) has to read the file: its protection is the slow key derivation, not the hash. The page opens both. Making a file takes a few seconds. Nothing is sent to the card.", 4, func(f *tview.Form) {
 		f.AddInputField("File", "dkek-share-1.pbe", 50, nil, nil)
+		labels := make([]string, len(shareFormats))
+		for i, sf := range shareFormats {
+			labels[i] = sf.label
+		}
+		f.AddDropDown("Format", labels, 0, nil)
 		f.AddPasswordField("Password", "", 30, '*', nil)
 		f.AddPasswordField("Password again", "", 30, '*', nil)
 	}, "Make", func(f *tview.Form) {
-		a.makeShare(strings.TrimSpace(fieldText(f, "File")), fieldText(f, "Password"), fieldText(f, "Password again"))
+		idx := 0
+		if dd, ok := f.GetFormItemByLabel("Format").(*tview.DropDown); ok {
+			idx, _ = dd.GetCurrentOption()
+		}
+		a.makeShare(strings.TrimSpace(fieldText(f, "File")), fieldText(f, "Password"), fieldText(f, "Password again"), shareFormats[idx].format)
 	})
 }
 
 // makeShare checks the answers of the form and makes the file.
-func (a *App) makeShare(path, pw, again string) {
+func (a *App) makeShare(path, pw, again string, format card.ShareFormat) {
 	switch {
 	case path == "":
 		a.fail(errors.New("no file name: nothing was done"))
@@ -287,14 +305,18 @@ func (a *App) makeShare(path, pw, again string) {
 			return "", err
 		}
 		defer card.Wipe(share)
-		file, err := card.EncryptShare(share, []byte(pw), nil)
+		file, err := card.EncryptShare(format, share, []byte(pw), nil)
 		if err != nil {
 			return "", err
 		}
 		if err := writeNew(path, file); err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("The share is written to %s (mode 0600).\nThe key check value of this share: %X\nFor a key domain of one share the card will show this value after the import.", path, card.KCV(share)), nil
+		note := ""
+		if format == card.Compatible {
+			note = "\nThe file is in the compatible format: its password is protected only by the slow key derivation, so keep the file as secret as the password."
+		}
+		return fmt.Sprintf("The share is written to %s (the %s format, mode 0600).\nThe key check value of this share: %X\nFor a key domain of one share the card will show this value after the import.%s", path, format, card.KCV(share), note), nil
 	})
 }
 
@@ -305,7 +327,7 @@ func (a *App) actImportShare(d card.Domain) {
 		f.AddPasswordField("User PIN", "", 20, '*', nil)
 	}, "Import", func(f *tview.Form) {
 		path, pw, pin := strings.TrimSpace(fieldText(f, "File")), fieldText(f, "Password of the file"), []byte(fieldText(f, "User PIN"))
-		raw, err := readSmall(path, 64)
+		raw, err := readSmall(path, 128)
 		if err != nil {
 			a.fail(err)
 			return

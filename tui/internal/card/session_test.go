@@ -89,7 +89,7 @@ func TestDomainShareLifecycle(t *testing.T) {
 	}
 	// a share from a file: made, written, read, imported; the card's check value is that of the share
 	share, _ := NewShare(nil)
-	file, _ := EncryptShare(share, []byte("pw"), nil)
+	file, _ := EncryptShare(Strong, share, []byte("pw"), nil)
 	back, err := DecryptShare(file, []byte("pw"))
 	if err != nil {
 		t.Fatal(err)

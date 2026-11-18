@@ -642,26 +642,39 @@ func TestCardShareFileIsMadeAndRefusesToOverwrite(t *testing.T) {
 	dir := t.TempDir()
 	taken := filepath.Join(dir, "taken.pbe")
 	os.WriteFile(taken, []byte("x"), 0o600)
-	r.do(func() { r.app.makeShare(taken, "a long password", "a long password") })
+	r.do(func() { r.app.makeShare(taken, "a long password", "a long password", card.Strong) })
 	r.waitFor("is there already", "nothing is overwritten")
 	r.key(tcell.KeyEnter, 0)
-	r.do(func() { r.app.makeShare(filepath.Join(dir, "x.pbe"), "short", "short") })
+	r.do(func() { r.app.makeShare(filepath.Join(dir, "x.pbe"), "short", "short", card.Strong) })
 	r.waitFor("must be the same twice")
 	r.key(tcell.KeyEnter, 0)
-	path := filepath.Join(dir, "new.pbe")
-	r.do(func() { r.app.makeShare(path, "a long password", "a long password") })
-	scr := r.waitFor("The share is written to", "key check value of this share")
-	st, err := os.Stat(path)
-	if err != nil || st.Mode().Perm() != 0o600 || st.Size() != 64 {
-		t.Fatalf("the file: %v %v", err, st)
-	}
-	raw, _ := os.ReadFile(path)
-	share, err := card.DecryptShare(raw, []byte("a long password"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := fmt.Sprintf("%X", card.KCV(share)); !strings.Contains(scr, want) {
-		t.Errorf("the key check value %s is not on the screen:\n%s", want, scr)
+	for _, format := range []card.ShareFormat{card.Strong, card.Compatible} {
+		path := filepath.Join(dir, format.String()+".pbe")
+		r.do(func() { r.app.makeShare(path, "a long password", "a long password", format) })
+		scr := r.waitFor("The share is written to", "key check value of this share", "format")
+		st, err := os.Stat(path)
+		wantSize := int64(88)
+		if format == card.Compatible {
+			wantSize = 64
+		}
+		if err != nil || st.Mode().Perm() != 0o600 || st.Size() != wantSize {
+			t.Fatalf("the %s file: %v %v", format, err, st)
+		}
+		raw, _ := os.ReadFile(path)
+		if got, ok := card.FormatOf(raw); !ok || got != format {
+			t.Errorf("the format of the file: %v %v", got, ok)
+		}
+		share, err := card.DecryptShare(raw, []byte("a long password"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := fmt.Sprintf("%X", card.KCV(share)); !strings.Contains(scr, want) {
+			t.Errorf("the key check value %s is not on the screen:\n%s", want, scr)
+		}
+		if (format == card.Compatible) != strings.Contains(scr, "compatible format") {
+			t.Errorf("the note about the compatible format:\n%s", scr)
+		}
+		r.key(tcell.KeyEnter, 0)
 	}
 }
 
@@ -761,7 +774,7 @@ func TestCardDomainFlowsThroughTheForms(t *testing.T) {
 	// a share from a file into the domain that the page shows as being set up (line 5); the simulated card has it as domain 1
 	sim.Domains[1] = &cardtest.SimDomain{Shares: 1, Outstanding: 1, DKEK: make([]byte, 32)}
 	share, _ := card.NewShare(nil)
-	file, _ := card.EncryptShare(share, []byte("share password"), nil)
+	file, _ := card.EncryptShare(card.Strong, share, []byte("share password"), nil)
 	path := filepath.Join(dir, "s.pbe")
 	os.WriteFile(path, file, 0o600)
 	r.key(tcell.KeyUp, 0)
@@ -832,4 +845,33 @@ func TestCardDomainFlowsThroughTheForms(t *testing.T) {
 	r.fill(map[string]string{"Current SO PIN": "57621880", "New SO PIN": "123", "New SO PIN again": "123"})
 	r.press(0)
 	r.waitFor("8 characters")
+}
+
+// The form of a share file offers the strong format first and the compatible one second, and makes what was chosen.
+func TestCardShareFormOffersBothFormats(t *testing.T) {
+	defer card.SetKDFCount(20)()
+	r, _ := cardRig(t)
+	dir := t.TempDir()
+	for i, size := range []int64{88, 64} {
+		r.key(tcell.KeyEnter, 0) // the card line
+		r.waitFor("Make a DKEK share file")
+		r.key(tcell.KeyEnter, 0)
+		r.waitFor("Password again", "strong")
+		path := filepath.Join(dir, fmt.Sprintf("f%d.pbe", i))
+		r.fill(map[string]string{"File": path, "Password": "a long password", "Password again": "a long password"})
+		r.do(func() {
+			dd := r.app.cardFormCur.GetFormItemByLabel("Format").(*tview.DropDown)
+			if cur, _ := dd.GetCurrentOption(); cur != 0 {
+				t.Errorf("the default format is the option %d", cur)
+			}
+			dd.SetCurrentOption(i)
+		})
+		r.press(0)
+		r.waitFor("The share is written to")
+		if st, err := os.Stat(path); err != nil || st.Size() != size {
+			t.Fatalf("option %d: %v %v", i, err, st)
+		}
+		r.key(tcell.KeyEnter, 0)
+		r.waitFor("signer (1, EC-256)")
+	}
 }
