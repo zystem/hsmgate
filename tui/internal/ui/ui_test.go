@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
+	"github.com/zystem/hsmgate/tui/internal/card"
 	"github.com/zystem/hsmgate/tui/internal/card/cardtest"
 )
 
@@ -427,6 +429,7 @@ func TestCardReaderMenu(t *testing.T) {
 
 	// the Reader button: the reader in use is marked
 	r.key(tcell.KeyTab, 0) // Read the card
+	r.key(tcell.KeyTab, 0) // Actions
 	r.key(tcell.KeyTab, 0) // Reader
 	r.key(tcell.KeyEnter, 0)
 	r.waitFor("Choose the reader", "* 1  card")
@@ -437,6 +440,7 @@ func TestCardReaderMenu(t *testing.T) {
 	r.key(tcell.KeyEsc, 0)
 
 	// a reader with no card
+	r.key(tcell.KeyTab, 0)
 	r.key(tcell.KeyTab, 0)
 	r.key(tcell.KeyTab, 0)
 	r.key(tcell.KeyEnter, 0)
@@ -479,4 +483,353 @@ func TestCardShowsXKEKDomain(t *testing.T) {
 		r.key(tcell.KeyDown, 0)
 	}
 	r.waitFor("exchange key encryption key", "0102030405060708")
+}
+
+// ---- the actions of the Card page ----------------------------------------------------------------------------------------------------------------------
+
+// cardRig is a page that has read a card and can change a simulated one.
+func cardRig(t *testing.T) (*rig, *cardtest.Sim) {
+	t.Helper()
+	c, sim := cardtest.New(t), cardtest.NewSim()
+	r := startWith(t, sample, false, func(o *Options) {
+		o.CardRun = c.Run
+		o.CardOpen = func(context.Context, card.Reader) (card.Conn, error) { return sim, nil }
+	})
+	r.waitFor("Overview")
+	r.screen.SetSize(170, 40)
+	r.key(tcell.KeyRune, '3')
+	r.key(tcell.KeyTab, 0)
+	r.key(tcell.KeyRune, 'r')
+	r.waitFor("signer (1, EC-256)")
+	return r, sim
+}
+
+// fill types into the fields of the form that is shown, and press presses one of its buttons (0 is the first): what a person does with the keys, without the keys.
+func (r *rig) fill(vals map[string]string) {
+	r.t.Helper()
+	r.do(func() {
+		for l, v := range vals {
+			it, ok := r.app.cardFormCur.GetFormItemByLabel(l).(*tview.InputField)
+			if !ok {
+				r.t.Fatalf("no field %q", l)
+			}
+			it.SetText(v)
+		}
+	})
+}
+
+func (r *rig) press(i int) {
+	r.t.Helper()
+	r.do(func() {
+		b := r.app.cardFormCur.GetButton(i)
+		b.InputHandler()(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone), func(tview.Primitive) {})
+	})
+}
+
+func (r *rig) down(n int) {
+	for i := 0; i < n; i++ {
+		r.key(tcell.KeyDown, 0)
+	}
+}
+
+// Enter on a line lists what can be done with that line, and only that.
+func TestCardActionMenusFollowTheLine(t *testing.T) {
+	r, _ := cardRig(t)
+	for _, tc := range []struct {
+		downs int
+		want  []string
+		not   []string
+	}{
+		{0, []string{"Make a DKEK share file", "Import a key from a file"}, []string{"Change the User PIN"}},
+		{1, []string{"Change the User PIN", "Unblock the User PIN with the SO PIN"}, []string{"Change the SO PIN"}},
+		{2, []string{"Change the SO PIN"}, []string{"Unblock"}},
+		{3, []string{"Import a key from a file", "Delete the key encryption key", "Delete the key domain"}, []string{"Import a DKEK share"}},
+		{4, []string{"Export the key to a file (wrap)", "Delete the key…"}, nil}, // the signer: ECDH and wrap
+		{5, []string{"Import a DKEK share from a file", "Delete the key domain"}, []string{"Delete the key…", "Import a key from a file"}},
+		{6, []string{"Delete the key…"}, []string{"Export the key"}}, // the RSA key: no wrap
+		{7, []string{"Create a DKEK key domain"}, []string{"Delete"}},
+	} {
+		for i := 0; i < tc.downs; i++ {
+			r.key(tcell.KeyDown, 0)
+		}
+		r.key(tcell.KeyEnter, 0)
+		scr := r.waitFor(append([]string{"Actions (Enter"}, tc.want...)...)
+		for _, n := range tc.not {
+			if strings.Contains(scr, n) {
+				t.Errorf("after %d downs the menu has %q:\n%s", tc.downs, n, scr)
+			}
+		}
+		r.key(tcell.KeyEsc, 0)
+		for i := 0; i < tc.downs; i++ { // back to the card line
+			r.key(tcell.KeyUp, 0)
+		}
+	}
+}
+
+// A form refuses what is wrong before it goes to the card.
+func TestCardFormsRefuseBadInput(t *testing.T) {
+	r, sim := cardRig(t)
+	r.down(1)
+	r.key(tcell.KeyEnter, 0)
+	r.waitFor("Change the User PIN")
+	r.key(tcell.KeyEnter, 0)
+	r.waitFor("Current PIN", "New PIN again")
+	r.fill(map[string]string{"Current PIN": "123456", "New PIN": "111111", "New PIN again": "222222"})
+	r.press(0)
+	r.waitFor("the two new PINs", "nothing was done")
+	r.key(tcell.KeyEnter, 0)
+	r.fill(map[string]string{"New PIN": "123", "New PIN again": "123"})
+	r.press(0)
+	r.waitFor("6 to 16 characters")
+	if len(sim.Sent) != 0 {
+		t.Errorf("the card was asked: %d commands", len(sim.Sent))
+	}
+}
+
+// The work on the card: the PIN is given only when the card has tries to spare, a wrong PIN stops everything, and what was done is told.
+func TestCardWorkGivesThePINCarefully(t *testing.T) {
+	r, sim := cardRig(t)
+	create := func(pin string) {
+		r.do(func() {
+			r.app.cardWork("Create the key domain", []byte(pin), func(s *card.Session) (string, error) {
+				_, err := s.CreateDKEKDomain(3, 1, "made")
+				return "The key domain 3 is made.", err
+			})
+		})
+	}
+	create("000000") // wrong
+	r.waitFor("did not take the User PIN", "2 tries remaining")
+	if sim.Domains[3] != nil || sim.Tries != 2 {
+		t.Errorf("after a wrong PIN: %v tries %d", sim.Domains[3], sim.Tries)
+	}
+	r.key(tcell.KeyEnter, 0)
+	sim.Tries = 1
+	create("123456") // one try left: not sent at all
+	r.waitFor("only 1 try of the User PIN is left")
+	if sim.Tries != 1 || sim.Logged {
+		t.Errorf("a PIN was sent with one try left: tries %d logged %v", sim.Tries, sim.Logged)
+	}
+	r.key(tcell.KeyEnter, 0)
+	sim.Tries = 3
+	create("123456")
+	r.waitFor("The key domain 3 is made.")
+	if sim.Domains[3] == nil || !strings.HasSuffix(string(sim.Files[0xC703]), "made") {
+		t.Errorf("the domain: %+v %q", sim.Domains[3], sim.Files[0xC703])
+	}
+}
+
+// A destructive action asks for a word first.
+func TestCardDeleteAsksForTheWord(t *testing.T) {
+	r, sim := cardRig(t)
+	sim.Keys[1] = &cardtest.SimKey{Wrap: true}
+	r.down(4) // the key of the first domain
+	r.key(tcell.KeyEnter, 0)
+	r.waitFor("Delete the key…")
+	r.key(tcell.KeyDown, 0) // after Export
+	r.key(tcell.KeyEnter, 0)
+	r.waitFor("Delete the key 1", "Type delete:")
+	r.fill(map[string]string{"Type delete:": "yes", "User PIN": "123456"})
+	r.press(0)
+	r.waitFor("you did not type", "nothing was done")
+	if len(sim.Sent) != 0 || sim.Keys[1] == nil {
+		t.Error("the card was touched without the word")
+	}
+}
+
+func TestCardShareFileIsMadeAndRefusesToOverwrite(t *testing.T) {
+	defer card.SetKDFCount(20)()
+	r, _ := cardRig(t)
+	dir := t.TempDir()
+	taken := filepath.Join(dir, "taken.pbe")
+	os.WriteFile(taken, []byte("x"), 0o600)
+	r.do(func() { r.app.makeShare(taken, "a long password", "a long password") })
+	r.waitFor("is there already", "nothing is overwritten")
+	r.key(tcell.KeyEnter, 0)
+	r.do(func() { r.app.makeShare(filepath.Join(dir, "x.pbe"), "short", "short") })
+	r.waitFor("must be the same twice")
+	r.key(tcell.KeyEnter, 0)
+	path := filepath.Join(dir, "new.pbe")
+	r.do(func() { r.app.makeShare(path, "a long password", "a long password") })
+	scr := r.waitFor("The share is written to", "key check value of this share")
+	st, err := os.Stat(path)
+	if err != nil || st.Mode().Perm() != 0o600 || st.Size() != 64 {
+		t.Fatalf("the file: %v %v", err, st)
+	}
+	raw, _ := os.ReadFile(path)
+	share, err := card.DecryptShare(raw, []byte("a long password"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := fmt.Sprintf("%X", card.KCV(share)); !strings.Contains(scr, want) {
+		t.Errorf("the key check value %s is not on the screen:\n%s", want, scr)
+	}
+}
+
+// Whole actions through their forms, on the simulated card: the PIN, the domain, the share, the backup file and the way back.
+func TestCardActionsThroughTheForms(t *testing.T) {
+	defer card.SetKDFCount(20)()
+	r, sim := cardRig(t)
+	dir := t.TempDir()
+	sim.Domains[0] = &cardtest.SimDomain{Shares: 1, DKEK: bytes.Repeat([]byte{9}, 32)}
+	sim.Keys[1] = &cardtest.SimKey{Domain: 0, Wrap: true, Data: bytes.Repeat([]byte{7}, 300)}
+	sim.Files[0xC401] = []byte{0xA0, 0x0E, 0x30, 0x09, 0x0C, 0x07, 'b', 'a', 'c', 'k', 'u', 'p', '!', 0x30, 0x01, 0x04}
+
+	// change the User PIN
+	r.down(1)
+	r.key(tcell.KeyEnter, 0) // the menu
+	r.key(tcell.KeyEnter, 0) // Change the User PIN
+	r.waitFor("Current PIN")
+	r.fill(map[string]string{"Current PIN": "123456", "New PIN": "654321", "New PIN again": "654321"})
+	r.press(0)
+	r.waitFor("The User PIN is changed.")
+	if sim.PIN != "654321" {
+		t.Errorf("the PIN is %q", sim.PIN)
+	}
+	r.key(tcell.KeyEnter, 0)
+	r.waitFor("signer (1, EC-256)") // the card is read again; the page stands on the same line
+
+	// export the key of the first domain (the page's tree shows the key 1, which the fake of the page and the simulated card share)
+	r.down(3) // the signer
+	r.key(tcell.KeyEnter, 0)
+	r.waitFor("Export the key to a file (wrap)")
+	r.key(tcell.KeyEnter, 0)
+	r.waitFor("User PIN", "File")
+	wky := filepath.Join(dir, "signer.wky")
+	r.fill(map[string]string{"File": wky, "User PIN": "654321"})
+	r.press(0)
+	r.waitFor("is written to", "308 bytes")
+	st, err := os.Stat(wky)
+	if err != nil || st.Mode().Perm() != 0o600 {
+		t.Fatalf("the file: %v %v", err, st)
+	}
+	r.key(tcell.KeyEnter, 0)
+
+	// the same file again is refused, and so is the key that is on the card already under that label
+	r.key(tcell.KeyEnter, 0)
+	r.key(tcell.KeyEnter, 0)
+	r.waitFor("File")
+	r.fill(map[string]string{"File": wky, "User PIN": "654321"})
+	r.press(0)
+	r.waitFor("is there already", "nothing is overwritten")
+	r.key(tcell.KeyEnter, 0)
+	r.press(1) // Cancel
+	sim.Tries = 3
+
+	// import it back: it comes as the key 2 (the label "backup!" is not on the page's tree, so no refusal)
+	r.key(tcell.KeyUp, 0)
+	r.key(tcell.KeyUp, 0)
+	r.key(tcell.KeyUp, 0)
+	r.key(tcell.KeyUp, 0)
+	r.key(tcell.KeyEnter, 0) // the card line
+	r.waitFor("Import a key from a file")
+	r.down(1)
+	r.key(tcell.KeyEnter, 0)
+	r.waitFor("File", "User PIN")
+	r.fill(map[string]string{"File": wky, "User PIN": "654321"})
+	r.press(0)
+	r.waitFor("The key is on the card as the key 2")
+	if k := sim.Keys[2]; k == nil || len(k.Data) != 300 {
+		t.Errorf("the key that came back: %+v", k)
+	}
+}
+
+// Key domains through the forms: make one, give it a share from a file, delete its key encryption key and the domain; and the PINs with the SO PIN.
+func TestCardDomainFlowsThroughTheForms(t *testing.T) {
+	defer card.SetKDFCount(20)()
+	r, sim := cardRig(t)
+	dir := t.TempDir()
+
+	// a domain that is not created (the tree of the page is the fake's: line 7)
+	r.down(7)
+	r.key(tcell.KeyEnter, 0)
+	r.waitFor("Create a DKEK key domain")
+	r.key(tcell.KeyEnter, 0)
+	r.waitFor("Number of shares")
+	r.fill(map[string]string{"Number of shares": "300", "Label": "t", "User PIN": "123456"})
+	r.press(0)
+	r.waitFor("1 to 255")
+	r.key(tcell.KeyEnter, 0)
+	r.fill(map[string]string{"Number of shares": "1", "Label": "t", "User PIN": "123456"})
+	r.press(0)
+	r.waitFor("The key domain 2 is made")
+	if d := sim.Domains[2]; d == nil || d.Outstanding != 1 {
+		t.Fatalf("%+v", sim.Domains[2])
+	}
+	r.key(tcell.KeyEnter, 0)
+	r.waitFor("signer (1, EC-256)")
+
+	// a share from a file into the domain that the page shows as being set up (line 5); the simulated card has it as domain 1
+	sim.Domains[1] = &cardtest.SimDomain{Shares: 1, Outstanding: 1, DKEK: make([]byte, 32)}
+	share, _ := card.NewShare(nil)
+	file, _ := card.EncryptShare(share, []byte("share password"), nil)
+	path := filepath.Join(dir, "s.pbe")
+	os.WriteFile(path, file, 0o600)
+	r.key(tcell.KeyUp, 0)
+	r.key(tcell.KeyUp, 0)
+	r.key(tcell.KeyEnter, 0)
+	r.waitFor("Import a DKEK share from a file")
+	r.key(tcell.KeyEnter, 0)
+	r.waitFor("Password of the file")
+	r.fill(map[string]string{"File": path, "Password of the file": "wrong one", "User PIN": "123456"})
+	r.press(0)
+	r.waitFor("does not open this DKEK share")
+	r.key(tcell.KeyEnter, 0)
+	if sim.Domains[1].Outstanding != 1 {
+		t.Error("a share was imported with a wrong password")
+	}
+	r.fill(map[string]string{"Password of the file": "share password"})
+	r.press(0)
+	r.waitFor("last share is in", "complete")
+	if sim.Domains[1].Outstanding != 0 {
+		t.Errorf("%+v", sim.Domains[1])
+	}
+	r.key(tcell.KeyEnter, 0)
+	r.waitFor("signer (1, EC-256)")
+
+	// delete the key encryption key and then the domain
+	for i, want := range []string{"is deleted", "is deleted"} {
+		r.key(tcell.KeyEnter, 0)
+		r.waitFor("Delete the key domain")
+		r.down(1 + i) // the key encryption key, then the domain
+		r.key(tcell.KeyEnter, 0)
+		r.waitFor("Type delete:")
+		r.fill(map[string]string{"Type delete:": "delete", "User PIN": "123456"})
+		r.press(0)
+		r.waitFor(want)
+		r.key(tcell.KeyEnter, 0)
+		r.waitFor("signer (1, EC-256)")
+		if i == 0 && sim.Domains[1].Outstanding != 1 {
+			t.Error("the key encryption key was not deleted")
+		}
+	}
+	if sim.Domains[1] != nil {
+		t.Error("the domain is still there")
+	}
+
+	// the PINs: the SO PIN unblocks the User PIN; the SO PIN is changed only with 8 characters
+	for i := 0; i < 6; i++ { // up to the card line, then down to the User PIN
+		r.key(tcell.KeyUp, 0)
+	}
+	r.down(1)
+	r.key(tcell.KeyEnter, 0)
+	r.waitFor("Unblock the User PIN with the SO PIN")
+	r.down(1)
+	r.key(tcell.KeyEnter, 0)
+	r.waitFor("New User PIN again")
+	r.fill(map[string]string{"SO PIN": "57621880", "New User PIN": "999999", "New User PIN again": "999999"})
+	r.press(0)
+	r.waitFor("The User PIN is set to the new one")
+	if sim.PIN != "999999" {
+		t.Errorf("%q", sim.PIN)
+	}
+	r.key(tcell.KeyEnter, 0)
+	r.waitFor("signer (1, EC-256)")
+	r.key(tcell.KeyDown, 0)
+	r.key(tcell.KeyEnter, 0)
+	r.waitFor("Change the SO PIN")
+	r.key(tcell.KeyEnter, 0)
+	r.waitFor("New SO PIN again")
+	r.fill(map[string]string{"Current SO PIN": "57621880", "New SO PIN": "123", "New SO PIN again": "123"})
+	r.press(0)
+	r.waitFor("8 characters")
 }

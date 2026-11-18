@@ -11,16 +11,20 @@ import (
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
+	"github.com/zystem/hsmgate/internal/config"
 	"github.com/zystem/hsmgate/tui/internal/card"
 	"github.com/zystem/hsmgate/tui/internal/sys"
 )
 
 // cardState is what the Card page remembers between visits: the tree that was read, and the reader that was chosen (-1: the first one with a card).
 type cardState struct {
-	tree   *card.Tree
-	reader int
-	err    string
-	busy   bool
+	tree    *card.Tree
+	reader  int
+	err     string
+	busy    bool
+	writeOK bool   // the person has said that a command that changes the card may go on while the service holds it
+	redraw  func() // draws the page again (set by the page)
+	cursor  int    // the line the person was on, as its position in the tree: after the card is read again the page stands on it
 }
 
 func (a *App) cardRun() card.Run {
@@ -33,10 +37,15 @@ func (a *App) cardRun() card.Run {
 // cardView is the tree of a SmartCard-HSM, as a card manager shows it: the PINs and their tries, the key domains with the key check value of their DKEK, the keys in them; on the
 // right, what the selected line means. It only reads.
 func (a *App) cardView() tview.Primitive {
+	st := &a.card
 	tree := tview.NewTreeView()
 	tree.SetBorder(true).SetTitle(" the card ")
 	tree.SetGraphics(false)
-	tree.SetSelectedFunc(func(n *tview.TreeNode) { n.SetExpanded(!n.IsExpanded()) })
+	tree.SetSelectedFunc(func(n *tview.TreeNode) { // Enter: what can be done with the line
+		if n.GetReference() != nil {
+			a.cardMenu(n.GetReference())
+		}
+	})
 
 	detail := tview.NewTextView().SetDynamicColors(true).SetWrap(true).SetWordWrap(true)
 	detail.SetBorder(true).SetTitle(" what it is (PgUp, PgDn) ")
@@ -48,9 +57,13 @@ func (a *App) cardView() tview.Primitive {
 		detail.SetText(a.cardDetail(n.GetReference()))
 		detail.ScrollToBeginning()
 	}
-	tree.SetChangedFunc(show)
+	tree.SetChangedFunc(func(n *tview.TreeNode) {
+		show(n)
+		if st.tree != nil && !st.busy && st.err == "" { // not while the page shows only a message
+			st.cursor = nodePosition(tree.GetRoot(), n)
+		}
+	})
 
-	st := &a.card
 	fill := func() {
 		tree.SetTitle(" the card ")
 		root := tview.NewTreeNode("no card read yet").SetColor(tcell.ColorBlack)
@@ -64,12 +77,15 @@ func (a *App) cardView() tview.Primitive {
 			root = a.cardNodes(st.tree)
 			tree.SetTitle(fmt.Sprintf(" the card (reader %d) ", st.tree.Reader.Nr))
 		default:
-			detail.SetText("Press [::b]Read the card[::-] (or R): the page asks the card what it holds, with commands that only read. No PIN is sent and nothing is written.\n\n" +
+			detail.SetText("Press [::b]Read the card[::-] (or R): the page asks the card what it holds, with commands that only read. No PIN is sent and nothing is written. Then Enter on a line (or [::b]Actions[::-]) lists what can be done with it: PINs, key domains, DKEK shares, keys, backup files.\n\n" +
 				"The card is the one in the first reader that has a card; [::b]Reader[::-] chooses another.\n\nIt needs the program opensc-tool (the package opensc).")
 		}
-		tree.SetRoot(root).SetCurrentNode(root)
-		show(root)
+		tree.SetRoot(root)
+		cur := nodeAt(root, st.cursor)
+		tree.SetCurrentNode(cur)
+		show(cur)
 	}
+	st.redraw = fill
 	fill()
 
 	read := func() { a.cardRead(fill) }
@@ -101,7 +117,50 @@ func (a *App) cardView() tview.Primitive {
 	}
 	return a.page("Card: what a SmartCard-HSM holds", body,
 		btn("Read the card", read),
+		btn("Actions", func() {
+			if n := tree.GetCurrentNode(); n != nil && n.GetReference() != nil {
+				a.cardMenu(n.GetReference())
+			}
+		}),
 		btn("Reader", func() { a.cardChooseReader(read) }))
+}
+
+// nodePosition is the place of a line in the tree, counted from the top (0 is the card). Walk goes on to the other lines when its function says false, so a flag stops the count.
+func nodePosition(root, n *tview.TreeNode) int {
+	pos, found := 0, -1
+	root.Walk(func(node, _ *tview.TreeNode) bool {
+		if found >= 0 {
+			return false
+		}
+		if node == n {
+			found = pos
+			return false
+		}
+		pos++
+		return true
+	})
+	return found
+}
+
+// nodeAt is the line at a place in the tree (the card when there is no such place).
+func nodeAt(root *tview.TreeNode, pos int) *tview.TreeNode {
+	var cur *tview.TreeNode
+	i := 0
+	root.Walk(func(node, _ *tview.TreeNode) bool {
+		if cur != nil {
+			return false
+		}
+		if i == pos {
+			cur = node
+			return false
+		}
+		i++
+		return true
+	})
+	if cur == nil {
+		return root
+	}
+	return cur
 }
 
 // cardNodes makes the tree: the card, the PINs, the key domains with their keys.
@@ -183,7 +242,7 @@ func (a *App) cardDetail(ref any) string {
 	case *card.Tree:
 		s := fmt.Sprintf("[::b]%s[::-]\n\nreader: %s\nSmartCard-HSM version %s, platform %d\nfree memory: %d bytes\n\n", tview.Escape(orStr(v.Label, "(no label)")), tview.Escape(v.Reader.Name), v.Version, v.Platform, v.FreeMemory)
 		s += "The line under the card name is the PINs, then the key domains, with the keys in them.\n\n"
-		s += "This page only reads. To make keys, change a PIN, make a key domain or copy keys to a spare card, use sc-hsm-tool and pkcs11-tool (docs/tokens/smartcard-hsm.md)."
+		s += "Enter on a line (or the Actions button) shows what can be done with it. Reading changes nothing; the actions that change the card ask for the PIN and say what they do. Making a key on the card and XKEK domains are not on this page yet: use the vendor's card manager or sc-hsm-tool and pkcs11-tool (docs/tokens/smartcard-hsm.md)."
 		return s
 	case card.PIN:
 		return a.pinDetail(v)
@@ -224,7 +283,7 @@ func (a *App) pinDetail(p card.PIN) string {
 
 func (a *App) domainDetail(d card.Domain) string {
 	if !d.Created {
-		return fmt.Sprintf("[::b]Key domain %d[::-] is not created. A key domain is a group of keys that share one key encryption key (DKEK); it is made with sc-hsm-tool, not from this page.", d.Number)
+		return fmt.Sprintf("[::b]Key domain %d[::-] is not created. A key domain is a group of keys that share one key encryption key (DKEK). Enter makes one: you say how many shares its DKEK is made of, and import the shares afterwards.", d.Number)
 	}
 	s := fmt.Sprintf("[::b]Key domain %d[::-]", d.Number)
 	if d.Label != "" {
@@ -263,7 +322,7 @@ func (a *App) keyDetail(k card.Key) string {
 		s += "\n\nCKA_ID (what hsmgate calls the key of a card in its configuration):\n[::b]" + id + "[::-]"
 		if t, l := a.configuredKey(id); t != "" {
 			s += fmt.Sprintf("\n\nIn the configuration: token [::b]%s[::-], label [::b]%s[::-].", tview.Escape(t), tview.Escape(l))
-		} else if cfg, _ := a.cfg(); cfg != nil {
+		} else if a.cfgLoose() != nil {
 			s += "\n\nNot in the configuration: no token names this id."
 		}
 	}
@@ -272,8 +331,8 @@ func (a *App) keyDetail(k card.Key) string {
 
 // configuredKey says whether a token of the configuration has this CKA_ID, and under which label.
 func (a *App) configuredKey(id string) (token, label string) {
-	cfg, err := a.cfg()
-	if err != nil || cfg == nil {
+	cfg := a.cfgLoose()
+	if cfg == nil {
 		return "", ""
 	}
 	for _, tk := range cfg.Tokens {
@@ -296,7 +355,7 @@ func (a *App) cardRead(redraw func()) {
 		return
 	}
 	if a.serviceHoldsCard() {
-		a.ask("The service holds a card", "hsmgate is running and its card is open. Reading the card with a second program selects the application of the card again, which may end the login of the service until the card is unlocked again (this was not tested).\n\nRead the card anyway?", []string{"Read", "Cancel"}, func(i int) {
+		a.ask("The service holds a card", "hsmgate is running and its card is open. Reading the card with a second program selects the application of the card again, which may end the login of the service's own connection. When it was tried (2026-11-18, one service and one card) the service went on sealing and opening texts afterwards, but that is one try.\n\nRead the card anyway?", []string{"Read", "Cancel"}, func(i int) {
 			if i == 0 {
 				a.cardReadNow(redraw)
 			}
@@ -311,8 +370,8 @@ func (a *App) serviceHoldsCard() bool {
 	if sock == "" {
 		return false
 	}
-	cfg, err := a.cfg()
-	if err != nil || cfg == nil {
+	cfg := a.cfgLoose()
+	if cfg == nil {
 		return false
 	}
 	st, err := sys.Status(sock)
@@ -453,4 +512,17 @@ func (a *App) readerMenu(rs []card.Reader, read func()) {
 		return ev
 	})
 	a.modalPage("form", l, 100, len(rs)+5)
+}
+
+// cfgLoose is the configuration as it is written, read without the checks of the service (which refuse a file that this user does not own, for one): the page needs only the tokens.
+func (a *App) cfgLoose() *config.Config {
+	raw, err := a.doc.Bytes()
+	if err != nil {
+		return nil
+	}
+	c, err := config.Parse(raw)
+	if err != nil {
+		return nil
+	}
+	return c
 }
