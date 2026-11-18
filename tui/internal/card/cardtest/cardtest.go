@@ -48,13 +48,13 @@ func tl(tag byte, v ...[]byte) []byte {
 	for _, x := range v {
 		body = append(body, x...)
 	}
-	return append([]byte{tag, byte(len(body))}, body...)
+	return append([]byte{tag, byte(len(body))}, body...) // #nosec G115 -- the bodies of the test data are a few bytes
 }
 
 func ec(label string, id byte, bits int) []byte {
 	idb := make([]byte, 20)
 	idb[0] = id
-	return tl(0xA0, tl(0x30, tl(0x0C, []byte(label))), tl(0x30, tl(0x04, idb), tl(0x03, []byte{7, 0x20, 0x80})), tl(0xA1, tl(0x30, tl(0x30, tl(0x04)), tl(0x02, []byte{byte(bits >> 8), byte(bits)}))))
+	return tl(0xA0, tl(0x30, tl(0x0C, []byte(label))), tl(0x30, tl(0x04, idb), tl(0x03, []byte{7, 0x20, 0x80})), tl(0xA1, tl(0x30, tl(0x30, tl(0x04)), tl(0x02, []byte{byte(bits >> 8), byte(bits)}) /* #nosec G115 -- a key size of the test data */)))
 }
 
 // KeyFCP is the answer to selecting a key file: no use counter when uses is FFFFFFFF, the algorithms and the key domain.
@@ -141,8 +141,8 @@ func (f *Card) card(b []byte) ([]byte, uint16) {
 	case b[0] == 0x00 && b[1] == 0xB1 && b[2] == 0x2F && b[3] == 0x02:
 		chr := append([]byte{0x5F, 0x20, 0x10}, []byte("DECC180026300000")...)
 		inner := append(append([]byte{0x42, 0x0D}, []byte("DEDICC1800001")...), chr...)
-		body := append([]byte{0x7F, 0x4E, byte(len(inner))}, inner...)
-		return append([]byte{0x7F, 0x21, byte(len(body))}, body...), 0x9000
+		body := append([]byte{0x7F, 0x4E, byte(len(inner))}, inner...)      // #nosec G115 -- a few bytes of test data
+		return append([]byte{0x7F, 0x21, byte(len(body))}, body...), 0x9000 // #nosec G115 -- a few bytes of test data
 	case b[0] == 0x80 && b[1] == 0x52:
 		if d, ok := f.Domains[b[3]]; ok {
 			return d, 0x9000

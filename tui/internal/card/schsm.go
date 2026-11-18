@@ -12,7 +12,7 @@ import (
 var aid = []byte{0x00, 0xA4, 0x04, 0x04, 0x0B, 0xE8, 0x2B, 0x06, 0x01, 0x04, 0x01, 0x81, 0xC3, 0x1F, 0x02, 0x01}
 
 // the most key domains asked for (a card is initialised for a number of them; the one that is not there answers 6A88, and the first other answer ends the search)
-const maxDomains = 8
+const maxDomains byte = 8
 
 // PIN is what the card says about a PIN without being given it.
 type PIN struct {
@@ -84,8 +84,8 @@ func Read(ctx context.Context, run Run, r Reader) (*Tree, error) {
 
 	// first: the application, what the card says about itself, the PINs, the key domains, the list of objects
 	apdus := [][]byte{aid, {0x80, 0x50, 0x00, 0x00, 0x00}, {0x00, 0x20, 0x00, 0x81}, {0x00, 0x20, 0x00, 0x88}, {0x00, 0xB1, 0x2F, 0x03, 0x04, 0x54, 0x02, 0x00, 0x00, 0x00}, {0x00, 0xB1, 0x2F, 0x02, 0x04, 0x54, 0x02, 0x00, 0x00, 0x00}}
-	for d := 0; d < maxDomains; d++ {
-		apdus = append(apdus, []byte{0x80, 0x52, 0x00, byte(d), 0x00})
+	for d := byte(0); d < maxDomains; d++ {
+		apdus = append(apdus, []byte{0x80, 0x52, 0x00, d, 0x00})
 	}
 	apdus = append(apdus, []byte{0x80, 0x58, 0x00, 0x00, 0x00})
 	rs, err := Exchange(ctx, run, r.Nr, apdus...)
@@ -108,7 +108,7 @@ func Read(ctx context.Context, run Run, r Reader) (*Tree, error) {
 		t.DeviceID = deviceID(rs[5].Data)
 	}
 	last := len(rs) - 1
-	for d := 0; d < maxDomains; d++ {
+	for d := 0; d < int(maxDomains); d++ {
 		resp := rs[6+d]
 		switch {
 		case resp.OK() && len(resp.Data) >= 10:
@@ -124,7 +124,7 @@ func Read(ctx context.Context, run Run, r Reader) (*Tree, error) {
 		case resp.SW == 0x6A88:
 			t.Domains = append(t.Domains, Domain{Number: d})
 		default:
-			d = maxDomains // the end of the domains this card was made with
+			d = int(maxDomains) // the end of the domains this card was made with
 		}
 	}
 	files := fileIDs(rs[last].Data)
@@ -133,19 +133,19 @@ func Read(ctx context.Context, run Run, r Reader) (*Tree, error) {
 	var ask [][]byte
 	var kinds []string
 	var nums []int
-	for _, f := range files {
-		switch f >> 8 {
+	for _, f := range files { // f[0] is the kind of the file, f[1] its number
+		switch f[0] {
 		case 0xCC:
-			if f&0xFF > 0 { // key 0 is the key of the device
-				ask = append(ask, []byte{0x00, 0xA4, 0x00, 0x04, 0x02, 0xCC, byte(f), 0x00})
-				kinds, nums = append(kinds, "key"), append(nums, f&0xFF)
+			if f[1] > 0 { // key 0 is the key of the device
+				ask = append(ask, []byte{0x00, 0xA4, 0x00, 0x04, 0x02, 0xCC, f[1], 0x00})
+				kinds, nums = append(kinds, "key"), append(nums, int(f[1]))
 			}
 		case 0xC4:
-			ask = append(ask, []byte{0x00, 0xB1, 0xC4, byte(f), 0x04, 0x54, 0x02, 0x00, 0x00, 0x00})
-			kinds, nums = append(kinds, "desc"), append(nums, f&0xFF)
+			ask = append(ask, []byte{0x00, 0xB1, 0xC4, f[1], 0x04, 0x54, 0x02, 0x00, 0x00, 0x00})
+			kinds, nums = append(kinds, "desc"), append(nums, int(f[1]))
 		case 0xC7:
-			ask = append(ask, []byte{0x00, 0xB1, 0xC7, byte(f), 0x04, 0x54, 0x02, 0x00, 0x00, 0x00})
-			kinds, nums = append(kinds, "label"), append(nums, f&0xFF)
+			ask = append(ask, []byte{0x00, 0xB1, 0xC7, f[1], 0x04, 0x54, 0x02, 0x00, 0x00, 0x00})
+			kinds, nums = append(kinds, "label"), append(nums, int(f[1]))
 		}
 	}
 	keys := map[int]*Key{}
@@ -217,11 +217,11 @@ func pin(name string, sw uint16) PIN {
 	return p
 }
 
-// fileIDs reads the answer to ENUMERATE OBJECTS: pairs of bytes, each a file identifier.
-func fileIDs(b []byte) []int {
-	var ids []int
+// fileIDs reads the answer to ENUMERATE OBJECTS: pairs of bytes, each a file identifier (the first byte says what kind of file, the second is its number).
+func fileIDs(b []byte) [][2]byte {
+	var ids [][2]byte
 	for i := 0; i+1 < len(b); i += 2 {
-		ids = append(ids, int(b[i])<<8|int(b[i+1]))
+		ids = append(ids, [2]byte{b[i], b[i+1]})
 	}
 	return ids
 }
