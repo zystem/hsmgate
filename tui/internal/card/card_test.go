@@ -177,3 +177,23 @@ func TestTLV(t *testing.T) {
 		t.Error("a broken text gave a value")
 	}
 }
+
+// A key domain with an XKEK is told from one with a DKEK by what follows the check value: the identifier of a key domain.
+func TestXKEKDomain(t *testing.T) {
+	f := cardtest.New(t)
+	f.Domains[2] = []byte{0, 0, 0xCC, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}
+	tree, err := Read(context.Background(), f.Run, Reader{Name: "r"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tree.Domains) != 4 || tree.Domains[0].XKEK || tree.Domains[1].XKEK {
+		t.Fatalf("%+v", tree.Domains)
+	}
+	x := tree.Domains[2]
+	if !x.Created || !x.XKEK || x.KCV != "CC02030405060708" || x.DomainID != "0102030405060708" {
+		t.Errorf("%+v", x)
+	}
+	if tree.Domains[3].Created {
+		t.Errorf("%+v", tree.Domains[3])
+	}
+}

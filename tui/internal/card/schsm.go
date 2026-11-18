@@ -55,9 +55,11 @@ type Key struct {
 type Domain struct {
 	Number      int
 	Created     bool
+	XKEK        bool   // the domain has an XKEK (the card says so by giving the identifier of a key domain after the check value), not a DKEK made of shares
+	DomainID    string // of an XKEK domain: the first 8 bytes of the identifier of the key domain, in hexadecimal
 	Shares      int    // DKEK shares in all
 	Outstanding int    // shares still to be imported
-	KCV         string // the key check value of the DKEK, 16 hexadecimal digits
+	KCV         string // the key check value of the DKEK or XKEK, 16 hexadecimal digits
 	Label       string
 	Keys        []Key
 }
@@ -110,7 +112,15 @@ func Read(ctx context.Context, run Run, r Reader) (*Tree, error) {
 		resp := rs[6+d]
 		switch {
 		case resp.OK() && len(resp.Data) >= 10:
-			t.Domains = append(t.Domains, Domain{Number: d, Created: true, Shares: int(resp.Data[0]), Outstanding: int(resp.Data[1]), KCV: strings.ToUpper(hex.EncodeToString(resp.Data[2:10]))})
+			dm := Domain{Number: d, Created: true, Shares: int(resp.Data[0]), Outstanding: int(resp.Data[1]), KCV: strings.ToUpper(hex.EncodeToString(resp.Data[2:10]))}
+			if len(resp.Data) > 10 { // more than the check value: the identifier of a key domain, which only an XKEK has
+				id := resp.Data[10:]
+				if len(id) > 8 {
+					id = id[:8]
+				}
+				dm.XKEK, dm.DomainID = true, strings.ToUpper(hex.EncodeToString(id))
+			}
+			t.Domains = append(t.Domains, dm)
 		case resp.SW == 0x6A88:
 			t.Domains = append(t.Domains, Domain{Number: d})
 		default:

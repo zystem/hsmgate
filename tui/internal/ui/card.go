@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -51,6 +52,7 @@ func (a *App) cardView() tview.Primitive {
 
 	st := &a.card
 	fill := func() {
+		tree.SetTitle(" the card ")
 		root := tview.NewTreeNode("no card read yet").SetColor(tcell.ColorBlack)
 		switch {
 		case st.busy:
@@ -60,6 +62,7 @@ func (a *App) cardView() tview.Primitive {
 			detail.SetText("[red]" + tview.Escape(st.err) + "[black]")
 		case st.tree != nil:
 			root = a.cardNodes(st.tree)
+			tree.SetTitle(fmt.Sprintf(" the card (reader %d) ", st.tree.Reader.Nr))
 		default:
 			detail.SetText("Press [::b]Read the card[::-] (or R): the page asks the card what it holds, with commands that only read. No PIN is sent and nothing is written.\n\n" +
 				"The card is the one in the first reader that has a card; [::b]Reader[::-] chooses another.\n\nIt needs the program opensc-tool (the package opensc).")
@@ -127,13 +130,7 @@ func (a *App) cardNodes(t *card.Tree) *tview.TreeNode {
 			root.AddChild(tview.NewTreeNode(fmt.Sprintf("Key domain %d not created", d.Number)).SetReference(d).SetColor(tcell.ColorGray))
 			continue
 		}
-		text := "DKEK with KCV " + d.KCV
-		if d.Label != "" {
-			text += " (" + d.Label + ")"
-		}
-		if d.Outstanding > 0 {
-			text += fmt.Sprintf(", %d share(s) to import", d.Outstanding)
-		}
+		text := domainText(d)
 		n := tview.NewTreeNode(text).SetReference(d).SetColor(tcell.ColorDarkBlue).SetExpanded(true)
 		for _, k := range d.Keys {
 			n.AddChild(tview.NewTreeNode(keyText(k)).SetReference(k))
@@ -149,6 +146,23 @@ func (a *App) cardNodes(t *card.Tree) *tview.TreeNode {
 	}
 	root.SetExpanded(true)
 	return root
+}
+
+// domainText is the line of a created key domain, in the words of the card manager: a DKEK with its check value, a DKEK still being set up, or an XKEK in a key domain.
+func domainText(d card.Domain) string {
+	var text string
+	switch {
+	case d.XKEK:
+		text = fmt.Sprintf("XKEK with KCV %s in key domain %s", d.KCV, d.DomainID)
+	case d.Outstanding > 0:
+		text = fmt.Sprintf("DKEK set-up in progress with %d of %d shares missing", d.Outstanding, d.Shares)
+	default:
+		text = "DKEK with KCV " + d.KCV
+	}
+	if d.Label != "" {
+		text += " (" + d.Label + ")"
+	}
+	return text
 }
 
 func keyText(k card.Key) string {
@@ -216,10 +230,17 @@ func (a *App) domainDetail(d card.Domain) string {
 	if d.Label != "" {
 		s += " " + tview.Escape(d.Label)
 	}
-	s += fmt.Sprintf("\n\nDKEK: %d share(s) in all, %d still to import.\nKey check value (KCV): [::b]%s[::-]\n\n", d.Shares, d.Outstanding, d.KCV)
-	s += "A key domain is a group of keys that share one key encryption key (DKEK). The KCV is a short check of that key: two cards with the same KCV can pass wrapped keys to each other, which is how a spare card gets a copy of a key (docs/operations.md, \"spare card\")."
-	if d.Outstanding > 0 {
-		s += "\n\n[red]The DKEK is not complete:[black] import the remaining shares before keys can be wrapped or unwrapped."
+	s += "\n\n"
+	switch {
+	case d.XKEK:
+		s += fmt.Sprintf("This key domain has an [::b]XKEK[::-] (exchange key encryption key), not a DKEK made of shares. Key check value (KCV): [::b]%s[::-]; the key domain it is in: [::b]%s[::-].\n\n", d.KCV, d.DomainID)
+		s += "The card manager makes it with its \"Create XKEK Key Domain\", \"Derive XKEK\" and \"Associate XKEK Key Domain\" actions: the key encryption key is not typed in as shares but derived with ECDH, and keys can then be wrapped to a card of another key domain. This page shows it and does not make or change one. (Reading an XKEK domain was tested only on a card made of bytes, not on a real card.)"
+	case d.Outstanding > 0:
+		s += fmt.Sprintf("The DKEK is [::b]being set up[::-]: %d share(s) in all, [red]%d still to import[black]. Keys cannot be wrapped or unwrapped in this domain until the last share is in. KCV so far: %s.\n\n", d.Shares, d.Outstanding, d.KCV)
+		s += "A DKEK (device key encryption key) is made of shares: each share is made on a computer (or a card manager) and imported into the card; when the last one is in, the card has the key. Import the remaining shares with sc-hsm-tool (docs/tokens/smartcard-hsm.md)."
+	default:
+		s += fmt.Sprintf("DKEK: %d share(s), all imported.\nKey check value (KCV): [::b]%s[::-]\n\n", d.Shares, d.KCV)
+		s += "A key domain is a group of keys that share one key encryption key. Here it is a DKEK (device key encryption key), made of shares that were imported into the card. The KCV is a short check of that key: two cards with the same KCV can pass wrapped keys to each other, which is how a spare card gets a copy of a key (docs/operations.md, \"spare card\")."
 	}
 	return s
 }
@@ -316,6 +337,13 @@ func (a *App) cardReadNow(redraw func()) {
 		tree, err := a.readCard(ctx, reader)
 		a.app.QueueUpdateDraw(func() {
 			a.card.busy = false
+			var pick needReader
+			if errors.As(err, &pick) {
+				a.card.err = ""
+				redraw()
+				a.readerMenu(pick.readers, func() { a.cardRead(redraw) })
+				return
+			}
 			if err != nil {
 				a.card.err, a.card.tree = err.Error(), nil
 			} else {
@@ -328,7 +356,12 @@ func (a *App) cardReadNow(redraw func()) {
 	}()
 }
 
-// readCard finds the reader (the chosen one, or the first with a card) and reads it.
+// needReader is what readCard returns when more than one reader has a card and none was chosen: reading the first would be a guess about which card is meant.
+type needReader struct{ readers []card.Reader }
+
+func (needReader) Error() string { return "more than one reader has a card: choose one" }
+
+// readCard finds the reader (the chosen one, or the only one that has a card) and reads it.
 func (a *App) readCard(ctx context.Context, reader int) (*card.Tree, error) {
 	rs, err := card.Readers(ctx, a.cardRun())
 	if err != nil {
@@ -337,18 +370,33 @@ func (a *App) readCard(ctx context.Context, reader int) (*card.Tree, error) {
 	if len(rs) == 0 {
 		return nil, fmt.Errorf("PC/SC shows no card reader.\n\nIs pcscd running (systemctl status pcscd)? From an SSH session pcscd may refuse a program that is not on the console: run this on the console, or as the user that pcscd allows (polkit)")
 	}
+	if reader < 0 {
+		var with []card.Reader
+		for _, r := range rs {
+			if r.HasCard {
+				with = append(with, r)
+			}
+		}
+		switch len(with) {
+		case 0:
+			return nil, fmt.Errorf("none of the %d reader(s) has a card in it", len(rs))
+		case 1:
+			return card.Read(ctx, a.cardRun(), with[0])
+		}
+		return nil, needReader{rs}
+	}
 	for _, r := range rs {
-		if (reader < 0 && r.HasCard) || r.Nr == reader {
+		if r.Nr == reader {
 			if !r.HasCard {
 				return nil, fmt.Errorf("there is no card in the reader %d (%s)", r.Nr, r.Name)
 			}
 			return card.Read(ctx, a.cardRun(), r)
 		}
 	}
-	return nil, fmt.Errorf("none of the %d reader(s) has a card in it", len(rs))
+	return nil, fmt.Errorf("the reader %d is not there any more (PC/SC lists %d)", reader, len(rs))
 }
 
-// cardChooseReader lists the readers and reads the one that is chosen.
+// cardChooseReader lists the readers (the Reader button) and reads the one that is chosen.
 func (a *App) cardChooseReader(read func()) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -358,31 +406,51 @@ func (a *App) cardChooseReader(read func()) {
 		return
 	}
 	if len(rs) == 0 {
-		a.fail(fmt.Errorf("PC/SC shows no card reader"))
+		a.fail(fmt.Errorf("PC/SC shows no card reader.\n\nIs pcscd running (systemctl status pcscd)?"))
 		return
 	}
+	a.readerMenu(rs, read)
+}
+
+// readerMenu is the menu of the readers: the first line lets the page choose (the only reader that has a card), the others are the readers as PC/SC numbers them; the one in use
+// is marked. Choosing one reads its card.
+func (a *App) readerMenu(rs []card.Reader, read func()) {
 	l := tview.NewList().ShowSecondaryText(false)
-	l.SetBorder(true).SetTitle(" Reader ")
+	l.SetBorder(true).SetTitle(" Choose the reader (Enter: read its card, Esc: cancel) ")
 	l.SetSelectedBackgroundColor(tcell.ColorNavy).SetSelectedTextColor(tcell.ColorWhite)
-	for _, r := range rs {
-		r := r
+	mark := func(on bool) string {
+		if on {
+			return "* "
+		}
+		return "  "
+	}
+	closeMenu := func() { a.pages.RemovePage("form"); a.app.SetFocus(a.content) } // back to the page, not to the menu on the left
+	choose := func(nr int) func() {
+		return func() {
+			closeMenu()
+			a.card.reader = nr
+			read()
+		}
+	}
+	l.AddItem(mark(a.card.reader < 0)+"automatic: the only reader that has a card", "", 0, choose(-1))
+	current := 0
+	for i, r := range rs {
 		state := "no card"
 		if r.HasCard {
-			state = "card"
+			state = "card   "
 		}
-		l.AddItem(fmt.Sprintf("%d  %s  %s", r.Nr, state, r.Name), "", 0, func() {
-			a.pages.RemovePage("form")
-			a.app.SetFocus(a.nav)
-			a.card.reader = r.Nr
-			read()
-		})
+		l.AddItem(fmt.Sprintf("%s%d  %s  %s", mark(a.card.reader == r.Nr), r.Nr, state, r.Name), "", 0, choose(r.Nr))
+		if a.card.reader == r.Nr {
+			current = i + 1
+		}
 	}
+	l.SetCurrentItem(current)
 	l.SetInputCapture(func(ev *tcell.EventKey) *tcell.EventKey {
 		if ev.Key() == tcell.KeyEsc {
-			a.closeForm()
+			closeMenu()
 			return nil
 		}
 		return ev
 	})
-	a.modalPage("form", l, 90, len(rs)+4)
+	a.modalPage("form", l, 100, len(rs)+5)
 }

@@ -62,8 +62,17 @@ func KeyFCP(domain byte, uses []byte, algs ...byte) []byte {
 	return tl(0x62, tl(0x80, []byte{0, 0}), tl(0x83, []byte{0xCC, 1}), tl(0xA5, tl(0x90, uses), tl(0x91, algs), tl(0x92, []byte{domain})))
 }
 
+// ReaderInfo is a reader of the fake: with a card or without, and the label of the card in it ("" : the label of the Card).
+type ReaderInfo struct {
+	Name    string
+	HasCard bool
+	Label   string
+}
+
 type Card struct {
 	t       *testing.T
+	Readers []ReaderInfo // the readers `opensc-tool -l` lists; nil: one reader with a card
+	cur     int          // the reader of the run
 	Label   string
 	Domains map[byte][]byte   // number -> the answer; absent: 6A88 up to `limit`, then 6A86
 	Limit   byte              // the number of domains the card was made with
@@ -78,7 +87,22 @@ func (f *Card) Run(_ context.Context, name string, args ...string) (string, erro
 		f.t.Fatalf("a program that is not opensc-tool: %s", name)
 	}
 	if args[0] == "-l" {
-		return "# Detected readers (pcsc)\nNr.  Card  Features  Name\n0    Yes             Test Reader 00 00\n", nil
+		rs := f.Readers
+		if rs == nil {
+			rs = []ReaderInfo{{Name: "Test Reader 00 00", HasCard: true}}
+		}
+		out := "# Detected readers (pcsc)\nNr.  Card  Features  Name\n"
+		for i, r := range rs {
+			card := "No "
+			if r.HasCard {
+				card = "Yes"
+			}
+			out += fmt.Sprintf("%d    %s             %s\n", i, card, r.Name)
+		}
+		return out, nil
+	}
+	if args[0] == "-r" && len(args) > 1 {
+		fmt.Sscanf(args[1], "%d", &f.cur)
 	}
 	var sb strings.Builder
 	var call []string
@@ -109,7 +133,11 @@ func (f *Card) card(b []byte) ([]byte, uint16) {
 	case b[0] == 0x00 && b[1] == 0x20:
 		return nil, f.SW[fmt.Sprintf("%02X", b[3])]
 	case b[0] == 0x00 && b[1] == 0xB1 && b[2] == 0x2F && b[3] == 0x03:
-		return tl(0x30, tl(0x02, []byte{0}), tl(0x80, []byte(f.Label))), 0x9000
+		label := f.Label
+		if f.cur < len(f.Readers) && f.Readers[f.cur].Label != "" {
+			label = f.Readers[f.cur].Label
+		}
+		return tl(0x30, tl(0x02, []byte{0}), tl(0x80, []byte(label))), 0x9000
 	case b[0] == 0x00 && b[1] == 0xB1 && b[2] == 0x2F && b[3] == 0x02:
 		chr := append([]byte{0x5F, 0x20, 0x10}, []byte("DECC180026300000")...)
 		inner := append(append([]byte{0x42, 0x0D}, []byte("DEDICC1800001")...), chr...)

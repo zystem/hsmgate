@@ -348,7 +348,7 @@ func TestCardPageShowsTheTree(t *testing.T) {
 	r.key(tcell.KeyTab, 0) // into the tree
 	r.key(tcell.KeyRune, 'r')
 	scr := r.waitFor("demo (DECC1800263)", "User PIN not verified, 3 tries remaining (63C3)", "SO PIN not verified, 15 tries remaining (63CF)",
-		"DKEK with KCV AA02030405060708 (first)", "signer (1, EC-256)", "DKEK with KCV BB02030405060708 (second), 1 share(s) to import", "rsa key (2, RSA-4096)",
+		"DKEK with KCV AA02030405060708 (first)", "signer (1, EC-256)", "DKEK set-up in progress with 1 of 2 shares missing (second)", "rsa key (2, RSA-4096)",
 		"Key domain 2 not created", "Key domain 3 not created", "version 4.1")
 	if strings.Contains(scr, "Key domain 4") {
 		t.Errorf("a domain that the card does not have:\n%s", scr)
@@ -403,4 +403,80 @@ func TestCardPageSaysWhyItCannotRead(t *testing.T) {
 			r.waitFor("the card could not be read", tc.want)
 		})
 	}
+}
+
+// With more than one card in readers the page does not guess: it shows the menu of the readers. The Reader button shows it again, with the reader in use marked, and a reader
+// with no card is refused in words.
+func TestCardReaderMenu(t *testing.T) {
+	c := cardtest.New(t)
+	c.Readers = []cardtest.ReaderInfo{{Name: "Reader A 00 00", HasCard: true, Label: "first-card"}, {Name: "Reader B 01 00", HasCard: true, Label: "second-card"}, {Name: "Reader C 02 00"}}
+	r := startWith(t, sample, false, func(o *Options) { o.CardRun = c.Run })
+	r.waitFor("Overview")
+	r.screen.SetSize(170, 40)
+	r.key(tcell.KeyRune, '3')
+	r.key(tcell.KeyTab, 0)
+	r.key(tcell.KeyRune, 'r')
+	r.waitFor("Choose the reader", "automatic: the only reader that has a card", "0  card", "Reader A", "1  card", "Reader B", "2  no card", "Reader C")
+	for _, call := range c.Calls {
+		t.Errorf("a card was read before a reader was chosen: %v", call)
+	}
+	r.key(tcell.KeyDown, 0) // from "automatic" to A, then B
+	r.key(tcell.KeyDown, 0)
+	r.key(tcell.KeyEnter, 0)
+	r.waitFor("second-card (DECC1800263)", "the card (reader 1)")
+
+	// the Reader button: the reader in use is marked
+	r.key(tcell.KeyTab, 0) // Read the card
+	r.key(tcell.KeyTab, 0) // Reader
+	r.key(tcell.KeyEnter, 0)
+	r.waitFor("Choose the reader", "* 1  card")
+	r.key(tcell.KeyUp, 0) // B to A, then to "automatic" (the list wraps round after that)
+	r.key(tcell.KeyUp, 0)
+	r.key(tcell.KeyEnter, 0) // automatic again: two cards, so the menu comes up
+	r.waitFor("Choose the reader", "* automatic")
+	r.key(tcell.KeyEsc, 0)
+
+	// a reader with no card
+	r.key(tcell.KeyTab, 0)
+	r.key(tcell.KeyTab, 0)
+	r.key(tcell.KeyEnter, 0)
+	r.waitFor("Choose the reader")
+	for i := 0; i < 3; i++ { // automatic, A, B, C
+		r.key(tcell.KeyDown, 0)
+	}
+	r.key(tcell.KeyEnter, 0)
+	r.waitFor("the card could not be read", "there is no card in the reader 2")
+}
+
+// One card among the readers is the one that is meant: no menu.
+func TestCardOneCardAmongReadersNeedsNoMenu(t *testing.T) {
+	c := cardtest.New(t)
+	c.Readers = []cardtest.ReaderInfo{{Name: "Empty 00 00"}, {Name: "Full 01 00", HasCard: true, Label: "only-card"}}
+	r := startWith(t, sample, false, func(o *Options) { o.CardRun = c.Run })
+	r.waitFor("Overview")
+	r.screen.SetSize(170, 40)
+	r.key(tcell.KeyRune, '3')
+	r.key(tcell.KeyTab, 0)
+	r.key(tcell.KeyRune, 'r')
+	scr := r.waitFor("only-card (DECC1800263)", "the card (reader 1)")
+	if strings.Contains(scr, "Choose the reader") {
+		t.Errorf("the menu came up for one card:\n%s", scr)
+	}
+}
+
+// A key domain with an XKEK and a DKEK that is still being set up are worded as the card manager words them.
+func TestCardShowsXKEKDomain(t *testing.T) {
+	c := cardtest.New(t)
+	c.Domains[2] = []byte{0, 0, 0xCC, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8}
+	r := startWith(t, sample, false, func(o *Options) { o.CardRun = c.Run })
+	r.waitFor("Overview")
+	r.screen.SetSize(170, 40)
+	r.key(tcell.KeyRune, '3')
+	r.key(tcell.KeyTab, 0)
+	r.key(tcell.KeyRune, 'r')
+	r.waitFor("XKEK with KCV CC02030405060708 in key domain 0102030405060708", "DKEK set-up in progress with 1 of 2 shares missing (second)", "DKEK with KCV AA02030405060708 (first)")
+	for i := 0; i < 7; i++ { // the card, 2 PINs, domain 0 and its key, domain 1 and its key: the next line is the XKEK domain
+		r.key(tcell.KeyDown, 0)
+	}
+	r.waitFor("exchange key encryption key", "0102030405060708")
 }
