@@ -46,6 +46,7 @@ type SimKey struct {
 	Wrap   bool
 	Data   []byte
 	Algs   []byte // the algorithms of a key that was generated (empty: ECDH, and wrap when Wrap)
+	AES    int    // the size in bits of an AES key that was generated (0: not an AES key)
 }
 
 // NewSim is a card with the User PIN 123456 (3 tries), 4 key domains, none created.
@@ -424,6 +425,33 @@ func (s *Sim) run(cla, ins, p1, p2 byte, body []byte, le int) ([]byte, uint16) {
 		req := append(tlvBytes(0x7F21, append(tlvBytes(0x7F4E, inner), tlvBytes(0x5F37, bytes.Repeat([]byte{5}, sigLen))...)), tlvBytes(0x42, []byte("SIMDEVICE0001"))...)
 		req = append(req, tlvBytes(0x5F37, bytes.Repeat([]byte{6}, 64))...)
 		return tlvBytes(0x67, req), 0x9000
+	case ins == 0x48: // generate an AES key: nothing comes back (no wrapping key is named); the algorithm byte says the size
+		if !s.Logged {
+			return nil, 0x6982
+		}
+		if _, ok := s.Keys[p1]; ok {
+			return nil, 0x6985
+		}
+		bits := map[byte]int{0xB0: 128, 0xB1: 192, 0xB2: 256}[p2]
+		a := findTag(body, 0x91)
+		if bits == 0 || len(a) == 0 {
+			return nil, 0x6A80
+		}
+		k := &SimKey{Domain: 0, Algs: append([]byte{}, a...), Wrap: bytes.Contains(a, []byte{0x92}), AES: bits}
+		if d := findTag(body, 0x92); len(d) == 1 {
+			k.Domain = int(d[0])
+		}
+		s.Keys[p1] = k
+		return nil, 0x9000
+	case ins == 0x78: // derive from a symmetric key: the answer is made of the key number and the text
+		if !s.Logged {
+			return nil, 0x6982
+		}
+		if k, ok := s.Keys[p1]; !ok || k.AES == 0 {
+			return nil, 0x6A88
+		}
+		h := sha256.Sum256(append([]byte{p1, p2}, body...))
+		return h[:16], 0x9000
 	case ins == 0x68: // sign
 		if !s.Logged {
 			return nil, 0x6982

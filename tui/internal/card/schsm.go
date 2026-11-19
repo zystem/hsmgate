@@ -265,7 +265,16 @@ func prkd(b []byte) (label string, id []byte, algo string) {
 			bits = bits<<8 | int(c)
 		}
 	}
+	if tag == 0xA8 { // a secret key: its size is in the attributes of the class (A0)
+		if a0 := find(val, 0xA0); a0 != nil {
+			for _, c := range find(a0, 0x02) {
+				bits = bits<<8 | int(c)
+			}
+		}
+	}
 	switch tag {
+	case 0xA8:
+		algo = fmt.Sprintf("AES-%d", bits)
 	case 0xA0:
 		algo = fmt.Sprintf("EC-%d", bits)
 	case 0x30:
@@ -291,6 +300,7 @@ var algorithms = map[byte]string{
 	0x70: "ECDSA raw", 0x71: "ECDSA SHA-1", 0x72: "ECDSA SHA-224", 0x73: "ECDSA SHA-256", 0x74: "ECDSA SHA-384", 0x75: "ECDSA SHA-512",
 	0x80: "ECDH", 0x84: "ECDH XKEK", 0x92: "wrap", 0x93: "unwrap", 0x94: "replace", 0x98: "derive EC key", 0x99: "derive SP800-56C",
 	0xA0: "sign (default)",
+	0x10: "AES-CBC encrypt", 0x11: "AES-CBC decrypt", 0x18: "AES-CMAC",
 }
 
 func algorithmName(a byte) string {

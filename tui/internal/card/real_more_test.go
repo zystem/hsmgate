@@ -3,6 +3,7 @@ package card
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -271,4 +272,89 @@ func TestRealSOPIN(t *testing.T) {
 		t.Fatalf("the User PIN does not open: %v %+v", err, got)
 	}
 	t.Logf("User PIN: %s", got.Text())
+}
+
+// TestRealAESKey makes an AES-256 key (encrypt, decrypt and wrap) and an AES-128 key that may do CMAC (named by a check value), looks at both in the tree, wraps the first and unwraps
+// it as a third key, and deletes all of them.
+func TestRealAESKey(t *testing.T) {
+	pinv := userPIN(t)
+	s, r := realSession(t)
+	dom := completeDomain(t, r)
+	if dom < 0 {
+		t.Skip("no complete key domain other than the first")
+	}
+	if err := s.Select(); err != nil {
+		t.Fatal(err)
+	}
+	realLogin(t, s, pinv)
+	var made []byte
+	defer func() {
+		if err := s.Select(); err != nil {
+			t.Errorf("%v (delete the keys %v by hand)", err, made)
+			return
+		}
+		realLogin(t, s, pinv)
+		for _, k := range made {
+			if err := s.DeleteKey(k); err != nil {
+				t.Errorf("deleting the key %d: %v (delete it by hand)", k, err)
+			}
+		}
+	}()
+	id1, _, kid1, err := s.GenerateKey(GenSpec{Kind: "AES", Bits: 256, Label: "aes-test", Algorithms: AlgorithmByName("AES", "encrypt", "wrap"), Domain: dom})
+	if id1 != 0 {
+		made = append(made, id1)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("the AES-256 key %d, identifier %X", id1, kid1)
+	id2, _, kid2, err := s.GenerateKey(GenSpec{Kind: "AES", Bits: 128, Label: "aes-mac", Algorithms: AlgorithmByName("AES", "cmac"), Domain: dom})
+	if id2 != 0 {
+		made = append(made, id2)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("the AES-128 CMAC key %d, identifier %X", id2, kid2)
+	kf, err := s.ExportKey(id1)
+	if err != nil {
+		t.Fatalf("wrapping the AES key: %v", err)
+	}
+	t.Logf("wrapped: blob %d bytes, description %d bytes", len(kf.Blob), len(kf.Description))
+	desc := append([]byte{}, kf.Description...)
+	if i := bytes.Index(desc, []byte("aes-test")); i >= 0 {
+		desc[i] ^= 0x20
+	}
+	kf.Description = desc
+	id3, err := s.ImportKey(kf)
+	if id3 != 0 {
+		made = append(made, id3)
+	}
+	if err != nil {
+		t.Fatalf("unwrapping: %v", err)
+	}
+	t.Logf("unwrapped as the key %d", id3)
+	tree, err := Read(context.Background(), run, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[int]string{}
+	for _, d := range tree.Domains {
+		for _, k := range d.Keys {
+			for _, m := range made {
+				if k.ID == int(m) {
+					seen[k.ID] = fmt.Sprintf("%s %s id=%X %v", k.Label, k.Algo, k.CKAID, k.Algorithms)
+				}
+			}
+		}
+	}
+	for _, m := range made {
+		t.Logf("in the tree: %d: %s", m, seen[int(m)])
+	}
+	if len(seen) != len(made) {
+		t.Errorf("not all the keys are in the tree: %v", seen)
+	}
+	if !strings.Contains(seen[int(id1)], "AES-256") || !strings.Contains(seen[int(id2)], "AES-128") {
+		t.Errorf("the keys are not shown as AES: %v", seen)
+	}
 }
