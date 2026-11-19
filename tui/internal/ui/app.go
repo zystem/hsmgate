@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gdamore/tcell/v2"
@@ -25,26 +26,28 @@ type Options struct {
 	Socket     string // the admin socket of the running service ("" : the one in the configuration)
 	Unit       string // the systemd unit (default hsmgate)
 	Version    string
-	FirstRun   bool         // start with the quick setup when there is no configuration
-	Screen     tcell.Screen // for tests: a simulation screen
-	Bin        string       // the hsmgate program (found when empty)
-	CardRun    card.Run     // runs opensc-tool for the Card page (sys.Run when nil; tests give a card made of bytes)
+	FirstRun   bool                                                  // start with the quick setup when there is no configuration
+	Screen     tcell.Screen                                          // for tests: a simulation screen
+	Bin        string                                                // the hsmgate program (found when empty)
+	CardRun    card.Run                                              // runs opensc-tool for the Card page (sys.Run when nil; tests give a card made of bytes)
+	CardOpen   func(context.Context, card.Reader) (card.Conn, error) // opens the connection for the commands that change the card (opensc-explorer when nil)
 	Now        func() time.Time
 }
 
 // App is the program.
 type App struct {
-	opt     Options
-	app     *tview.Application
-	pages   *tview.Pages
-	nav     *tview.List
-	body    *tview.Flex     // the right side: the page of a section
-	content tview.Primitive // what the body holds now: Tab moves the focus into it
-	sw, sh  int             // the size of the screen, seen at the last draw
-	bar     *tview.TextView
-	head    *tview.TextView
-	doc     *store.Doc
-	card    cardState // the Card page
+	opt         Options
+	app         *tview.Application
+	pages       *tview.Pages
+	nav         *tview.List
+	body        *tview.Flex     // the right side: the page of a section
+	content     tview.Primitive // what the body holds now: Tab moves the focus into it
+	sw, sh      int             // the size of the screen, seen at the last draw
+	bar         *tview.TextView
+	head        *tview.TextView
+	doc         *store.Doc
+	card        cardState   // the Card page
+	cardFormCur *tview.Form // the form of the action that is shown (for tests to fill and press)
 
 	section  string
 	sections []section
@@ -88,8 +91,14 @@ func New(opt Options) (*App, error) {
 	return a, nil
 }
 
+// themeOnce: the colours are settings of the whole library, the same for every screen; they are set the first time a program is made. (A second program in a test, made while the
+// screen of an earlier one is still being drawn, would write what the other reads.)
+var themeOnce sync.Once
+
 // theme: a blue desktop, grey dialogs with black text, as the installers have.
-func theme() {
+func theme() { themeOnce.Do(setTheme) }
+
+func setTheme() {
 	tview.Styles.PrimitiveBackgroundColor = tcell.ColorSilver
 	tview.Styles.ContrastBackgroundColor = tcell.ColorNavy
 	tview.Styles.MoreContrastBackgroundColor = tcell.ColorTeal
@@ -227,12 +236,17 @@ func (a *App) modalPage(name string, p tview.Primitive, w, h int) {
 
 // ask shows a question with buttons; then is told which one was chosen (the index), after the dialog is closed.
 func (a *App) ask(title, text string, buttons []string, then func(int)) {
+	prev := a.app.GetFocus() // the focus goes back to where it was: to a form that is still open, to the page
 	m := tview.NewModal().SetText(text).AddButtons(buttons)
 	m.SetBackgroundColor(tcell.ColorSilver).SetTextColor(tcell.ColorBlack)
 	m.SetButtonBackgroundColor(tcell.ColorNavy).SetButtonTextColor(tcell.ColorWhite)
 	m.SetDoneFunc(func(i int, _ string) {
 		a.pages.RemovePage("modal")
-		a.app.SetFocus(a.nav)
+		if prev != nil && a.pages.HasPage("form") || prev != nil && prev != m && a.section == "card" {
+			a.app.SetFocus(prev)
+		} else {
+			a.app.SetFocus(a.nav)
+		}
 		if i >= 0 && then != nil {
 			then(i)
 		}

@@ -112,15 +112,7 @@ func Read(ctx context.Context, run Run, r Reader) (*Tree, error) {
 		resp := rs[6+d]
 		switch {
 		case resp.OK() && len(resp.Data) >= 10:
-			dm := Domain{Number: d, Created: true, Shares: int(resp.Data[0]), Outstanding: int(resp.Data[1]), KCV: strings.ToUpper(hex.EncodeToString(resp.Data[2:10]))}
-			if len(resp.Data) > 10 { // more than the check value: the identifier of a key domain, which only an XKEK has
-				id := resp.Data[10:]
-				if len(id) > 8 {
-					id = id[:8]
-				}
-				dm.XKEK, dm.DomainID = true, strings.ToUpper(hex.EncodeToString(id))
-			}
-			t.Domains = append(t.Domains, dm)
+			t.Domains = append(t.Domains, parseDomain(d, resp.Data))
 		case resp.SW == 0x6A88:
 			t.Domains = append(t.Domains, Domain{Number: d})
 		default:
@@ -202,6 +194,20 @@ func Read(ctx context.Context, run Run, r Reader) (*Tree, error) {
 		}
 	}
 	return t, nil
+}
+
+// parseDomain reads the answer of the card to the status of a key domain: the shares in all, the shares still to import, the check value of 8 bytes, and for an XKEK the identifier of a
+// key domain.
+func parseDomain(n int, data []byte) Domain {
+	dm := Domain{Number: n, Created: true, Shares: int(data[0]), Outstanding: int(data[1]), KCV: strings.ToUpper(hex.EncodeToString(data[2:10]))}
+	if len(data) > 10 { // more than the check value: the identifier of a key domain, which only an XKEK has
+		id := data[10:]
+		if len(id) > 8 {
+			id = id[:8]
+		}
+		dm.XKEK, dm.DomainID = true, strings.ToUpper(hex.EncodeToString(id))
+	}
+	return dm
 }
 
 func pin(name string, sw uint16) PIN {
