@@ -455,3 +455,37 @@ func TestSOPINBytes(t *testing.T) {
 		t.Errorf("the hexadecimal form of the SO PIN: %v", err)
 	}
 }
+
+// An AES key is made with `00 48` (the size in the second parameter, the algorithms and the key domain in the data), described by a file of its own (A8), and named by the number
+// of the key, or by the check value that the card derives when the key may do CMAC or derivation.
+func TestGenerateAESKey(t *testing.T) {
+	s, sim := newSession(t)
+	if _, _, _, err := s.GenerateKey(GenSpec{Kind: "AES", Bits: 256, Label: "k", Algorithms: AlgorithmByName("AES", "encrypt"), Domain: 1}); err == nil {
+		t.Error("a key was made before the login")
+	}
+	login(t, s)
+	for _, bad := range []GenSpec{{Kind: "AES", Bits: 100, Label: "x", Algorithms: []byte{0x10}}, {Kind: "AES", Bits: 128, Label: "x"}} {
+		if _, _, _, err := s.GenerateKey(bad); err == nil {
+			t.Errorf("%+v was accepted", bad)
+		}
+	}
+	id, req, kid, err := s.GenerateKey(GenSpec{Kind: "AES", Bits: 256, Label: "aes-enc", Algorithms: AlgorithmByName("AES", "encrypt", "wrap"), Domain: 2})
+	if err != nil || req != nil || !bytes.Equal(kid, []byte{id}) {
+		t.Fatalf("%v %X %X", err, kid, id)
+	}
+	if k := sim.Keys[id]; k == nil || k.AES != 256 || k.Domain != 2 || !k.Wrap || !bytes.Equal(k.Algs, []byte{AlgCBCEnc, AlgCBCDec, AlgWrap}) {
+		t.Errorf("the key: %+v", k)
+	}
+	label, gotID, algo := prkd(sim.Files[0xC400|uint16(id)])
+	if label != "aes-enc" || !bytes.Equal(gotID, kid) || algo != "AES-256" {
+		t.Errorf("the description: %q %X %q", label, gotID, algo)
+	}
+	// a key that may do CMAC is named by the check value the card derives
+	id2, _, kid2, err := s.GenerateKey(GenSpec{Kind: "AES", Bits: 128, Label: "aes-mac", Algorithms: AlgorithmByName("AES", "cmac"), Domain: 2})
+	if err != nil || len(kid2) != 8 {
+		t.Fatalf("%v %X", err, kid2)
+	}
+	if _, gotID2, algo2 := prkd(sim.Files[0xC400|uint16(id2)]); !bytes.Equal(gotID2, kid2) || algo2 != "AES-128" {
+		t.Errorf("the description: %X %q", gotID2, algo2)
+	}
+}

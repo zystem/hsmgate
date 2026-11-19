@@ -1,6 +1,7 @@
 package card
 
 import (
+	"bytes"
 	"crypto/elliptic"
 	"crypto/sha1" // #nosec G505 -- the key identifier of PKCS#15 is the SHA-1 of the public key: a name, not a protection
 	"errors"
@@ -24,6 +25,10 @@ const (
 	AlgECDH        = 0x80
 	AlgWrap        = 0x92
 	AlgDerive      = 0x98
+	AlgCBCEnc      = 0x10 // AES-CBC encrypt
+	AlgCBCDec      = 0x11 // AES-CBC decrypt
+	AlgCMAC        = 0x18 // AES-CMAC
+	AlgDeriveSP    = 0x99 // derivation by SP 800-56C
 )
 
 // GenSpec says what key to make.
@@ -54,8 +59,15 @@ func (g GenSpec) validate() error {
 		if g.Bits != 2048 && g.Bits != 3072 && g.Bits != 4096 {
 			return errors.New("RSA keys of 2048, 3072 or 4096 bits only")
 		}
+	case "AES":
+		if g.Bits != 128 && g.Bits != 192 && g.Bits != 256 {
+			return errors.New("AES keys of 128, 192 or 256 bits only")
+		}
+		if len(g.Algorithms) == 0 {
+			return errors.New("an AES key needs what it may be used for")
+		}
 	default:
-		return errors.New("a key is EC or RSA")
+		return errors.New("a key is EC, RSA or AES")
 	}
 	return nil
 }
@@ -120,6 +132,10 @@ func (s *Session) GenerateKey(g GenSpec) (id byte, request, keyID []byte, err er
 	}
 	if id, err = s.FreeKeyID(); err != nil {
 		return
+	}
+	if g.Kind == "AES" {
+		keyID, err = s.generateAES(id, g)
+		return id, nil, keyID, err
 	}
 	what := fmt.Sprintf("generating the key %d (a %s key of %d bits: an RSA key takes up to a minute; the User PIN must be given)", id, g.Kind, g.Bits)
 	request, sw, err := s.SendExtended(0x00, 0x46, id, 0x00, g.encode())
@@ -191,7 +207,15 @@ func AlgorithmByName(kind string, names ...string) []byte {
 				out = append(out, 0x20, 0x31, 0x33, 0x35, 0x40, 0x41, 0x43, 0x45)
 			}
 		case "derive", "ecdh":
-			out = append(out, AlgECDH)
+			if kind == "AES" {
+				out = append(out, AlgDeriveSP)
+			} else {
+				out = append(out, AlgECDH)
+			}
+		case "encrypt":
+			out = append(out, AlgCBCEnc, AlgCBCDec)
+		case "cmac":
+			out = append(out, AlgCMAC)
 		case "decrypt":
 			out = append(out, 0x21, 0x22, 0x23)
 		case "wrap":
@@ -199,4 +223,58 @@ func AlgorithmByName(kind string, names ...string) []byte {
 		}
 	}
 	return out
+}
+
+// generateAES makes an AES key (`00 48 key algorithm`: B0, B1 or B2 for 128, 192 or 256 bits; the data is the algorithms `91` and the key domain `92`). The card keeps the key and
+// gives nothing back (it would give the key wrapped under a wrapping key, if one were named; none is). Its identifier is the number of the key, or, for a key that may do CMAC or
+// derivation, the first 8 bytes of what the card derives from the text "KeyCheckValue" with it, which is how the vendor's card manager names such a key.
+func (s *Session) generateAES(id byte, g GenSpec) ([]byte, error) {
+	var gen byte
+	switch g.Bits {
+	case 128:
+		gen = 0xB0
+	case 192:
+		gen = 0xB1
+	default:
+		gen = 0xB2
+	}
+	body := der(0x91, g.Algorithms)
+	if g.Domain >= 0 {
+		body = append(body, der(0x92, []byte{byte(g.Domain)})...) // #nosec G115 -- a key domain number
+	}
+	what := fmt.Sprintf("generating the AES key %d (the User PIN must be given)", id)
+	if _, err := s.do(what, 0x00, 0x48, id, gen, body, true); err != nil {
+		return nil, err
+	}
+	keyID := []byte{id}
+	for _, a := range g.Algorithms {
+		if a == AlgCMAC || a == AlgDeriveSP {
+			alg := byte(AlgCMAC)
+			if a == AlgDeriveSP && !bytes.Contains(g.Algorithms, []byte{AlgCMAC}) {
+				alg = AlgDeriveSP
+			}
+			kcv, err := s.do(fmt.Sprintf("reading the check value of the AES key %d", id), 0x80, 0x78, id, alg, []byte("KeyCheckValue"), true)
+			if err != nil {
+				return nil, fmt.Errorf("the key %d is made but its identifier could not be made: %w", id, err)
+			}
+			if len(kcv) < 8 {
+				return nil, fmt.Errorf("the key %d is made but the check value is short (%d bytes)", id, len(kcv))
+			}
+			keyID = kcv[:8]
+			break
+		}
+	}
+	if err := s.WriteFile(0xC400|uint16(id), skdFor(g, keyID)); err != nil {
+		return keyID, fmt.Errorf("the key %d is made but its description was not written: %w", id, err)
+	}
+	return keyID, nil
+}
+
+// skdFor is the description of a secret key as the card manager writes it: the label, the identifier and usage, and the size.
+func skdFor(g GenSpec, keyID []byte) []byte {
+	label := der(0x30, der(0x0C, []byte(g.Label)))
+	common := der(0x30, append(der(0x04, keyID), 0x03, 0x03, 0x07, 0xC0, 0x10))
+	size := der(0xA0, der(0x30, der(0x02, []byte{byte(g.Bits >> 8), byte(g.Bits)}))) // #nosec G115 -- 128 to 256
+	typ := der(0xA1, der(0x30, der(0x30, der(0x04, nil))))
+	return der(0xA8, append(append(append(label, common...), size...), typ...))
 }

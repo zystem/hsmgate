@@ -55,11 +55,11 @@ func (a *App) cardActions(ref any) []cardAction {
 			add("Create a DKEK key domain…", func() { a.actCreateDomain(v.Number) })
 			add("Create an XKEK key domain from a membership file…", func() { a.actCreateXKEK(v.Number) })
 		case v.XKEK:
-			add("Generate a key (EC or RSA)…", func() { a.actGenerateKey(v.Number) })
+			add("Generate a key (EC, RSA or AES)…", func() { a.actGenerateKey(v.Number) })
 			add("Delete the key domain…", func() { a.actDeleteDomain(v) })
 		default:
 			if v.Outstanding == 0 {
-				add("Generate a key (EC or RSA)…", func() { a.actGenerateKey(v.Number) })
+				add("Generate a key (EC, RSA or AES)…", func() { a.actGenerateKey(v.Number) })
 			}
 			if v.Outstanding > 0 {
 				add("Import a DKEK share from a file…", func() { a.actImportShare(v) })
@@ -641,6 +641,9 @@ var keyKinds = []struct {
 	{"RSA 2048 (takes the card about 20 seconds)", "RSA", 2048},
 	{"RSA 3072 (takes the card about a minute)", "RSA", 3072},
 	{"RSA 4096 (takes the card a minute or more)", "RSA", 4096},
+	{"AES 256", "AES", 256},
+	{"AES 192", "AES", 192},
+	{"AES 128", "AES", 128},
 }
 
 var keyUses = []struct {
@@ -655,6 +658,10 @@ var keyUses = []struct {
 	{"sign (RSA)", "RSA", []string{"sign"}},
 	{"decrypt (RSA)", "RSA", []string{"decrypt"}},
 	{"sign, decrypt and wrap", "RSA", []string{"sign", "decrypt", "wrap"}},
+	{"encrypt and decrypt (CBC)", "AES", []string{"encrypt"}},
+	{"encrypt, decrypt (CBC) and wrap (backup)", "AES", []string{"encrypt", "wrap"}},
+	{"authenticate (CMAC)", "AES", []string{"cmac"}},
+	{"derive keys (SP 800-56C)", "AES", []string{"derive"}},
 }
 
 func dropIndex(f *tview.Form, label string) int {
@@ -666,7 +673,7 @@ func dropIndex(f *tview.Form, label string) int {
 }
 
 func (a *App) actGenerateKey(domain int) {
-	a.cardForm(fmt.Sprintf("Generate a key in the key domain %d", domain), "The card makes the key and the private key never leaves it (only wrapped under the DKEK, if you allow wrap). Give it a label and say what it may be used for: a key of hsmgate is an EC key for key agreement. An RSA key takes the card a long time; the page waits.\n"+a.pinHint(), 4, func(f *tview.Form) {
+	a.cardForm(fmt.Sprintf("Generate a key in the key domain %d", domain), "The card makes the key and the private key never leaves it (only wrapped under the DKEK, if you allow wrap). Give it a label and say what it may be used for: a key of hsmgate is an EC key for key agreement. An AES key can only be used inside the card. An RSA key takes the card a long time; the page waits.\n"+a.pinHint(), 4, func(f *tview.Form) {
 		f.AddInputField("Label", "", 30, nil, nil)
 		kinds := make([]string, len(keyKinds))
 		for i, k := range keyKinds {

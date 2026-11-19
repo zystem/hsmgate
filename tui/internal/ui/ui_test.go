@@ -915,7 +915,7 @@ func TestCardKeyAndXKEKActionsThroughTheForms(t *testing.T) {
 	// a signing key in the first key domain (line 3): the card makes it and the page writes its description
 	r.down(3)
 	r.key(tcell.KeyEnter, 0)
-	r.waitFor("Generate a key (EC or RSA)")
+	r.waitFor("Generate a key (EC, RSA or AES)")
 	r.key(tcell.KeyEnter, 0)
 	r.waitFor("Label", "Type", "Use")
 	r.fill(map[string]string{"Label": "signer", "User PIN": "123456"})
@@ -981,5 +981,48 @@ func TestCardKeyAndXKEKActionsThroughTheForms(t *testing.T) {
 	d := sim.Domains[2]
 	if d == nil || d.XKEK == nil || !bytes.Equal(d.XKEK, mf.DomainUID()[:8]) {
 		t.Errorf("the domain: %+v, the id of the file %X", d, mf.DomainUID())
+	}
+}
+
+// An AES key is generated through the form: the type and the use are chosen from the lists, and a use of another kind is refused.
+func TestCardGeneratesAnAESKeyThroughTheForm(t *testing.T) {
+	c, sim := cardtest.New(t), cardtest.NewSim()
+	c.FCPs["CC01"] = cardtest.KeyFCP(0, []byte{0xFF, 0xFF, 0xFF, 0xFF}, 0x73, 0x80, 0x92)
+	r := startWith(t, sample, false, func(o *Options) {
+		o.CardRun = c.Run
+		o.CardOpen = func(context.Context, card.Reader) (card.Conn, error) { return sim, nil }
+	})
+	r.waitFor("Overview")
+	r.screen.SetSize(170, 40)
+	r.key(tcell.KeyRune, '3')
+	r.key(tcell.KeyTab, 0)
+	r.key(tcell.KeyRune, 'r')
+	r.waitFor("signer (1, EC-256)")
+	r.down(3)
+	r.key(tcell.KeyEnter, 0)
+	r.waitFor("Generate a key (EC, RSA or AES)")
+	r.key(tcell.KeyEnter, 0)
+	r.waitFor("Label", "Type", "Use")
+	r.fill(map[string]string{"Label": "aes-two", "User PIN": "123456"})
+	r.do(func() {
+		f := r.app.cardFormCur
+		f.GetFormItemByLabel("Type").(*tview.DropDown).SetCurrentOption(4) // AES 256
+	})
+	r.press(0)
+	r.waitFor("is for EC keys")
+	r.key(tcell.KeyEnter, 0)
+	r.do(func() {
+		r.app.cardFormCur.GetFormItemByLabel("Use").(*tview.DropDown).SetCurrentOption(8) // encrypt, decrypt and wrap
+	})
+	r.press(0)
+	r.waitFor("(aes-two, AES-256) is made")
+	var k *cardtest.SimKey
+	for _, v := range sim.Keys {
+		if v.AES == 256 {
+			k = v
+		}
+	}
+	if k == nil || !bytes.Equal(k.Algs, card.AlgorithmByName("AES", "encrypt", "wrap")) {
+		t.Fatalf("the AES key: %+v", k)
 	}
 }
