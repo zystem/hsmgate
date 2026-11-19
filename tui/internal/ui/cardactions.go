@@ -41,6 +41,7 @@ func (a *App) cardActions(ref any) []cardAction {
 	case *card.Tree:
 		add("Make a DKEK share file…", a.actMakeShare)
 		add("Import a key from a file (unwrap)…", func() { a.actImportKey(-1) })
+		add("Export the device ID of this card (for an XKEK group)…", a.actExportDeviceID)
 	case card.PIN:
 		if v.Name == "User PIN" {
 			add("Change the User PIN…", a.actChangePIN)
@@ -52,9 +53,14 @@ func (a *App) cardActions(ref any) []cardAction {
 		switch {
 		case !v.Created:
 			add("Create a DKEK key domain…", func() { a.actCreateDomain(v.Number) })
+			add("Create an XKEK key domain from a membership file…", func() { a.actCreateXKEK(v.Number) })
 		case v.XKEK:
+			add("Generate a key (EC or RSA)…", func() { a.actGenerateKey(v.Number) })
 			add("Delete the key domain…", func() { a.actDeleteDomain(v) })
 		default:
+			if v.Outstanding == 0 {
+				add("Generate a key (EC or RSA)…", func() { a.actGenerateKey(v.Number) })
+			}
 			if v.Outstanding > 0 {
 				add("Import a DKEK share from a file…", func() { a.actImportShare(v) })
 			} else {
@@ -64,6 +70,9 @@ func (a *App) cardActions(ref any) []cardAction {
 			add("Delete the key domain…", func() { a.actDeleteDomain(v) })
 		}
 	case card.Key:
+		if hasAlg(v, "ECDSA SHA-256") {
+			add("Sign a key domain membership (group signer)…", func() { a.actSignMembership(v) })
+		}
 		if hasWrap(v) {
 			add("Export the key to a file (wrap)…", func() { a.actExportKey(v) })
 		}
@@ -72,9 +81,11 @@ func (a *App) cardActions(ref any) []cardAction {
 	return acts
 }
 
-func hasWrap(k card.Key) bool {
+func hasWrap(k card.Key) bool { return hasAlg(k, "wrap") }
+
+func hasAlg(k card.Key, name string) bool {
 	for _, a := range k.Algorithms {
-		if a == "wrap" {
+		if a == name {
 			return true
 		}
 	}
@@ -612,4 +623,171 @@ func safeName(s string) string {
 		return "key"
 	}
 	return b.String()
+}
+
+// ---- keys and XKEK -------------------------------------------------------------------------------------------------------------------------------------
+
+// the kinds of key the form offers, and what a key of each may be used for
+var keyKinds = []struct {
+	label string
+	kind  string
+	bits  int
+}{
+	{"EC P-256", "EC", 256},
+	{"RSA 2048 (takes the card about 20 seconds)", "RSA", 2048},
+	{"RSA 3072 (takes the card about a minute)", "RSA", 3072},
+	{"RSA 4096 (takes the card a minute or more)", "RSA", 4096},
+}
+
+var keyUses = []struct {
+	label string
+	kind  string
+	names []string
+}{
+	{"sign (ECDSA)", "EC", []string{"sign"}},
+	{"sign (ECDSA) and wrap (backup)", "EC", []string{"sign", "wrap"}},
+	{"key agreement (ECDH) and wrap: what hsmgate uses", "EC", []string{"derive", "wrap"}},
+	{"sign, key agreement and wrap", "EC", []string{"sign", "derive", "wrap"}},
+	{"sign (RSA)", "RSA", []string{"sign"}},
+	{"decrypt (RSA)", "RSA", []string{"decrypt"}},
+	{"sign, decrypt and wrap", "RSA", []string{"sign", "decrypt", "wrap"}},
+}
+
+func dropIndex(f *tview.Form, label string) int {
+	if dd, ok := f.GetFormItemByLabel(label).(*tview.DropDown); ok {
+		i, _ := dd.GetCurrentOption()
+		return i
+	}
+	return 0
+}
+
+func (a *App) actGenerateKey(domain int) {
+	a.cardForm(fmt.Sprintf("Generate a key in the key domain %d", domain), "The card makes the key and the private key never leaves it (only wrapped under the DKEK, if you allow wrap). Give it a label and say what it may be used for: a key of hsmgate is an EC key for key agreement. An RSA key takes the card a long time; the page waits.\n"+a.pinHint(), 4, func(f *tview.Form) {
+		f.AddInputField("Label", "", 30, nil, nil)
+		kinds := make([]string, len(keyKinds))
+		for i, k := range keyKinds {
+			kinds[i] = k.label
+		}
+		f.AddDropDown("Type", kinds, 0, nil)
+		uses := make([]string, len(keyUses))
+		for i, u := range keyUses {
+			uses[i] = u.kind + ": " + u.label
+		}
+		f.AddDropDown("Use", uses, 2, nil)
+		f.AddPasswordField("User PIN", "", 20, '*', nil)
+	}, "Generate", func(f *tview.Form) {
+		kind, use := keyKinds[dropIndex(f, "Type")], keyUses[dropIndex(f, "Use")]
+		label := strings.TrimSpace(fieldText(f, "Label"))
+		switch {
+		case label == "" || len(label) > 60:
+			a.fail(errors.New("a label of 1 to 60 characters is needed: nothing was done"))
+			return
+		case use.kind != kind.kind:
+			a.fail(fmt.Errorf("the use %q is for %s keys and the type is %s: nothing was done", use.label, use.kind, kind.kind))
+			return
+		case a.labelOnCard(label):
+			a.fail(fmt.Errorf("a key with the label %q is on the card already: nothing was done", label))
+			return
+		}
+		pin := []byte(fieldText(f, "User PIN"))
+		a.cardClose()
+		spec := card.GenSpec{Kind: kind.kind, Bits: kind.bits, Label: label, Algorithms: card.AlgorithmByName(kind.kind, use.names...), Domain: domain}
+		a.cardWork("Generate the key", pin, func(s *card.Session) (string, error) {
+			id, _, keyID, err := s.GenerateKey(spec)
+			if err != nil {
+				return "", err
+			}
+			return fmt.Sprintf("The key %d (%s, %s) is made in the key domain %d.\nCKA_ID (what hsmgate calls the key of a card): %X", id, label, kind.kind+"-"+fmt.Sprint(kind.bits), domain, keyID), nil
+		})
+	})
+}
+
+func (a *App) actExportDeviceID() {
+	a.cardForm("Export the device ID of this card", "The device ID says which card a key domain membership is for: it holds the certificates of the card, which are not secret. Give the file to the person who holds the group signer key of the XKEK group.\nNo PIN is needed.", 1, func(f *tview.Form) {
+		f.AddInputField("File", "device-id.id", 50, nil, nil)
+	}, "Export", func(f *tview.Form) {
+		path := strings.TrimSpace(fieldText(f, "File"))
+		if _, err := os.Stat(path); err == nil {
+			a.fail(fmt.Errorf("%s is there already: choose another name (nothing is overwritten)", path))
+			return
+		}
+		a.cardClose()
+		a.cardWork("Export the device ID", nil, func(s *card.Session) (string, error) {
+			certs, err := s.DeviceCertificates()
+			if err != nil {
+				return "", err
+			}
+			if err := writeNew(path, card.EncodeDeviceID(certs)); err != nil {
+				return "", err
+			}
+			return fmt.Sprintf("The device ID is written to %s (%d bytes).", path, len(card.EncodeDeviceID(certs))), nil
+		})
+	})
+}
+
+func (a *App) actSignMembership(k card.Key) {
+	a.cardForm(fmt.Sprintf("Sign a membership with the key %d (%s)", k.ID, orStr(k.Label, "no label")), "The key is the group signer of an XKEK group. Give the device ID file of the card that is to belong to the group (it can be this card); the page signs the membership and writes the membership file, which that card then uses to make its XKEK key domain. The identifier of the key domain is the public key of this key.\n"+a.pinHint(), 3, func(f *tview.Form) {
+		f.AddInputField("Device ID file", "", 50, nil, nil)
+		f.AddInputField("Membership file", "membership.kdm", 50, nil, nil)
+		f.AddPasswordField("User PIN", "", 20, '*', nil)
+	}, "Sign", func(f *tview.Form) {
+		in, out, pin := strings.TrimSpace(fieldText(f, "Device ID file")), strings.TrimSpace(fieldText(f, "Membership file")), []byte(fieldText(f, "User PIN"))
+		raw, err := readSmall(in, 4096)
+		if err != nil {
+			a.fail(err)
+			return
+		}
+		dev, err := card.ParseDeviceID(raw)
+		if err != nil {
+			a.fail(err)
+			return
+		}
+		if _, err := os.Stat(out); err == nil {
+			a.fail(fmt.Errorf("%s is there already: choose another name (nothing is overwritten)", out))
+			return
+		}
+		a.cardClose()
+		a.cardWork("Sign the membership", pin, func(s *card.Session) (string, error) {
+			mf, err := s.SignMembership(byte(k.ID), dev) // #nosec G115 -- a key number
+			if err != nil {
+				return "", err
+			}
+			if err := writeNew(out, mf.Encode()); err != nil {
+				return "", err
+			}
+			return fmt.Sprintf("The membership is written to %s (%d bytes).\nThe key domain it is for: %X", out, len(mf.Encode()), mf.DomainUID()), nil
+		})
+	})
+}
+
+func (a *App) actCreateXKEK(n int) {
+	a.cardForm(fmt.Sprintf("Create the XKEK key domain %d", n), "An XKEK key domain belongs to a group of cards. Give the membership file that the holder of the group signer key made for this card. The card checks the certificates in it and makes the domain.\n"+a.pinHint(), 3, func(f *tview.Form) {
+		f.AddInputField("Membership file", "", 50, nil, nil)
+		f.AddInputField("Label", "", 30, nil, nil)
+		f.AddPasswordField("User PIN", "", 20, '*', nil)
+	}, "Create", func(f *tview.Form) {
+		path, label, pin := strings.TrimSpace(fieldText(f, "Membership file")), strings.TrimSpace(fieldText(f, "Label")), []byte(fieldText(f, "User PIN"))
+		raw, err := readSmall(path, 16384)
+		if err != nil {
+			a.fail(err)
+			return
+		}
+		mf, err := card.ParseMembershipFile(raw)
+		if err != nil {
+			a.fail(err)
+			return
+		}
+		if len(label) > 60 {
+			a.fail(errors.New("a label of more than 60 characters: nothing was done"))
+			return
+		}
+		a.cardClose()
+		a.cardWork("Create the XKEK key domain", pin, func(s *card.Session) (string, error) {
+			d, err := s.CreateXKEKDomain(byte(n), mf.GroupRequest, mf.Membership, mf.Signer, label) // #nosec G115 -- a key domain number
+			if err != nil {
+				return "", err
+			}
+			return fmt.Sprintf("The XKEK key domain %d is made. Key domain: %s.", n, d.DomainID), nil
+		})
+	})
 }

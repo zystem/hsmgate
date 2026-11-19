@@ -96,7 +96,7 @@ func (c *explorerConn) Transmit(apdu []byte) ([]byte, error) {
 		return nil, err
 	}
 	var got []string
-	timeout := time.After(60 * time.Second)
+	timeout := time.After(3 * time.Minute) // a key of 4096 bits takes the card up to a minute and more
 	for {
 		select {
 		case l, ok := <-c.lines:
@@ -109,7 +109,7 @@ func (c *explorerConn) Transmit(apdu []byte) ([]byte, error) {
 				return answerOf(got)
 			}
 		case <-timeout:
-			return nil, errors.New("the card did not answer in 60 seconds")
+			return nil, errors.New("the card did not answer in 3 minutes")
 		}
 	}
 }

@@ -264,3 +264,191 @@ func TestRealDeleteKey(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestRealGenerateKey makes an EC key in the first complete key domain other than the first, checks what the card answered and the tree, and deletes it.
+func TestRealGenerateKey(t *testing.T) {
+	pinv := userPIN(t)
+	s, r := realSession(t)
+	tree, err := Read(context.Background(), run, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dom := -1
+	for _, d := range tree.Domains {
+		if d.Created && !d.XKEK && d.Outstanding == 0 && d.Number > 0 {
+			dom = d.Number
+			break
+		}
+	}
+	if dom < 0 {
+		t.Skip("no complete key domain other than the first")
+	}
+	if err := s.Select(); err != nil {
+		t.Fatal(err)
+	}
+	realLogin(t, s, pinv)
+	id, req, kid, err := s.GenerateKey(GenSpec{Kind: "EC", Bits: 256, Label: "gen-test", Algorithms: AlgorithmByName("EC", "sign"), Domain: dom})
+	if err != nil {
+		if id != 0 {
+			t.Logf("the key %d may be on the card: delete it", id)
+		}
+		t.Fatal(err)
+	}
+	t.Logf("the key %d, request of %d bytes, identifier %X", id, len(req), kid)
+	defer func() {
+		if err := s.Select(); err == nil {
+			realLogin(t, s, pinv)
+			if err := s.DeleteKey(id); err != nil {
+				t.Errorf("deleting the key %d: %v (delete it by hand)", id, err)
+			}
+		}
+	}()
+	tree2, err := Read(context.Background(), run, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, d := range tree2.Domains {
+		for _, k := range d.Keys {
+			if k.ID == int(id) {
+				found = true
+				t.Logf("in the tree: %s (%d, %s) in domain %d, id %X, algorithms %v", k.Label, k.ID, k.Algo, d.Number, k.CKAID, k.Algorithms)
+				if k.Label != "gen-test" || k.Algo != "EC-256" || d.Number != dom || !bytes.Equal(k.CKAID, kid) {
+					t.Errorf("the key is not as asked")
+				}
+			}
+		}
+	}
+	if !found {
+		t.Error("the new key is not in the tree")
+	}
+}
+
+// TestRealXKEKDomain makes an XKEK key domain on a free number with a group signer key on the same card (a group of one card: the card is its own member), looks at it, and
+// removes the domain and the key.
+func TestRealXKEKDomain(t *testing.T) {
+	pinv := userPIN(t)
+	s, _ := realSession(t)
+	var free, signerDomain byte = 255, 255
+	for n := byte(0); n < 8; n++ {
+		d, err := s.DomainStatus(n)
+		if err != nil {
+			break
+		}
+		if !d.Created && free == 255 {
+			free = n
+		}
+		if d.Created && !d.XKEK && d.Outstanding == 0 && n > 0 && signerDomain == 255 {
+			signerDomain = n
+		}
+	}
+	if free == 255 || signerDomain == 255 {
+		t.Skip("no free key domain, or no complete one for the group signer")
+	}
+	realLogin(t, s, pinv)
+	id, req, _, err := s.GenerateKey(GenSpec{Kind: "EC", Bits: 256, Label: "xkek-signer", Algorithms: AlgorithmByName("EC", "sign"), Domain: int(signerDomain)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := s.DeleteKey(id); err != nil {
+			t.Errorf("deleting the group signer key %d: %v (delete it by hand)", id, err)
+		}
+	}()
+	certs, err := s.DeviceCertificates()
+	if err != nil {
+		t.Fatal(err)
+	}
+	x, err := certs.DevicePointX()
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := s.Membership(id, x)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("device certificate %d bytes, issuer %d bytes, membership %d bytes", len(certs.Device), len(certs.DICA), len(m))
+	d, err := s.CreateXKEKDomain(free, req, m, certs, "xkek-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := s.DeleteKEK(free); err != nil {
+			t.Logf("deleting the KEK: %v", err)
+		}
+		if err := s.DeleteDomain(free); err != nil {
+			t.Errorf("deleting the key domain %d: %v (delete it by hand)", free, err)
+		}
+	}()
+	t.Logf("the XKEK domain %d: xkek=%v kcv=%s domain id %s", free, d.XKEK, d.KCV, d.DomainID)
+	if !d.XKEK || d.DomainID == "" {
+		t.Errorf("the card does not say it is an XKEK domain: %+v", d)
+	}
+	got, err := s.DomainStatus(free)
+	if err != nil || !got.XKEK || got.DomainID != d.DomainID {
+		t.Errorf("asked again: %v %+v", err, got)
+	}
+}
+
+// TestRealXKEKFiles is the whole way through the files of the card manager on one card: the device id file, a group signer key, the membership file, and the XKEK domain made
+// from what was read back from the files.
+func TestRealXKEKFiles(t *testing.T) {
+	pinv := userPIN(t)
+	s, _ := realSession(t)
+	var free, signerDomain byte = 255, 255
+	for n := byte(0); n < 8; n++ {
+		d, err := s.DomainStatus(n)
+		if err != nil {
+			break
+		}
+		if !d.Created && free == 255 {
+			free = n
+		}
+		if d.Created && !d.XKEK && d.Outstanding == 0 && n > 0 && signerDomain == 255 {
+			signerDomain = n
+		}
+	}
+	if free == 255 || signerDomain == 255 {
+		t.Skip("no free key domain, or no complete one for the group signer")
+	}
+	realLogin(t, s, pinv)
+	id, _, _, err := s.GenerateKey(GenSpec{Kind: "EC", Bits: 256, Label: "xkek-signer", Algorithms: AlgorithmByName("EC", "sign"), Domain: int(signerDomain)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := s.DeleteKey(id); err != nil {
+			t.Errorf("deleting the key %d: %v (delete it by hand)", id, err)
+		}
+	}()
+	certs, err := s.DeviceCertificates()
+	if err != nil {
+		t.Fatal(err)
+	}
+	idFile := EncodeDeviceID(certs) // what the device id file holds
+	dev, err := ParseDeviceID(idFile)
+	if err != nil || !bytes.Equal(dev.Device, certs.Device) || !bytes.Equal(dev.DICA, certs.DICA) {
+		t.Fatalf("the device id file does not read back: %v", err)
+	}
+	mf, err := s.SignMembership(id, dev)
+	if err != nil {
+		t.Fatal(err)
+	}
+	back, err := ParseMembershipFile(mf.Encode())
+	if err != nil || !bytes.Equal(back.GroupRequest, mf.GroupRequest) || !bytes.Equal(back.Membership, mf.Membership) {
+		t.Fatalf("the membership file does not read back: %v", err)
+	}
+	t.Logf("the membership file is %d bytes, the key domain id %X", len(mf.Encode()), back.DomainUID())
+	d, err := s.CreateXKEKDomain(free, back.GroupRequest, back.Membership, back.Signer, "from-files")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := s.DeleteDomain(free); err != nil {
+			t.Errorf("deleting the key domain %d: %v (delete it by hand)", free, err)
+		}
+	}()
+	if !d.XKEK || !strings.HasPrefix(strings.ToUpper(bytesHex(back.DomainUID())), d.DomainID) {
+		t.Errorf("the domain: %+v, the id of the file %X", d, back.DomainUID())
+	}
+}

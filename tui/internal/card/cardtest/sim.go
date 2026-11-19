@@ -18,24 +18,26 @@ import (
 // package card the way the real card did when it was tried (extended length for long bodies and answers, 6884 for a chained command, 6982 until the User PIN is given), and it ends
 // a login when the application is selected. It is for tests only.
 type Sim struct {
-	mu      sync.Mutex
-	PIN     string
-	Tries   int
-	SOTries int
-	Logged  bool
-	Limit   int // the number of key domains the card was made with
-	Domains map[byte]*SimDomain
-	Keys    map[byte]*SimKey
-	Files   map[uint16][]byte
-	Calls   []string // the instruction bytes of the commands, "A4", "20", for a test to look at
-	Sent    [][]byte // every command, as it came
-	pending []byte
+	mu       sync.Mutex
+	PIN      string
+	Tries    int
+	SOTries  int
+	Logged   bool
+	Limit    int // the number of key domains the card was made with
+	Domains  map[byte]*SimDomain
+	Keys     map[byte]*SimKey
+	Files    map[uint16][]byte
+	Calls    []string // the instruction bytes of the commands, "A4", "20", for a test to look at
+	Sent     [][]byte // every command, as it came
+	pending  []byte
+	verified map[string]bool // the certificates the card has verified
 }
 
 // SimDomain is a key domain of the simulated card.
 type SimDomain struct {
 	Shares, Outstanding int
 	DKEK                []byte
+	XKEK                []byte // the identifier of an XKEK key domain (8 bytes); nil for a DKEK domain
 }
 
 // SimKey is a key of the simulated card.
@@ -43,11 +45,79 @@ type SimKey struct {
 	Domain int
 	Wrap   bool
 	Data   []byte
+	Algs   []byte // the algorithms of a key that was generated (empty: ECDH, and wrap when Wrap)
 }
 
 // NewSim is a card with the User PIN 123456 (3 tries), 4 key domains, none created.
 func NewSim() *Sim {
-	return &Sim{PIN: "123456", Tries: 3, SOTries: 15, Limit: 4, Domains: map[byte]*SimDomain{}, Keys: map[byte]*SimKey{}, Files: map[uint16][]byte{}}
+	s := &Sim{PIN: "123456", Tries: 3, SOTries: 15, Limit: 4, Domains: map[byte]*SimDomain{}, Keys: map[byte]*SimKey{}, Files: map[uint16][]byte{}}
+	pt := func(b byte) []byte { return append([]byte{0x04}, bytes.Repeat([]byte{b}, 64)...) }
+	cert := func(car, chr string, point []byte) []byte {
+		inner := tlvBytes(0x5F29, []byte{0}) // profile
+		inner = append(inner, tlvBytes(0x42, []byte(car))...)
+		inner = append(inner, tlvBytes(0x7F49, append([]byte{0x06, 0x01, 0x01}, tlvBytes(0x86, point)...))...)
+		inner = append(inner, tlvBytes(0x5F20, []byte(chr))...)
+		return tlvBytes(0x7F21, append(tlvBytes(0x7F4E, inner), tlvBytes(0x5F37, bytes.Repeat([]byte{9}, 64))...))
+	}
+	s.Files[0x2F02] = append(cert("SIMDICA00001", "SIMDEVICE0001", pt(7)), cert("SIMROOT00001", "SIMDICA00001", pt(8))...)
+	return s
+}
+
+// tlvBytes writes a tag (one or two bytes), a length in BER and a value.
+func tlvBytes(tag int, v []byte) []byte {
+	var t []byte
+	if tag > 0xFF {
+		t = []byte{byte(tag >> 8), byte(tag)} // #nosec G115 -- a tag of two bytes
+	} else {
+		t = []byte{byte(tag)} // #nosec G115 -- a tag of one byte
+	}
+	switch {
+	case len(v) < 0x80:
+		t = append(t, byte(len(v))) // #nosec G115 -- below 128
+	case len(v) < 0x100:
+		t = append(t, 0x81, byte(len(v))) // #nosec G115 -- below 256
+	default:
+		t = append(t, 0x82, byte(len(v)>>8), byte(len(v))) // #nosec G115 -- a few kilobytes
+	}
+	return append(t, v...)
+}
+
+// findTag looks for the first element with a tag among siblings and inside constructed ones (what the simulator needs of a parser).
+func findTag(b []byte, want int) []byte {
+	for len(b) > 1 {
+		tag, i := int(b[0]), 1
+		if tag&0x1F == 0x1F {
+			tag, i = tag<<8|int(b[1]), 2
+		}
+		if len(b) <= i {
+			return nil
+		}
+		n := int(b[i])
+		i++
+		if n == 0x81 && len(b) > i {
+			n, i = int(b[i]), i+1
+		} else if n == 0x82 && len(b) > i+1 {
+			n, i = int(b[i])<<8|int(b[i+1]), i+2
+		}
+		if i+n > len(b) {
+			return nil
+		}
+		val := b[i : i+n]
+		if tag == want {
+			return val
+		}
+		first := tag
+		if tag > 0xFF {
+			first = tag >> 8
+		}
+		if first&0x20 != 0 {
+			if v := findTag(val, want); v != nil {
+				return v
+			}
+		}
+		b = b[i+n:]
+	}
+	return nil
 }
 
 func kcvOf(dkek []byte) []byte {
@@ -57,7 +127,11 @@ func kcvOf(dkek []byte) []byte {
 
 func (s *Sim) status(n byte) []byte {
 	d := s.Domains[n]
-	return append([]byte{byte(d.Shares), byte(d.Outstanding)}, kcvOf(d.DKEK)...) // #nosec G115 -- sizes and numbers of the test data
+	out := append([]byte{byte(d.Shares), byte(d.Outstanding)}, kcvOf(d.DKEK)...) // #nosec G115 -- sizes and numbers of the test data
+	if d.XKEK != nil {
+		out = append(out, d.XKEK...) // the identifier of the key domain follows the check value
+	}
+	return out
 }
 
 func (s *Sim) pinSW(tries int) uint16 { return 0x63C0 | uint16(tries) } // #nosec G115 -- sizes and numbers of the test data
@@ -68,7 +142,7 @@ func (s *Sim) Transmit(apdu []byte) ([]byte, error) {
 	defer s.mu.Unlock()
 	s.Sent = append(s.Sent, append([]byte{}, apdu...))
 	data, sw := s.handle(apdu)
-	return append(data, byte(sw>>8), byte(sw)), nil // #nosec G115 -- sizes and numbers of the test data
+	return append(append([]byte{}, data...), byte(sw>>8), byte(sw)), nil // #nosec G115 -- a copy: the data may be a part of a file, and appending would write into it
 }
 
 // Close ends the connection.
@@ -159,6 +233,9 @@ func (s *Sim) run(cla, ins, p1, p2 byte, body []byte, le int) ([]byte, uint16) {
 			if !k.Wrap {
 				algs = []byte{0x80}
 			}
+			if len(k.Algs) > 0 {
+				algs = k.Algs
+			}
 			return append([]byte{0x62, byte(14 + len(algs))}, append([]byte{0x80, 0x02, 0, 0, 0x83, 0x02, 0xCC, byte(fid), 0xA5, byte(7 + len(algs)), 0x90, 0x04, 0xFF, 0xFF, 0xFF, 0xFF, 0x91, byte(len(algs))}, append(algs, 0x92, 0x01, byte(k.Domain))...)...), 0x9000 // #nosec G115 -- sizes and numbers of the test data
 		}
 		if _, ok := s.Files[fid]; ok {
@@ -188,11 +265,23 @@ func (s *Sim) run(cla, ins, p1, p2 byte, body []byte, le int) ([]byte, uint16) {
 			return nil, 0x6A80
 		}
 		off := int(body[2])<<8 | int(body[3])
+		n, hdr := int(body[5]), 6
+		switch {
+		case body[5] == 0x81 && len(body) > 6:
+			n, hdr = int(body[6]), 7
+		case body[5] == 0x82 && len(body) > 7:
+			n, hdr = int(body[6])<<8|int(body[7]), 8
+		case body[5] >= 0x80:
+			return nil, 0x6A80 // the length of the data is not in the form of BER: what the real card refused
+		}
+		if hdr+n > len(body) {
+			return nil, 0x6A80
+		}
 		f := s.Files[fid]
 		if off > len(f) {
 			return nil, 0x6B00
 		}
-		s.Files[fid] = append(f[:off:off], body[6:6+int(body[5])]...)
+		s.Files[fid] = append(f[:off:off], body[hdr:hdr+n]...)
 		return nil, 0x9000
 	case ins == 0xE4: // delete a file
 		if !s.Logged {
@@ -250,9 +339,12 @@ func (s *Sim) run(cla, ins, p1, p2 byte, body []byte, le int) ([]byte, uint16) {
 	case ins == 0x52: // key domains
 		return s.domainCommand(p1, p2, body)
 	case ins == 0x58: // list of objects
-		var ids []uint16
-		ids = append(ids, 0x2F02, 0x2F03)
+		set := map[uint16]bool{0x2F02: true, 0x2F03: true}
 		for fid := range s.Files {
+			set[fid] = true
+		}
+		var ids []uint16
+		for fid := range set {
 			ids = append(ids, fid)
 		}
 		for id := range s.Keys {
@@ -294,6 +386,57 @@ func (s *Sim) run(cla, ins, p1, p2 byte, body []byte, le int) ([]byte, uint16) {
 			}
 		}
 		return nil, 0x6A88
+	case ins == 0x46: // generate a key pair: the request answers
+		if !s.Logged {
+			return nil, 0x6982
+		}
+		if _, ok := s.Keys[p1]; ok {
+			return nil, 0x6985
+		}
+		k := &SimKey{Domain: 0, Wrap: true}
+		if d := findTag(body, 0x92); len(d) == 1 {
+			k.Domain = int(d[0])
+		}
+		if a := findTag(body, 0x91); len(a) > 0 {
+			k.Algs, k.Wrap = append([]byte{}, a...), bytes.Contains(a, []byte{0x92})
+		}
+		x := bytes.Repeat([]byte{p1}, 32)
+		point := append(append([]byte{0x04}, x...), bytes.Repeat([]byte{0x77}, 32)...)
+		s.Keys[p1] = k
+		inner := tlvBytes(0x5F29, []byte{0})
+		inner = append(inner, tlvBytes(0x42, []byte("UTDUMMY00001"))...)
+		inner = append(inner, tlvBytes(0x7F49, append([]byte{0x06, 0x01, 0x01}, tlvBytes(0x86, point)...))...)
+		inner = append(inner, tlvBytes(0x5F20, []byte("UTDUMMY00001"))...)
+		req := append(tlvBytes(0x7F21, append(tlvBytes(0x7F4E, inner), tlvBytes(0x5F37, bytes.Repeat([]byte{5}, 64))...)), tlvBytes(0x42, []byte("SIMDEVICE0001"))...)
+		req = append(req, tlvBytes(0x5F37, bytes.Repeat([]byte{6}, 64))...)
+		return tlvBytes(0x67, req), 0x9000
+	case ins == 0x68: // sign
+		if !s.Logged {
+			return nil, 0x6982
+		}
+		if _, ok := s.Keys[p1]; !ok {
+			return nil, 0x6A88
+		}
+		r := bytes.Repeat([]byte{0x11}, 32)
+		sg := bytes.Repeat([]byte{0x22}, 32)
+		return append(append([]byte{0x30, 0x44, 0x02, 0x20}, r...), append([]byte{0x02, 0x20}, sg...)...), 0x9000
+	case ins == 0x22 && p1 == 0x81 && p2 == 0xB6: // select the key for the command that follows: a certificate that is not verified yet is asked for again with its authority
+		ref := string(findTag(body, 0x83))
+		if s.verified[ref] {
+			return nil, 0x9000
+		}
+		if ref == "SIMDEVICE0001" || ref == "SIMDICA00001" {
+			return nil, 0x6A88 // the holder is not known yet
+		}
+		return nil, 0x9000
+	case ins == 0x2A && p1 == 0x00 && p2 == 0xBE: // verify a certificate: its holder is known from now on
+		if chr := findTag(body, 0x5F20); len(chr) > 0 {
+			if s.verified == nil {
+				s.verified = map[string]bool{}
+			}
+			s.verified[string(chr)] = true
+		}
+		return nil, 0x9000
 	case ins == 0x84: // random
 		return make([]byte, le), 0x9000
 	}
@@ -334,6 +477,19 @@ func (s *Sim) domainCommand(p1, p2 byte, body []byte) ([]byte, uint16) {
 		}
 		s.Domains[n] = &SimDomain{Shares: int(body[0]), Outstanding: int(body[0]), DKEK: make([]byte, 32)}
 		return s.status(n), 0x9000
+	case 0x02: // create an XKEK domain
+		if !s.Logged {
+			return nil, 0x6982
+		}
+		if d != nil {
+			return nil, 0x6A80
+		}
+		pt := findTag(body, 0x86)
+		if len(pt) != 65 || findTag(body, 0x54) == nil {
+			return nil, 0x6A80
+		}
+		s.Domains[n] = &SimDomain{DKEK: make([]byte, 32), XKEK: append([]byte{}, pt[1:9]...)}
+		return s.status(n), 0x9000
 	case 0x03: // delete the domain
 		if !s.Logged {
 			return nil, 0x6982
@@ -354,6 +510,9 @@ func (s *Sim) domainCommand(p1, p2 byte, body []byte) ([]byte, uint16) {
 		}
 		if d == nil {
 			return nil, 0x6A88
+		}
+		if d.XKEK != nil {
+			return nil, 0x6985 // an XKEK domain has no key encryption key until an exchange key is made
 		}
 		d.DKEK, d.Outstanding = make([]byte, 32), d.Shares
 		return s.status(n), 0x9000

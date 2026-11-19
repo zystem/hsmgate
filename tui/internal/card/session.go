@@ -194,7 +194,7 @@ func (s *Session) DeleteFile(fid uint16) error {
 	return err
 }
 
-// ReadFile reads a whole file.
+// ReadFile reads a whole file, a block of up to 256 bytes at a time (a longer file, such as the device certificates, needs more than one).
 func (s *Session) ReadFile(fid uint16) ([]byte, error) {
 	var out []byte
 	for {
@@ -204,38 +204,38 @@ func (s *Session) ReadFile(fid uint16) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		if sw != 0x9000 && sw != 0x6282 {
+		if sw != 0x9000 && sw != 0x6282 { // the end of the file (6B00: the offset is past it) or an error at the start
 			if len(out) == 0 {
 				return nil, &SWError{SW: sw, What: fmt.Sprintf("reading the file %04X", fid)}
 			}
 			return out, nil
 		}
 		out = append(out, data...)
-		if sw == 0x9000 || len(data) == 0 {
+		if len(data) < 256 {
 			return out, nil
 		}
 	}
 }
 
-// WriteFile writes a file from its first byte (the card makes it when it is not there).
+// WriteFile writes a file from its first byte (the card makes it when it is not there). The data goes as the object 53 after the offset (54), with its length in the form of BER
+// (a block of more than 127 bytes needs the long form). A certificate file is checked by the card as a whole, so a file of a few hundred bytes goes in one command.
 func (s *Session) WriteFile(fid uint16, data []byte) error {
-	const block = 200 // the data of a command, less the two small objects around it
-	for off := 0; off < len(data) || off == 0; {
+	const block = 900
+	off := 0
+	for {
 		n := len(data) - off
 		if n > block {
 			n = block
 		}
-		body := []byte{0x54, 0x02, byte(off >> 8), byte(off), 0x53, byte(n)} // #nosec G115 -- block is 200
-		body = append(body, data[off:off+n]...)
+		body := append([]byte{0x54, 0x02, byte(off >> 8), byte(off)}, der(0x53, data[off:off+n])...)                                 // #nosec G115 -- an offset in a file of a few kilobytes
 		if _, err := s.do(fmt.Sprintf("writing the file %04X", fid), 0x00, 0xD7, byte(fid>>8), byte(fid), body, false); err != nil { // #nosec G115
 			return err
 		}
 		off += n
-		if len(data) == 0 {
-			break
+		if off >= len(data) {
+			return nil
 		}
 	}
-	return nil
 }
 
 // ---- key domains ---------------------------------------------------------------------------------------------------------------------------------------
