@@ -341,7 +341,11 @@ func Apply(ctx context.Context, a Answers, log func(string)) (*Result, error) {
 		}
 	}
 	if a.Mode == ModeCard && !res.Started {
-		res.Notes = append(res.Notes, "the card is locked until it gets its PIN: hsmgate unlock -config "+a.ConfigPath()+" -token card (or give pin_file and start the service)")
+		if a.PinFile == "" {
+			res.Notes = append(res.Notes, "the card is locked until it gets its PIN: hsmgate unlock -config "+a.ConfigPath()+" -token card (or give pin_file and start the service)")
+		} else {
+			res.Notes = append(res.Notes, "the service reads the PIN from "+a.PinFile+" when it starts (the file must be owned by the account the service runs as, mode 0400)")
+		}
 	}
 	if !res.Started {
 		res.Notes = append(res.Notes, "start it: hsmgate serve -config "+a.ConfigPath())
