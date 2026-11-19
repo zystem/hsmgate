@@ -6,7 +6,7 @@ General steps: read the notes; run `hsmgate check -config …` with the new bina
 
 ## 0.9.2 to 0.9.3
 
-- Nothing to do in the configuration or the formats. A package replaces the files in `/usr/bin` and does not restart the service. If you made the setup with 0.9.2 (`hsmgate-setup -auto`), `/etc/hsmgate` was given to the service account: `sudo chown root:hsmgate /etc/hsmgate` brings it back to what the package declares (`rpm -V hsmgate` or `dpkg -V hsmgate` shows the difference), and `sudo chmod 0750 /var/log/hsmgate` does the same for the audit directory (the new unit sets it by itself at the next start).
+- Nothing to do in the configuration or the formats. A package replaces the files in `/usr/bin` and does not restart the service. 0.9.2 had two faults in the directories (`hsmgate-setup -auto` gave `/etc/hsmgate` to the service account, and the unit made `/var/log/hsmgate` 0755; `rpm -V hsmgate` showed both): **`dnf upgrade` to 0.9.3 puts both right by itself** (tried on AlmaLinux 10, 2026-11-19; the service is restarted by you, and the new unit keeps the mode). For a deb that was not tried: if `dpkg -V hsmgate` shows a difference, `sudo chown root:hsmgate /etc/hsmgate` and `sudo chmod 0750 /var/log/hsmgate` do it by hand.
 
 ## 0.9.1 to 0.9.2
 
