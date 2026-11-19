@@ -194,7 +194,7 @@ func (s *Session) DeleteFile(fid uint16) error {
 	return err
 }
 
-// ReadFile reads a whole file.
+// ReadFile reads a whole file, a block of up to 256 bytes at a time (a longer file, such as the device certificates, needs more than one).
 func (s *Session) ReadFile(fid uint16) ([]byte, error) {
 	var out []byte
 	for {
@@ -204,14 +204,14 @@ func (s *Session) ReadFile(fid uint16) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		if sw != 0x9000 && sw != 0x6282 {
+		if sw != 0x9000 && sw != 0x6282 { // the end of the file (6B00: the offset is past it) or an error at the start
 			if len(out) == 0 {
 				return nil, &SWError{SW: sw, What: fmt.Sprintf("reading the file %04X", fid)}
 			}
 			return out, nil
 		}
 		out = append(out, data...)
-		if sw == 0x9000 || len(data) == 0 {
+		if len(data) < 256 {
 			return out, nil
 		}
 	}
