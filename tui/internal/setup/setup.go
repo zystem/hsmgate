@@ -211,7 +211,7 @@ func Apply(ctx context.Context, a Answers, log func(string)) (*Result, error) {
 	if err := os.MkdirAll(a.Dir, 0o750); err != nil {
 		return nil, err
 	}
-	sys.Chown(a.Dir, a.User)
+	sys.ChownGroup(a.Dir, a.User) // the directory of the configuration stays root's (the package makes it root:hsmgate 0750): the service reads it through its group and must not own it
 	d := store.New(a.ConfigPath())
 	steps := []error{
 		d.Set(a.Listen, "listen"),

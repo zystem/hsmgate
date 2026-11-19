@@ -22,6 +22,7 @@ Group=hsmgate
 RuntimeDirectory=hsmgate
 RuntimeDirectoryMode=0750
 LogsDirectory=hsmgate
+LogsDirectoryMode=0750
 ConfigurationDirectory=hsmgate
 ConfigurationDirectoryMode=0750
 
