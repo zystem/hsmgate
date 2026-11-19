@@ -157,7 +157,7 @@ func (a *App) cardForm(title, text string, nfields int, fields func(f *tview.For
 // ---- the actions ---------------------------------------------------------------------------------------------------------------------------------------
 
 func (a *App) actChangePIN() {
-	a.cardForm("Change the User PIN", "Give the current User PIN and the new one (6 to 16 characters). The card checks the current one: a wrong one uses a try.\n"+a.pinHint(), 3, func(f *tview.Form) {
+	a.cardForm("Change the User PIN", "Give the current User PIN and the new one: it must have as many characters as the current one (the card refuses another length). The card checks the current one: a wrong one uses a try.\n"+a.pinHint(), 3, func(f *tview.Form) {
 		f.AddPasswordField("Current PIN", "", 20, '*', nil)
 		f.AddPasswordField("New PIN", "", 20, '*', nil)
 		f.AddPasswordField("New PIN again", "", 20, '*', nil)
@@ -165,6 +165,10 @@ func (a *App) actChangePIN() {
 		cur, next, again := fieldText(f, "Current PIN"), fieldText(f, "New PIN"), fieldText(f, "New PIN again")
 		if err := checkNewPIN(next, again); err != nil {
 			a.fail(err)
+			return
+		}
+		if len(cur) != len(next) {
+			a.fail(fmt.Errorf("the new User PIN must have the same number of characters as the current one (%d): the card refuses another length", len(cur)))
 			return
 		}
 		a.cardClose()

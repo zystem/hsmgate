@@ -3,6 +3,8 @@
 ## Unreleased
 
 ### Fixed
+- **Generating an RSA key on the Card page** failed with `6700` on a real card: the answer is longer than a short Le can hold, so the command now uses extended lengths (RSA-2048 was made, wrapped, unwrapped and deleted on the real card). Found by the new real-card tests.
+- **Changing the User PIN**: the card refuses a new PIN of another length than the current one (`6A80`); the page and the library now say so before any try is spent.
 - The quick setup in card mode no longer says that the card "is locked until it gets its PIN" when a PIN file was given: it says that the service reads the PIN from that file. Found by running the wizard on a real card.
 
 ### Added

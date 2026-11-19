@@ -121,9 +121,13 @@ func (s *Session) GenerateKey(g GenSpec) (id byte, request, keyID []byte, err er
 	if id, err = s.FreeKeyID(); err != nil {
 		return
 	}
-	request, err = s.do(fmt.Sprintf("generating the key %d (a %s key of %d bits: an RSA key takes up to a minute; the User PIN must be given)", id, g.Kind, g.Bits), 0x00, 0x46, id, 0x00, g.encode(), true)
+	what := fmt.Sprintf("generating the key %d (a %s key of %d bits: an RSA key takes up to a minute; the User PIN must be given)", id, g.Kind, g.Bits)
+	request, sw, err := s.SendExtended(0x00, 0x46, id, 0x00, g.encode())
 	if err != nil {
-		return 0, nil, nil, err
+		return 0, nil, nil, fmt.Errorf("%s: %w", what, err)
+	}
+	if sw != 0x9000 {
+		return 0, nil, nil, &SWError{SW: sw, What: what}
 	}
 	keyID, err = requestKeyID(request)
 	if err != nil {

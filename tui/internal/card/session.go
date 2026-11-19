@@ -84,6 +84,20 @@ func (s *Session) Send(cla, ins, p1, p2 byte, data []byte, expect bool) ([]byte,
 	return s.answer(apdu)
 }
 
+// SendExtended sends a command with extended lengths whatever the size of the body: for a command whose answer is longer than 256 bytes, which a short Le makes the card refuse
+// (6700), as the answer to the generation of an RSA key is.
+func (s *Session) SendExtended(cla, ins, p1, p2 byte, data []byte) ([]byte, uint16, error) {
+	apdu := []byte{cla, ins, p1, p2}
+	if len(data) > 0 {
+		apdu = append(apdu, 0x00, byte(len(data)>>8), byte(len(data))) // #nosec G115 -- a body of a few hundred bytes
+		apdu = append(apdu, data...)
+		apdu = append(apdu, 0x00, 0x00)
+	} else {
+		apdu = append(apdu, 0x00, 0x00, 0x00)
+	}
+	return s.answer(apdu)
+}
+
 func statusOf(resp []byte) uint16 {
 	if len(resp) < 2 {
 		return 0
@@ -164,6 +178,9 @@ func (s *Session) VerifyUserPIN(p []byte) (PIN, error) {
 
 // ChangeUserPIN replaces the User PIN (the card needs the current one given in the same command).
 func (s *Session) ChangeUserPIN(current, next []byte) error {
+	if len(current) != len(next) { // found on a real card: the command is the two PINs one after the other and the card cuts it in the middle; any other length gives 6A80
+		return fmt.Errorf("the new User PIN must have the same number of characters as the current one (%d): the card refuses another length", len(current))
+	}
 	_, err := s.do("changing the User PIN", 0x00, 0x24, 0x00, refUserPIN, append(append([]byte{}, current...), next...), false)
 	return err
 }

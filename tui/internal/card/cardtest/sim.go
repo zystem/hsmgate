@@ -323,11 +323,14 @@ func (s *Sim) run(cla, ins, p1, p2 byte, body []byte, le int) ([]byte, uint16) {
 		s.Tries--
 		return nil, s.pinSW(s.Tries)
 	case ins == 0x24 && p2 == 0x81: // change the PIN
-		if !bytes.HasPrefix(body, []byte(s.PIN)) || len(body) == len(s.PIN) {
+		if len(body)%2 != 0 { // as the real card: the two PINs are cut in the middle, so they must be of one length (6A80 otherwise)
+			return nil, 0x6A80
+		}
+		if h := len(body) / 2; string(body[:h]) != s.PIN {
 			s.Tries--
 			return nil, s.pinSW(s.Tries)
 		}
-		s.PIN = string(body[len(s.PIN):])
+		s.PIN = string(body[len(body)/2:])
 		return nil, 0x9000
 	case ins == 0x2C && p2 == 0x81: // unblock with the SO PIN (the SO PIN of the simulated card is 3537363231383830)
 		if !bytes.HasPrefix(body, []byte("57621880")) {
@@ -403,11 +406,22 @@ func (s *Sim) run(cla, ins, p1, p2 byte, body []byte, le int) ([]byte, uint16) {
 		x := bytes.Repeat([]byte{p1}, 32)
 		point := append(append([]byte{0x04}, x...), bytes.Repeat([]byte{0x77}, 32)...)
 		s.Keys[p1] = k
+		pub := append([]byte{0x06, 0x01, 0x01}, tlvBytes(0x86, point)...)
+		sigLen := 64
+		if bytes.Contains(body, []byte{0x04, 0x00, 0x7F, 0x00, 0x07, 0x02, 0x02, 0x02, 0x01, 0x02}) { // an RSA key: the answer is the modulus and a signature of its size, longer than 256 bytes
+			if le > 0 && le <= 256 {
+				delete(s.Keys, p1)
+				return nil, 0x6700 // as the real card: a short Le is refused when the answer is longer
+			}
+			mod := append([]byte{0xB5}, bytes.Repeat([]byte{p1}, 255)...)
+			pub = append(tlvBytes(0x81, mod), tlvBytes(0x82, []byte{1, 0, 1})...)
+			sigLen = 256
+		}
 		inner := tlvBytes(0x5F29, []byte{0})
 		inner = append(inner, tlvBytes(0x42, []byte("UTDUMMY00001"))...)
-		inner = append(inner, tlvBytes(0x7F49, append([]byte{0x06, 0x01, 0x01}, tlvBytes(0x86, point)...))...)
+		inner = append(inner, tlvBytes(0x7F49, pub)...)
 		inner = append(inner, tlvBytes(0x5F20, []byte("UTDUMMY00001"))...)
-		req := append(tlvBytes(0x7F21, append(tlvBytes(0x7F4E, inner), tlvBytes(0x5F37, bytes.Repeat([]byte{5}, 64))...)), tlvBytes(0x42, []byte("SIMDEVICE0001"))...)
+		req := append(tlvBytes(0x7F21, append(tlvBytes(0x7F4E, inner), tlvBytes(0x5F37, bytes.Repeat([]byte{5}, sigLen))...)), tlvBytes(0x42, []byte("SIMDEVICE0001"))...)
 		req = append(req, tlvBytes(0x5F37, bytes.Repeat([]byte{6}, 64))...)
 		return tlvBytes(0x67, req), 0x9000
 	case ins == 0x68: // sign
