@@ -18,7 +18,9 @@ Group=hsmgate
 RuntimeDirectory=hsmgate
 RuntimeDirectoryMode=0750
 LogsDirectory=hsmgate
+LogsDirectoryMode=0750
 ConfigurationDirectory=hsmgate
+ConfigurationDirectoryMode=0750
 
 # sandbox: the service talks to pcscd over its unix socket, listens on one port, writes the audit log and nothing else
 NoNewPrivileges=yes

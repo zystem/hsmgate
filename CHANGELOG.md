@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Fixed
+- **`hsmgate-setup -auto` no longer gives `/etc/hsmgate` to the service account**: the directory stays `root:hsmgate 0750` as the package makes it (the service reads it through its group), so `rpm -V` is clean after a setup. The unit sets `LogsDirectoryMode=0750` (systemd made the audit directory 0755 at the first start, against the 0750 of the package); the same two lines are in `deploy/hsmgate.service`. Found by trying the rpm on a machine with SELinux.
 - **The SO PIN** is taken as 8 characters or as 16 hexadecimal digits (how the vendor's tools write it); a 16-digit SO PIN was refused with `6A80`. Found on a real card; the change of the SO PIN and the unblocking were run there.
 - **Generating an RSA key on the Card page** failed with `6700` on a real card: the answer is longer than a short Le can hold, so the command now uses extended lengths (RSA-2048 was made, wrapped, unwrapped and deleted on the real card). Found by the new real-card tests.
 - **Changing the User PIN**: the card refuses a new PIN of another length than the current one (`6A80`); the page and the library now say so before any try is spent.
