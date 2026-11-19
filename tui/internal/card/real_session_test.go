@@ -389,3 +389,66 @@ func TestRealXKEKDomain(t *testing.T) {
 		t.Errorf("asked again: %v %+v", err, got)
 	}
 }
+
+// TestRealXKEKFiles is the whole way through the files of the card manager on one card: the device id file, a group signer key, the membership file, and the XKEK domain made
+// from what was read back from the files.
+func TestRealXKEKFiles(t *testing.T) {
+	pinv := userPIN(t)
+	s, _ := realSession(t)
+	var free, signerDomain byte = 255, 255
+	for n := byte(0); n < 8; n++ {
+		d, err := s.DomainStatus(n)
+		if err != nil {
+			break
+		}
+		if !d.Created && free == 255 {
+			free = n
+		}
+		if d.Created && !d.XKEK && d.Outstanding == 0 && n > 0 && signerDomain == 255 {
+			signerDomain = n
+		}
+	}
+	if free == 255 || signerDomain == 255 {
+		t.Skip("no free key domain, or no complete one for the group signer")
+	}
+	realLogin(t, s, pinv)
+	id, _, _, err := s.GenerateKey(GenSpec{Kind: "EC", Bits: 256, Label: "xkek-signer", Algorithms: AlgorithmByName("EC", "sign"), Domain: int(signerDomain)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := s.DeleteKey(id); err != nil {
+			t.Errorf("deleting the key %d: %v (delete it by hand)", id, err)
+		}
+	}()
+	certs, err := s.DeviceCertificates()
+	if err != nil {
+		t.Fatal(err)
+	}
+	idFile := EncodeDeviceID(certs) // what the device id file holds
+	dev, err := ParseDeviceID(idFile)
+	if err != nil || !bytes.Equal(dev.Device, certs.Device) || !bytes.Equal(dev.DICA, certs.DICA) {
+		t.Fatalf("the device id file does not read back: %v", err)
+	}
+	mf, err := s.SignMembership(id, dev)
+	if err != nil {
+		t.Fatal(err)
+	}
+	back, err := ParseMembershipFile(mf.Encode())
+	if err != nil || !bytes.Equal(back.GroupRequest, mf.GroupRequest) || !bytes.Equal(back.Membership, mf.Membership) {
+		t.Fatalf("the membership file does not read back: %v", err)
+	}
+	t.Logf("the membership file is %d bytes, the key domain id %X", len(mf.Encode()), back.DomainUID())
+	d, err := s.CreateXKEKDomain(free, back.GroupRequest, back.Membership, back.Signer, "from-files")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := s.DeleteDomain(free); err != nil {
+			t.Errorf("deleting the key domain %d: %v (delete it by hand)", free, err)
+		}
+	}()
+	if !d.XKEK || !strings.HasPrefix(strings.ToUpper(bytesHex(back.DomainUID())), d.DomainID) {
+		t.Errorf("the domain: %+v, the id of the file %X", d, back.DomainUID())
+	}
+}

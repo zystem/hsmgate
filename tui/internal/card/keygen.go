@@ -87,8 +87,8 @@ func rsaKeySpec(bits int) []byte {
 
 // derTag2 writes an element with a tag of two bytes.
 func derTag2(tag int, v []byte) []byte {
-	e := der(byte(tag&0xFF), v) // #nosec G115 -- the low byte of the tag
-	return append([]byte{byte(tag >> 8)}, e...)
+	e := der(byte(tag&0xFF), v)                 // #nosec G115 -- the low byte of the tag
+	return append([]byte{byte(tag >> 8)}, e...) // #nosec G115 -- the high byte of a tag of two bytes
 }
 
 // encode is the body of the generation command.
@@ -131,6 +131,10 @@ func (s *Session) GenerateKey(g GenSpec) (id byte, request, keyID []byte, err er
 	}
 	if err = s.WriteFile(0xC400|uint16(id), prkdFor(g, keyID)); err != nil {
 		return id, request, keyID, fmt.Errorf("the key %d is made but its description was not written: %w", id, err)
+	}
+	// the request is kept in the file CEnn, as the card manager keeps it: a group signer key needs it later, and the card gives it only once
+	if err = s.WriteFile(0xCE00|uint16(id), request); err != nil {
+		return id, request, keyID, fmt.Errorf("the key %d is made but its request was not written: %w", id, err)
 	}
 	return id, request, keyID, nil
 }

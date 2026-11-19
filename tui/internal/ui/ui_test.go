@@ -875,3 +875,111 @@ func TestCardShareFormOffersBothFormats(t *testing.T) {
 		r.waitFor("signer (1, EC-256)")
 	}
 }
+
+// A key is generated and an XKEK key domain is made through the files, all through the forms on the simulated card.
+func TestCardKeyAndXKEKActionsThroughTheForms(t *testing.T) {
+	c, sim := cardtest.New(t), cardtest.NewSim()
+	c.FCPs["CC01"] = cardtest.KeyFCP(0, []byte{0xFF, 0xFF, 0xFF, 0xFF}, 0x73, 0x80, 0x92) // the first key may sign
+	r := startWith(t, sample, false, func(o *Options) {
+		o.CardRun = c.Run
+		o.CardOpen = func(context.Context, card.Reader) (card.Conn, error) { return sim, nil }
+	})
+	r.waitFor("Overview")
+	r.screen.SetSize(170, 40)
+	r.key(tcell.KeyRune, '3')
+	r.key(tcell.KeyTab, 0)
+	r.key(tcell.KeyRune, 'r')
+	r.waitFor("signer (1, EC-256)")
+	dir := t.TempDir()
+	idFile, kdm := filepath.Join(dir, "dev.id"), filepath.Join(dir, "m.kdm")
+
+	// the device ID of the card
+	r.key(tcell.KeyEnter, 0)
+	r.waitFor("Export the device ID of this card")
+	r.down(2)
+	r.key(tcell.KeyEnter, 0)
+	r.waitFor("File", "device ID")
+	r.fill(map[string]string{"File": idFile})
+	r.press(0)
+	r.waitFor("The device ID is written to")
+	raw, err := os.ReadFile(idFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := card.ParseDeviceID(raw); err != nil {
+		t.Errorf("the device ID file: %v", err)
+	}
+	r.key(tcell.KeyEnter, 0)
+	r.waitFor("signer (1, EC-256)")
+
+	// a signing key in the first key domain (line 3): the card makes it and the page writes its description
+	r.down(3)
+	r.key(tcell.KeyEnter, 0)
+	r.waitFor("Generate a key (EC or RSA)")
+	r.key(tcell.KeyEnter, 0)
+	r.waitFor("Label", "Type", "Use")
+	r.fill(map[string]string{"Label": "signer", "User PIN": "123456"})
+	r.press(0)
+	r.waitFor("a key with the label", "already")
+	r.key(tcell.KeyEnter, 0)
+	r.fill(map[string]string{"Label": "group-signer"})
+	r.do(func() {
+		r.app.cardFormCur.GetFormItemByLabel("Use").(*tview.DropDown).SetCurrentOption(4) // an RSA use for an EC type
+	})
+	r.press(0)
+	r.waitFor("is for RSA keys")
+	r.key(tcell.KeyEnter, 0)
+	r.do(func() {
+		r.app.cardFormCur.GetFormItemByLabel("Use").(*tview.DropDown).SetCurrentOption(0) // sign (ECDSA)
+	})
+	r.press(0)
+	r.waitFor("The key 1 (group-signer, EC-256) is made", "CKA_ID")
+	if k := sim.Keys[1]; k == nil || k.Domain != 0 || !bytes.Equal(k.Algs, card.AlgorithmByName("EC", "sign")) {
+		t.Fatalf("the key: %+v", sim.Keys[1])
+	}
+	r.key(tcell.KeyEnter, 0)
+	r.waitFor("signer (1, EC-256)")
+
+	// the group signer signs the membership of the device (line 4 is the key 1 of the page)
+	r.down(1)
+	r.key(tcell.KeyEnter, 0)
+	r.waitFor("Sign a key domain membership (group signer)")
+	r.key(tcell.KeyEnter, 0)
+	r.waitFor("Device ID file", "Membership file")
+	r.fill(map[string]string{"Device ID file": filepath.Join(dir, "nothing.id"), "Membership file": kdm, "User PIN": "123456"})
+	r.press(0)
+	r.waitFor("nothing.id")
+	r.key(tcell.KeyEnter, 0)
+	r.fill(map[string]string{"Device ID file": idFile})
+	r.press(0)
+	r.waitFor("The membership is written to", "key domain it is for")
+	raw, err = os.ReadFile(kdm)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mf, err := card.ParseMembershipFile(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.key(tcell.KeyEnter, 0)
+	r.waitFor("signer (1, EC-256)")
+
+	// the XKEK key domain from the file (the page's tree has the domain 2 as not created, line 7)
+	r.down(3)
+	r.key(tcell.KeyEnter, 0)
+	r.waitFor("Create an XKEK key domain from a membership file")
+	r.down(1)
+	r.key(tcell.KeyEnter, 0)
+	r.waitFor("Membership file", "Label")
+	r.fill(map[string]string{"Membership file": idFile, "User PIN": "123456"})
+	r.press(0)
+	r.waitFor("not a key domain membership")
+	r.key(tcell.KeyEnter, 0)
+	r.fill(map[string]string{"Membership file": kdm, "Label": "group"})
+	r.press(0)
+	r.waitFor("The XKEK key domain 2 is made")
+	d := sim.Domains[2]
+	if d == nil || d.XKEK == nil || !bytes.Equal(d.XKEK, mf.DomainUID()[:8]) {
+		t.Errorf("the domain: %+v, the id of the file %X", d, mf.DomainUID())
+	}
+}

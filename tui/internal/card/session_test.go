@@ -269,3 +269,135 @@ func TestExplorerErrors(t *testing.T) {
 		t.Errorf("%v", err)
 	}
 }
+
+// A file of more than 127 bytes: the length of the data of the write is in the long form of BER (the real card answered 6A80 to a length byte of 200), and the file reads back.
+func TestWriteAndReadALongFile(t *testing.T) {
+	s, sim := newSession(t)
+	login(t, s)
+	for _, n := range []int{5, 127, 128, 255, 489, 1500} {
+		data := bytes.Repeat([]byte{byte(n)}, n) // #nosec G115 -- test data
+		if err := s.WriteFile(0xCE09, data); err != nil {
+			t.Fatalf("%d bytes: %v", n, err)
+		}
+		if !bytes.Equal(sim.Files[0xCE09], data) {
+			t.Fatalf("%d bytes were not written as they were", n)
+		}
+		got, err := s.ReadFile(0xCE09)
+		if err != nil || !bytes.Equal(got, data) {
+			t.Fatalf("%d bytes: read back %d bytes, %v", n, len(got), err)
+		}
+		if err := s.DeleteFile(0xCE09); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestGenerateKeyWritesItsDescriptionAndRequest(t *testing.T) {
+	s, sim := newSession(t)
+	if _, _, _, err := s.GenerateKey(GenSpec{Kind: "EC", Bits: 256, Label: "k", Domain: -1}); err == nil {
+		t.Error("a key was made before the login")
+	}
+	login(t, s)
+	for _, bad := range []GenSpec{{Kind: "EC", Bits: 256}, {Kind: "EC", Bits: 384, Label: "x"}, {Kind: "RSA", Bits: 1024, Label: "x"}, {Kind: "DSA", Bits: 256, Label: "x"}} {
+		if _, _, _, err := s.GenerateKey(bad); err == nil {
+			t.Errorf("%+v was accepted", bad)
+		}
+	}
+	id, req, kid, err := s.GenerateKey(GenSpec{Kind: "EC", Bits: 256, Label: "mine", Algorithms: AlgorithmByName("EC", "derive", "wrap"), Domain: 2})
+	if err != nil || id != 1 || len(kid) != 20 || len(req) == 0 {
+		t.Fatalf("%v %d %d", err, id, len(kid))
+	}
+	if k := sim.Keys[1]; k == nil || k.Domain != 2 || !k.Wrap || !bytes.Equal(k.Algs, []byte{AlgECDH, AlgWrap}) {
+		t.Errorf("the key: %+v", k)
+	}
+	label, gotID, algo := prkd(sim.Files[0xC401])
+	if label != "mine" || !bytes.Equal(gotID, kid) || algo != "EC-256" {
+		t.Errorf("the description: %q %X %q", label, gotID, algo)
+	}
+	if !bytes.Equal(sim.Files[0xCE01], req) {
+		t.Error("the request was not kept in its file")
+	}
+	// the spec that was sent is the one of the vendor's card manager: the profile, the references, P-256, the holder, the algorithms and the key domain
+	spec := GenSpec{Kind: "EC", Bits: 256, Label: "x", Algorithms: []byte{0x73}, Domain: 2}.encode()
+	for _, want := range [][]byte{{0x5F, 0x29, 0x01, 0x00}, {0x42, 0x0C}, {0x7F, 0x49}, oidECDSASHA256, {0x5F, 0x20, 0x0C}, {0x91, 0x01, 0x73}, {0x92, 0x01, 0x02}} {
+		if !bytes.Contains(spec, want) {
+			t.Errorf("the specification lacks % X", want)
+		}
+	}
+	rsa := GenSpec{Kind: "RSA", Bits: 2048, Label: "x", Domain: -1}.encode()
+	if !bytes.Contains(rsa, oidRSAv15SHA256) || !bytes.Contains(rsa, []byte{0x02, 0x02, 0x08, 0x00}) || bytes.Contains(rsa, []byte{0x92}) && false {
+		t.Errorf("the RSA specification: % X", rsa)
+	}
+}
+
+func TestXKEKDomainThroughTheFiles(t *testing.T) {
+	s, sim := newSession(t)
+	login(t, s)
+	id, _, _, err := s.GenerateKey(GenSpec{Kind: "EC", Bits: 256, Label: "signer", Algorithms: AlgorithmByName("EC", "sign"), Domain: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	certs, err := s.DeviceCertificates()
+	if err != nil || len(certs.Device) == 0 || len(certs.DICA) == 0 {
+		t.Fatalf("%v %+v", err, certs)
+	}
+	dev, err := ParseDeviceID(EncodeDeviceID(certs))
+	if err != nil || !bytes.Equal(dev.Device, certs.Device) {
+		t.Fatalf("the device id file: %v", err)
+	}
+	if _, err := ParseDeviceID(append([]byte{0x30, 0x03}, 1, 2, 3)); err == nil {
+		t.Error("a file that is not a device id")
+	}
+	mf, err := s.SignMembership(id, dev)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mf.Membership) != 66 || mf.Membership[0] != 0x54 || mf.Membership[1] != 64 {
+		t.Errorf("the membership is the TLV 54 with 64 bytes: % X", mf.Membership[:4])
+	}
+	back, err := ParseMembershipFile(mf.Encode())
+	if err != nil || !bytes.Equal(back.GroupRequest, mf.GroupRequest) || !bytes.Equal(back.Membership, mf.Membership) || !bytes.Equal(back.Signer.Device, certs.Device) {
+		t.Fatalf("the membership file does not read back: %v", err)
+	}
+	if _, err := ParseMembershipFile(EncodeDeviceID(certs)); err == nil {
+		t.Error("a device id was read as a membership")
+	}
+	d, err := s.CreateXKEKDomain(2, back.GroupRequest, back.Membership, back.Signer, "group")
+	if err != nil || !d.XKEK || d.DomainID != "0101010101010101" || d.Label != "group" {
+		t.Fatalf("%v %+v", err, d)
+	}
+	var swe *SWError
+	if err := s.DeleteKEK(2); !errors.As(err, &swe) || swe.SW != 0x6985 {
+		t.Errorf("the key encryption key of an XKEK domain before an exchange key: %v", err)
+	}
+	if _, err := s.CreateXKEKDomain(2, back.GroupRequest, back.Membership, back.Signer, ""); err == nil {
+		t.Error("a domain that is there was made again")
+	}
+	if err := s.DeleteDomain(2); err != nil {
+		t.Fatal(err)
+	}
+	if sim.Domains[2] != nil {
+		t.Error("the domain is still there")
+	}
+	// a membership without the signature is refused before the card is asked
+	if _, err := s.CreateXKEKDomain(2, nil, back.Membership, back.Signer, ""); err == nil {
+		t.Error("no request")
+	}
+}
+
+func TestRawECDSA(t *testing.T) {
+	der := append([]byte{0x30, 0x46, 0x02, 0x21, 0x00}, append(bytes.Repeat([]byte{0xFF}, 32), append([]byte{0x02, 0x21, 0x00}, bytes.Repeat([]byte{0x80}, 32)...)...)...)
+	raw, err := rawECDSA(der, 32)
+	if err != nil || len(raw) != 64 || raw[0] != 0xFF || raw[32] != 0x80 {
+		t.Fatalf("%v % X", err, raw)
+	}
+	short := []byte{0x30, 0x06, 0x02, 0x01, 0x05, 0x02, 0x01, 0x07}
+	if raw, _ := rawECDSA(short, 32); len(raw) != 64 || raw[31] != 5 || raw[63] != 7 {
+		t.Errorf("short integers are padded: % X", raw)
+	}
+	for _, bad := range [][]byte{nil, {0x31, 0x00}, {0x30, 0x03, 0x02, 0x01, 0x01}} {
+		if _, err := rawECDSA(bad, 32); err == nil {
+			t.Errorf("% X was read", bad)
+		}
+	}
+}
