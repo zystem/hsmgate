@@ -4,7 +4,7 @@ The rule is in [SECURITY.md](../SECURITY.md), "What is supported": the **latest 
 
 | Release | Date | Status |
 |---|---|---|
-| **0.9.3** | 2026-11-20 | supported: the latest |
+| **0.9.3** | 2026-11-19 | supported: the latest |
 | 0.9.2, 0.9.1 | 2026-11-15 | replaced: update (0.9.0 was tagged but never released) |
 | 0.8.0 | 2026-11-13 | previous minor: High and Critical fixes only, **until 2026-12-15**; then not supported |
 | 0.7.3 | 2026-11-11 | High and Critical fixes only, **until 2026-12-13** (the date set when 0.8.0 came out); then not supported |
