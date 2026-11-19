@@ -401,3 +401,57 @@ func TestRawECDSA(t *testing.T) {
 		}
 	}
 }
+
+// The answer to the generation of an RSA key is longer than 256 bytes, and a card refuses a short Le then (6700, found on a real card): the key is made with extended lengths.
+func TestGenerateRSAKeyUsesAnExtendedLength(t *testing.T) {
+	s, sim := newSession(t)
+	login(t, s)
+	id, req, kid, err := s.GenerateKey(GenSpec{Kind: "RSA", Bits: 2048, Label: "rsa", Algorithms: AlgorithmByName("RSA", "sign"), Domain: 1})
+	if err != nil || len(kid) != 20 || len(req) < 512 {
+		t.Fatalf("%v: %d %d", err, len(kid), len(req))
+	}
+	label, gotID, algo := prkd(sim.Files[0xC400|uint16(id)])
+	if label != "rsa" || !bytes.Equal(gotID, kid) || algo != "RSA-2048" {
+		t.Errorf("the description: %q %X %q", label, gotID, algo)
+	}
+	// a short Le is refused, as the card refuses it
+	body := GenSpec{Kind: "RSA", Bits: 2048, Label: "x", Domain: 1}.encode()
+	short := append(append([]byte{0x00, 0x46, 0x09, 0x00, byte(len(body))}, body...), 0x00)
+	if resp, _ := sim.Transmit(short); statusOf(resp) != 0x6700 {
+		t.Errorf("a short Le was accepted: %X", statusOf(resp))
+	}
+}
+
+// A real card refuses a new User PIN of another length than the current one (6A80); the library says so before it sends anything, so no try is spent.
+func TestChangeUserPINNeedsTheSameLength(t *testing.T) {
+	s, sim := newSession(t)
+	sent := len(sim.Sent)
+	if err := s.ChangeUserPIN([]byte("123456"), []byte("1234567")); err == nil || !strings.Contains(err.Error(), "same number of characters") {
+		t.Errorf("a PIN of another length: %v", err)
+	}
+	if len(sim.Sent) != sent {
+		t.Error("something was sent to the card")
+	}
+	if err := s.ChangeUserPIN([]byte("123456"), []byte("65432")); err == nil {
+		t.Error("a shorter PIN was accepted")
+	}
+}
+
+// The SO PIN is 8 bytes: given as 8 characters or as 16 hexadecimal digits (how the vendor's tools write it, and how a real card's was written).
+func TestSOPINBytes(t *testing.T) {
+	for in, want := range map[string]string{"57621880": "57621880", "3537363231383830": "57621880"} {
+		got, err := SOPINBytes(in)
+		if err != nil || string(got) != want {
+			t.Errorf("%q: %q %v", in, got, err)
+		}
+	}
+	for _, bad := range []string{"", "1234567", "123456789", "zzzzzzzzzzzzzzzz", "12345678901234567"} {
+		if _, err := SOPINBytes(bad); err == nil {
+			t.Errorf("%q was accepted", bad)
+		}
+	}
+	s, _ := newSession(t)
+	if err := s.UnblockUserPIN([]byte("3537363231383830"), []byte("111111")); err != nil {
+		t.Errorf("the hexadecimal form of the SO PIN: %v", err)
+	}
+}

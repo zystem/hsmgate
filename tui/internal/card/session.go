@@ -2,6 +2,7 @@ package card
 
 import (
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
 )
@@ -80,6 +81,20 @@ func (s *Session) Send(cla, ins, p1, p2 byte, data []byte, expect bool) ([]byte,
 		}
 	case expect:
 		apdu = append(apdu, 0x00)
+	}
+	return s.answer(apdu)
+}
+
+// SendExtended sends a command with extended lengths whatever the size of the body: for a command whose answer is longer than 256 bytes, which a short Le makes the card refuse
+// (6700), as the answer to the generation of an RSA key is.
+func (s *Session) SendExtended(cla, ins, p1, p2 byte, data []byte) ([]byte, uint16, error) {
+	apdu := []byte{cla, ins, p1, p2}
+	if len(data) > 0 {
+		apdu = append(apdu, 0x00, byte(len(data)>>8), byte(len(data))) // #nosec G115 -- a body of a few hundred bytes
+		apdu = append(apdu, data...)
+		apdu = append(apdu, 0x00, 0x00)
+	} else {
+		apdu = append(apdu, 0x00, 0x00, 0x00)
 	}
 	return s.answer(apdu)
 }
@@ -164,19 +179,50 @@ func (s *Session) VerifyUserPIN(p []byte) (PIN, error) {
 
 // ChangeUserPIN replaces the User PIN (the card needs the current one given in the same command).
 func (s *Session) ChangeUserPIN(current, next []byte) error {
+	if len(current) != len(next) { // found on a real card: the command is the two PINs one after the other and the card cuts it in the middle; any other length gives 6A80
+		return fmt.Errorf("the new User PIN must have the same number of characters as the current one (%d): the card refuses another length", len(current))
+	}
 	_, err := s.do("changing the User PIN", 0x00, 0x24, 0x00, refUserPIN, append(append([]byte{}, current...), next...), false)
 	return err
 }
 
+// SOPINBytes turns what a person gives as the SO PIN (the initialization code, 8 bytes) into the 8 bytes: either 8 characters as they are, or 16 hexadecimal digits, which is how the
+// vendor's tools write it (sc-hsm-tool --so-pin). The two lengths cannot be mistaken for each other.
+func SOPINBytes(s string) ([]byte, error) {
+	switch len(s) {
+	case 8:
+		return []byte(s), nil
+	case 16:
+		b, err := hex.DecodeString(s)
+		if err != nil {
+			return nil, errors.New("an SO PIN of 16 characters is 16 hexadecimal digits (8 bytes)")
+		}
+		return b, nil
+	}
+	return nil, errors.New("an SO PIN is 8 characters, or 16 hexadecimal digits")
+}
+
 // UnblockUserPIN sets the User PIN with the SO PIN (the initialization code), when the User PIN is blocked or forgotten.
 func (s *Session) UnblockUserPIN(so, next []byte) error {
-	_, err := s.do("unblocking the User PIN", 0x00, 0x2C, 0x00, refUserPIN, append(append([]byte{}, so...), next...), false)
+	code, err := SOPINBytes(string(so))
+	if err != nil {
+		return err
+	}
+	_, err = s.do("unblocking the User PIN", 0x00, 0x2C, 0x00, refUserPIN, append(append([]byte{}, code...), next...), false)
 	return err
 }
 
 // ChangeSOPIN replaces the SO PIN.
 func (s *Session) ChangeSOPIN(current, next []byte) error {
-	_, err := s.do("changing the SO PIN", 0x00, 0x24, 0x00, refSOPIN, append(append([]byte{}, current...), next...), false)
+	cur, err := SOPINBytes(string(current))
+	if err != nil {
+		return err
+	}
+	nxt, err := SOPINBytes(string(next))
+	if err != nil {
+		return err
+	}
+	_, err = s.do("changing the SO PIN", 0x00, 0x24, 0x00, refSOPIN, append(append([]byte{}, cur...), nxt...), false)
 	return err
 }
 
