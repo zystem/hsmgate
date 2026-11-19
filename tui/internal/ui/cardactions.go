@@ -195,14 +195,14 @@ func checkNewPIN(next, again string) error {
 }
 
 func (a *App) actChangeSOPIN() {
-	a.cardForm("Change the SO PIN", "Give the current SO PIN (the initialization code) and the new one (8 characters). Keep it apart from the User PIN.", 3, func(f *tview.Form) {
+	a.cardForm("Change the SO PIN", "Give the current SO PIN (the initialization code) and the new one (8 characters, or 16 hexadecimal digits as the vendor's tools write it). Keep it apart from the User PIN.", 3, func(f *tview.Form) {
 		f.AddPasswordField("Current SO PIN", "", 20, '*', nil)
 		f.AddPasswordField("New SO PIN", "", 20, '*', nil)
 		f.AddPasswordField("New SO PIN again", "", 20, '*', nil)
 	}, "Change", func(f *tview.Form) {
 		cur, next, again := fieldText(f, "Current SO PIN"), fieldText(f, "New SO PIN"), fieldText(f, "New SO PIN again")
-		if next != again || len(next) != 8 {
-			a.fail(errors.New("the two new SO PINs must be the same and 8 characters long: nothing was done"))
+		if _, err := card.SOPINBytes(next); err != nil || next != again {
+			a.fail(errors.New("the two new SO PINs must be the same, 8 characters or 16 hexadecimal digits: nothing was done"))
 			return
 		}
 		a.cardClose()

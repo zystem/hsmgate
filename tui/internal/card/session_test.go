@@ -436,3 +436,22 @@ func TestChangeUserPINNeedsTheSameLength(t *testing.T) {
 		t.Error("a shorter PIN was accepted")
 	}
 }
+
+// The SO PIN is 8 bytes: given as 8 characters or as 16 hexadecimal digits (how the vendor's tools write it, and how a real card's was written).
+func TestSOPINBytes(t *testing.T) {
+	for in, want := range map[string]string{"57621880": "57621880", "3537363231383830": "57621880"} {
+		got, err := SOPINBytes(in)
+		if err != nil || string(got) != want {
+			t.Errorf("%q: %q %v", in, got, err)
+		}
+	}
+	for _, bad := range []string{"", "1234567", "123456789", "zzzzzzzzzzzzzzzz", "12345678901234567"} {
+		if _, err := SOPINBytes(bad); err == nil {
+			t.Errorf("%q was accepted", bad)
+		}
+	}
+	s, _ := newSession(t)
+	if err := s.UnblockUserPIN([]byte("3537363231383830"), []byte("111111")); err != nil {
+		t.Errorf("the hexadecimal form of the SO PIN: %v", err)
+	}
+}

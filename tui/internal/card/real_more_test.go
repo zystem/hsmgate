@@ -200,3 +200,75 @@ func rsaUses() []string {
 	}
 	return []string{"sign", "wrap"}
 }
+
+func soPIN(t *testing.T) []byte {
+	t.Helper()
+	f := os.Getenv("HSMGATE_REAL_SO_PIN_FILE")
+	if f == "" {
+		t.Skip("set HSMGATE_REAL_SO_PIN_FILE to a file that holds the SO PIN")
+	}
+	b, err := os.ReadFile(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return bytes.TrimSpace(b)
+}
+
+// TestRealSOPIN changes the SO PIN to another of the same length and back, then sets the User PIN with the SO PIN: to a PIN of another length (what the rule of the length of a
+// new User PIN is for this command) and back to the PIN it was. If a way back fails the log says what the PIN is now.
+func TestRealSOPIN(t *testing.T) {
+	pinv := userPIN(t)
+	so := soPIN(t)
+	s, _ := realSession(t)
+	st, err := s.PINState("SO PIN", refSOPIN)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Tries < 3 {
+		t.Fatalf("only %d tries of the SO PIN are left: not trying", st.Tries)
+	}
+	temp := bytes.Repeat([]byte("5"), len(so))
+	if bytes.Equal(temp, so) {
+		temp = bytes.Repeat([]byte("6"), len(so))
+	}
+	if err := s.ChangeSOPIN(so, temp); err != nil {
+		t.Fatalf("changing the SO PIN: %v (a new SO PIN of another length than the current one is refused, perhaps)", err)
+	}
+	if err := s.Select(); err != nil {
+		t.Fatalf("%v: THE SO PIN IS NOW %s", err, temp)
+	}
+	if err := s.ChangeSOPIN(temp, so); err != nil {
+		t.Fatalf("the way back: %v: THE SO PIN IS NOW %s", err, temp)
+	}
+	t.Log("the SO PIN was changed and put back")
+	// the unblocking: the SO PIN and a new User PIN
+	if err := s.Select(); err != nil {
+		t.Fatal(err)
+	}
+	other := []byte("1234567890")
+	if err := s.UnblockUserPIN(so, other); err != nil {
+		t.Logf("unblocking with a new User PIN of %d characters (the current one has %d): %v", len(other), len(pinv), err)
+	} else {
+		t.Logf("unblocking with a new User PIN of %d characters (the current one has %d): taken", len(other), len(pinv))
+		if err := s.Select(); err != nil {
+			t.Fatalf("%v: THE USER PIN IS NOW %s", err, other)
+		}
+		if err := s.UnblockUserPIN(so, pinv); err != nil {
+			t.Fatalf("the way back: %v: THE USER PIN IS NOW %s", err, other)
+		}
+	}
+	if err := s.Select(); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UnblockUserPIN(so, pinv); err != nil {
+		t.Fatalf("unblocking with the same PIN: %v", err)
+	}
+	if err := s.Select(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.VerifyUserPIN(pinv)
+	if err != nil || !got.Verified {
+		t.Fatalf("the User PIN does not open: %v %+v", err, got)
+	}
+	t.Logf("User PIN: %s", got.Text())
+}
