@@ -34,6 +34,27 @@ contents:
     dst: /lib/systemd/system/hsmgate.service
     file_info: {mode: 0644}
     packager: deb
+  # pcscd lets the service account use the reader (polkit; the default rule allows a session on the console only)
+  - src: packaging/50-hsmgate.rules
+    dst: /usr/share/polkit-1/rules.d/50-hsmgate.rules
+    file_info: {mode: 0644}
+  # the SELinux module of the service: the sources and the script that builds and loads them (optional: without it the service runs as unconfined_service_t)
+  - src: packaging/selinux/hsmgate.te
+    dst: /usr/share/hsmgate/selinux/hsmgate.te
+    file_info: {mode: 0644}
+    packager: rpm
+  - src: packaging/selinux/hsmgate.fc
+    dst: /usr/share/hsmgate/selinux/hsmgate.fc
+    file_info: {mode: 0644}
+    packager: rpm
+  - src: packaging/selinux/hsmgate.if
+    dst: /usr/share/hsmgate/selinux/hsmgate.if
+    file_info: {mode: 0644}
+    packager: rpm
+  - src: packaging/selinux/install.sh
+    dst: /usr/share/hsmgate/selinux/install.sh
+    file_info: {mode: 0755}
+    packager: rpm
   # the directories are the package's, so that they have the right owner and mode from the first moment (the configuration is read by the service through its group, nobody else)
   - dst: /etc/hsmgate
     type: dir

@@ -202,3 +202,35 @@ func TestCardAnswersNeedTheirFieldsAndThePlanSaysNoKeyIsMade(t *testing.T) {
 		t.Errorf("the plan: %v", plan)
 	}
 }
+
+// A card answer that lacks something says which thing it is (the module, the label, the id), not a list of all three.
+func TestCardAnswerNamesWhatIsMissing(t *testing.T) {
+	a := Defaults()
+	a.Dir = "/etc/x"
+	a.Mode = ModeCard
+	a.Module, a.TokenLabel, a.CardKeyID = "", "cinim", ""
+	err := a.Validate()
+	if err == nil {
+		t.Fatal("a card with no module and no key id was accepted")
+	}
+	for _, want := range []string{"-module", "-card-key-id"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("%q is not in %q", want, err)
+		}
+	}
+	if strings.Contains(err.Error(), "-token-label") {
+		t.Errorf("the label was given and is named as missing: %q", err)
+	}
+}
+
+func TestUnitFailureNoteSaysWhenThereIsNoUnit(t *testing.T) {
+	n := unitFailureNote("Failed to enable unit: Unit hsmgate.service does not exist\n")
+	for _, want := range []string{"no systemd unit named hsmgate", "deploy/hsmgate.service", "daemon-reload"} {
+		if !strings.Contains(n, want) {
+			t.Errorf("%q is not in %q", want, n)
+		}
+	}
+	if o := unitFailureNote("Job for hsmgate.service failed"); !strings.Contains(o, "journalctl -u hsmgate") || strings.Contains(o, "no systemd unit") {
+		t.Errorf("another failure is told as a missing unit: %q", o)
+	}
+}

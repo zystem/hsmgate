@@ -14,6 +14,7 @@ plain)
     expect "hsmgate runs" hsmgate version
     expect "hsmgate-setup runs" hsmgate-setup -version
     expect "the unit is installed" test -f /usr/lib/systemd/system/hsmgate.service
+    expect "the polkit rule for the service account is installed" grep -q "s.user == \"hsmgate\"" /usr/share/polkit-1/rules.d/50-hsmgate.rules
     ;;
 auto)
     HSMGATE_SETUP_AUTO=1 dnf install -y -q "$RPM" >/tmp/b.log 2>&1 || { cat /tmp/b.log; fail "dnf install"; }

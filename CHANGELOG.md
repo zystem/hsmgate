@@ -1,8 +1,20 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **A SELinux module for the service** (the rpm; optional): the service runs as `hsmgate_t` instead of `unconfined_service_t`. The sources and `install.sh` are in `/usr/share/hsmgate/selinux/`; CI compiles the module on AlmaLinux 10. [docs/selinux.md](docs/selinux.md). Run on AlmaLinux 10.2 with a card in the enforcing mode, also after a reboot: no denial.
+- **A polkit rule for the service account** in the deb and the rpm (`/usr/share/polkit-1/rules.d/50-hsmgate.rules`): without it `pcscd` refuses the account `hsmgate`, and a card is "no matching token in the reader" on a clean machine (found on AlmaLinux 10.2 with a card, 2026-11-20).
+- `tools/retry-net.sh`: what CI downloads is run again when the network fails, and only then.
+
+### Fixed
+- **`hsmgate-setup -auto -mode card` as a person without root** did not look for the OpenSC module and said only "a card needs the PKCS#11 module, the label … and the CKA_ID …"; it now looks for the module as root does and names what is missing.
+- **The quick setup on a machine that has the programs but no systemd unit** (an unpacked archive) said "Unit hsmgate.service does not exist (see: journalctl -u hsmgate)"; it now says that there is no unit and where to get it.
+- **The deb's installation** no longer starts the wizard when `TERM` is unset or `dumb` (it printed a terminfo error from a session with no terminal).
+
 ## 0.9.3 — 2026-11-19
 
-The **Card** page of `hsmgate-setup` grows from a reader into a card manager (PINs, key domains, DKEK shares in two formats, wrapped keys, key generation for EC, RSA and AES, the first steps of an XKEK group), and what was tried on a real card and on AlmaLinux with SELinux found five faults that are fixed here. XKEK with two cards (association, exchange keys, derivation), the SELinux policy for the service and arm64 are not done: [setup-tool.md](docs/setup-tool.md) and [installing-packages.md](docs/installing-packages.md) say what was run and what was not.
+The **Card** page of `hsmgate-setup` grows from a reader into a card manager (PINs, key domains, DKEK shares in two formats, wrapped keys, key generation for EC, RSA and AES, the first steps of an XKEK group), and what was tried on a real card and on AlmaLinux with SELinux found five faults that are fixed here. XKEK with two cards (association, exchange keys, derivation) is not done, and arm64 packages are not built (the programs were built and run on emulated arm64 only): [setup-tool.md](docs/setup-tool.md) and [installing-packages.md](docs/installing-packages.md) say what was run and what was not.
 
 ### Fixed
 - **`hsmgate-setup -auto` no longer gives `/etc/hsmgate` to the service account**: the directory stays `root:hsmgate 0750` as the package makes it (the service reads it through its group), so `rpm -V` is clean after a setup. The unit sets `LogsDirectoryMode=0750` (systemd made the audit directory 0755 at the first start, against the 0750 of the package); the same two lines are in `deploy/hsmgate.service`. Found by trying the rpm on a machine with SELinux.

@@ -21,6 +21,7 @@ plain)
     expect "hsmgate-setup runs" hsmgate-setup -version
     expect "hsmgate setup -h works" sh -c 'hsmgate setup -h | grep -q hsmgate-setup'
     expect "the unit is installed" sh -c '[ -f /lib/systemd/system/hsmgate.service ] && grep -q "ConditionPathExists=/etc/hsmgate/hsmgate.yaml" /lib/systemd/system/hsmgate.service'
+    expect "the polkit rule for the service account is installed" sh -c 'grep -q "s.user == \"hsmgate\"" /usr/share/polkit-1/rules.d/50-hsmgate.rules'
     ;;
 auto)
     HSMGATE_SETUP_AUTO=1 apt-get install -y -qq "$DEB" >/tmp/b.log 2>&1 || { cat /tmp/b.log; fail "apt-get install"; }

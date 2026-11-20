@@ -1,0 +1,83 @@
+policy_module(hsmgate, 0.1.0)
+
+########################################
+#
+# Declarations
+#
+
+require {
+	type pcscd_t;
+	type pcscd_var_run_t;
+}
+
+type hsmgate_t;
+type hsmgate_exec_t;
+init_nnp_daemon_domain(hsmgate_t)
+init_daemon_domain(hsmgate_t, hsmgate_exec_t)
+
+
+# /etc/hsmgate: the configuration, the PIN file, the key files and the certificates
+type hsmgate_conf_t;
+files_config_file(hsmgate_conf_t)
+
+# /var/log/hsmgate: the audit file and what it is rotated to
+type hsmgate_log_t;
+logging_log_file(hsmgate_log_t)
+
+# /run/hsmgate: the admin socket
+type hsmgate_var_run_t;
+files_pid_file(hsmgate_var_run_t)
+
+########################################
+#
+# hsmgate local policy
+#
+
+allow hsmgate_t self:process { signal_perms getsched setsched };
+allow hsmgate_t self:fifo_file rw_fifo_file_perms;
+allow hsmgate_t self:unix_stream_socket create_stream_socket_perms;
+allow hsmgate_t self:unix_dgram_socket create_socket_perms;
+allow hsmgate_t self:tcp_socket create_stream_socket_perms;
+
+# the configuration is read, never written
+list_dirs_pattern(hsmgate_t, hsmgate_conf_t, hsmgate_conf_t)
+read_files_pattern(hsmgate_t, hsmgate_conf_t, hsmgate_conf_t)
+read_lnk_files_pattern(hsmgate_t, hsmgate_conf_t, hsmgate_conf_t)
+
+# the audit file
+manage_dirs_pattern(hsmgate_t, hsmgate_log_t, hsmgate_log_t)
+manage_files_pattern(hsmgate_t, hsmgate_log_t, hsmgate_log_t)
+logging_log_filetrans(hsmgate_t, hsmgate_log_t, { dir file })
+
+# the admin socket
+manage_dirs_pattern(hsmgate_t, hsmgate_var_run_t, hsmgate_var_run_t)
+manage_files_pattern(hsmgate_t, hsmgate_var_run_t, hsmgate_var_run_t)
+manage_sock_files_pattern(hsmgate_t, hsmgate_var_run_t, hsmgate_var_run_t)
+files_pid_filetrans(hsmgate_t, hsmgate_var_run_t, { dir file sock_file })
+
+# the card: the PKCS#11 module of OpenSC talks to pcscd over its socket
+allow hsmgate_t pcscd_var_run_t:dir search_dir_perms;
+allow hsmgate_t pcscd_var_run_t:sock_file write_sock_file_perms;
+allow hsmgate_t pcscd_t:unix_stream_socket connectto;
+
+# the listening port (the default 8443 is http_port_t; another port needs: semanage port -a -t http_port_t -p tcp N)
+corenet_tcp_bind_generic_node(hsmgate_t)
+corenet_tcp_bind_http_port(hsmgate_t)
+corenet_tcp_sendrecv_generic_if(hsmgate_t)
+corenet_tcp_sendrecv_generic_node(hsmgate_t)
+
+domain_use_interactive_fds(hsmgate_t)
+files_read_etc_files(hsmgate_t)
+miscfiles_read_localization(hsmgate_t)
+miscfiles_read_generic_certs(hsmgate_t)
+libs_use_ld_so(hsmgate_t)
+libs_use_shared_libs(hsmgate_t)
+sysnet_dns_name_resolve(hsmgate_t)
+kernel_read_system_state(hsmgate_t)
+# the Go runtime reads the size of the listen queue, the size of a huge page and the root of the control groups when it starts
+kernel_read_net_sysctls(hsmgate_t)
+dev_read_sysfs(hsmgate_t)
+fs_search_cgroup_dirs(hsmgate_t)
+
+# a key of the service may be checked against an OIDC provider (the keys of its tokens are fetched over HTTPS)
+corenet_tcp_connect_http_port(hsmgate_t)
