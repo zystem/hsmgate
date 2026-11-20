@@ -1,0 +1,5 @@
+// The service of the package runs as the account hsmgate, which has no login session. With a card, pcscd asks polkit before it lets a program use the reader, and the default rule
+// allows a local active session only: without this rule the token is "no matching token in the reader" for the service. Only this account, only these two actions.
+polkit.addRule(function(a, s) {
+  if ((a.id == "org.debian.pcsc-lite.access_pcsc" || a.id == "org.debian.pcsc-lite.access_card") && s.user == "hsmgate") return polkit.Result.YES;
+});

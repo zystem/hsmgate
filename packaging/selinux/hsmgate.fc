@@ -1,0 +1,7 @@
+/usr/bin/hsmgate		--	gen_context(system_u:object_r:hsmgate_exec_t,s0)
+
+/etc/hsmgate(/.*)?		gen_context(system_u:object_r:hsmgate_conf_t,s0)
+
+/var/log/hsmgate(/.*)?		gen_context(system_u:object_r:hsmgate_log_t,s0)
+
+/run/hsmgate(/.*)?		gen_context(system_u:object_r:hsmgate_var_run_t,s0)

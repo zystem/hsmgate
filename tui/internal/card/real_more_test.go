@@ -27,7 +27,7 @@ func completeDomain(t *testing.T, r Reader) int {
 	return -1
 }
 
-// TestRealRSAGenerateWrapUnwrap makes an RSA-2048 key (the card takes up to a minute), wraps it, unwraps it as a second key, checks the tree and deletes both.
+// TestRealRSAGenerateWrapUnwrap makes an RSA key (2048 bits, or HSMGATE_REAL_RSA_BITS: 3072 or 4096; the card takes up to a minute, for 4096 several), wraps it, unwraps it as a second key, checks the tree and deletes both.
 func TestRealRSAGenerateWrapUnwrap(t *testing.T) {
 	pinv := userPIN(t)
 	s, r := realSession(t)
@@ -39,7 +39,7 @@ func TestRealRSAGenerateWrapUnwrap(t *testing.T) {
 		t.Fatal(err)
 	}
 	realLogin(t, s, pinv)
-	id, _, kid, err := s.GenerateKey(GenSpec{Kind: "RSA", Bits: 2048, Label: "rsa-test", Algorithms: AlgorithmByName("RSA", rsaUses()...), Domain: dom})
+	id, _, kid, err := s.GenerateKey(GenSpec{Kind: "RSA", Bits: rsaBits(), Label: "rsa-test", Algorithms: AlgorithmByName("RSA", rsaUses()...), Domain: dom})
 	if err != nil {
 		if id != 0 {
 			t.Logf("the key %d may be on the card: delete it", id)
@@ -94,8 +94,8 @@ func TestRealRSAGenerateWrapUnwrap(t *testing.T) {
 		}
 	}
 	t.Logf("in the tree: %v", seen)
-	if len(seen) != 2 || !strings.Contains(seen[int(id)], "RSA-2048") || !strings.Contains(seen[int(copyID)], "RSA-2048") {
-		t.Errorf("the two RSA-2048 keys are not both in the tree: %v", seen)
+	if len(seen) != 2 || !strings.Contains(seen[int(id)], fmt.Sprintf("RSA-%d", rsaBits())) || !strings.Contains(seen[int(copyID)], fmt.Sprintf("RSA-%d", rsaBits())) {
+		t.Errorf("the two RSA-%d keys are not both in the tree: %v", rsaBits(), seen)
 	}
 }
 
@@ -316,6 +316,14 @@ func TestRealAESKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Logf("the AES-128 CMAC key %d, identifier %X", id2, kid2)
+	id4, _, kid4, err := s.GenerateKey(GenSpec{Kind: "AES", Bits: 192, Label: "aes-192", Algorithms: AlgorithmByName("AES", "encrypt"), Domain: dom})
+	if id4 != 0 {
+		made = append(made, id4)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("the AES-192 key %d, identifier %X", id4, kid4)
 	kf, err := s.ExportKey(id1)
 	if err != nil {
 		t.Fatalf("wrapping the AES key: %v", err)
@@ -354,7 +362,18 @@ func TestRealAESKey(t *testing.T) {
 	if len(seen) != len(made) {
 		t.Errorf("not all the keys are in the tree: %v", seen)
 	}
-	if !strings.Contains(seen[int(id1)], "AES-256") || !strings.Contains(seen[int(id2)], "AES-128") {
+	if !strings.Contains(seen[int(id1)], "AES-256") || !strings.Contains(seen[int(id2)], "AES-128") || !strings.Contains(seen[int(id4)], "AES-192") {
 		t.Errorf("the keys are not shown as AES: %v", seen)
 	}
+}
+
+// rsaBits is the size of the RSA key of the test (HSMGATE_REAL_RSA_BITS, default 2048).
+func rsaBits() int {
+	switch os.Getenv("HSMGATE_REAL_RSA_BITS") {
+	case "3072":
+		return 3072
+	case "4096":
+		return 4096
+	}
+	return 2048
 }

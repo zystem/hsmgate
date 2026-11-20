@@ -206,6 +206,20 @@ jobs:
           tools/retry-net.sh /tmp/venv/bin/pip install -q --require-hashes -r test/kmsjson-boto3/requirements.txt
           /tmp/venv/bin/python test/kmsjson-boto3/test_boto3.py build/hsmgate
 
+  selinux:
+    # the SELinux module of the service compiles against the policy of a Red Hat family distribution (compile only: loading it needs a machine with SELinux, which is run by hand, docs/selinux.md)
+    runs-on: ubuntu-latest
+    container: almalinux:10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: sh tools/retry-net.sh dnf install -y -q selinux-policy-devel make
+      - run: |
+          mkdir /tmp/pol && cp packaging/selinux/hsmgate.te packaging/selinux/hsmgate.fc packaging/selinux/hsmgate.if /tmp/pol/
+          make -C /tmp/pol -f /usr/share/selinux/devel/Makefile hsmgate.pp
+          test -s /tmp/pol/hsmgate.pp
+
   chart:
     # the Helm chart: lint, the templates with the variants of the values, and their schema (kubeconform, strict)
     runs-on: ubuntu-latest

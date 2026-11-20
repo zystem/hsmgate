@@ -55,6 +55,9 @@ func Defaults() Answers {
 		Mode: ModeSoft, Listen: "0.0.0.0:8443", KeyName: "app", ClientName: "app",
 		AuditStdout: false, AuditMaxMB: 25, AuditFiles: 5,
 	}
+	// the OpenSC module is looked for for a person without root too (it is the card that needs it, not the account)
+	a.Module = firstExisting(
+		"/usr/lib/x86_64-linux-gnu/opensc-pkcs11.so", "/usr/lib/aarch64-linux-gnu/opensc-pkcs11.so", "/usr/lib64/opensc-pkcs11.so", "/usr/lib/opensc-pkcs11.so", "/usr/lib/pkcs11/opensc-pkcs11.so")
 	if sys.IsRoot() {
 		a.Dir = "/etc/hsmgate"
 		a.AuditFile = "/var/log/hsmgate/audit.log"
@@ -63,8 +66,6 @@ func Defaults() Answers {
 			a.User = "hsmgate"
 		}
 		a.Enable = sys.HasSystemd()
-		a.Module = firstExisting(
-			"/usr/lib/x86_64-linux-gnu/opensc-pkcs11.so", "/usr/lib/aarch64-linux-gnu/opensc-pkcs11.so", "/usr/lib64/opensc-pkcs11.so", "/usr/lib/opensc-pkcs11.so", "/usr/lib/pkcs11/opensc-pkcs11.so")
 		a.PinFile = "/etc/hsmgate/pin"
 		return a
 	}
@@ -120,8 +121,18 @@ func (a Answers) Validate() error {
 		return fmt.Errorf("with a context the key needs at least one allowed prefix, for example app/")
 	}
 	if a.Mode == ModeCard {
-		if a.Module == "" || (a.TokenLabel == "" && a.TokenSerial == "") || a.CardKeyID == "" {
-			return fmt.Errorf("a card needs the PKCS#11 module, the label (or serial) of the token and the CKA_ID of the key pair (hex)")
+		var missing []string
+		if a.Module == "" {
+			missing = append(missing, "the PKCS#11 module (-module; the OpenSC one was not found: apt install opensc)")
+		}
+		if a.TokenLabel == "" && a.TokenSerial == "" {
+			missing = append(missing, "the label of the token (-token-label)")
+		}
+		if a.CardKeyID == "" {
+			missing = append(missing, "the CKA_ID of the key pair in hex (-card-key-id)")
+		}
+		if len(missing) > 0 {
+			return fmt.Errorf("a card needs %s", strings.Join(missing, ", "))
 		}
 	}
 	if a.AuditMaxMB < 0 || a.AuditFiles < 0 || ((a.AuditMaxMB > 0) && a.AuditFile == "") {
@@ -334,7 +345,7 @@ func Apply(ctx context.Context, a Answers, log func(string)) (*Result, error) {
 	res.ClientFiles = []string{filepath.Join(cl, a.ClientName+".pem"), filepath.Join(cl, a.ClientName+".key"), filepath.Join(cl, "ca.pem")}
 	if a.Enable && sys.IsRoot() && sys.HasSystemd() {
 		if out, err := sys.Systemctl(ctx, "enable", "--now", "hsmgate"); err != nil {
-			res.Notes = append(res.Notes, "the service did not start: "+strings.TrimSpace(out)+" (see: journalctl -u hsmgate)")
+			res.Notes = append(res.Notes, unitFailureNote(out))
 		} else {
 			res.Started = true
 			log("enabled and started the service")
@@ -375,4 +386,16 @@ func hostOf(listen string) string {
 		}
 	}
 	return net.JoinHostPort(h, p)
+}
+
+// unitFailureNote says why `systemctl enable --now hsmgate` failed. A machine that has the programs but not the unit (an unpacked archive, a copy of the binaries) is told how to get the unit;
+// any other failure is shown as systemd said it, with where to look.
+func unitFailureNote(out string) string {
+	out = strings.TrimSpace(out)
+	if strings.Contains(out, "does not exist") || strings.Contains(out, "not-found") {
+		return "the service was not started: this machine has no systemd unit named hsmgate (the deb and rpm packages install one). " +
+			"Copy deploy/hsmgate.service from the release (hsmgate-deploy.tar.gz) to /etc/systemd/system/ and run: systemctl daemon-reload && systemctl enable --now hsmgate. " +
+			"The configuration written here is ready; or start the program by hand as the note below says."
+	}
+	return "the service did not start: " + out + " (see: journalctl -u hsmgate)"
 }
