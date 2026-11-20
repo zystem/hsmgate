@@ -150,6 +150,32 @@ jobs:
             build/hsmgate-setup
           retention-days: 7
 
+  # arm64: a native runner (no emulation); the release still ships amd64 only, this keeps the code building and passing on arm64
+  arm64:
+    needs: test
+    runs-on: ubuntu-24.04-arm
+    container: golang:1.26.11-bookworm
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - run: tools/retry-net.sh go mod download
+      - run: cd tui && ../tools/retry-net.sh go mod download
+      - name: Build both programs
+        run: |
+          test "$(uname -m)" = aarch64
+          mkdir -p build
+          CGO_ENABLED=1 go build -buildmode=pie -trimpath -buildvcs=false -ldflags "-s -w -linkmode=external -extldflags '-Wl,-z,relro,-z,now'" -o build/hsmgate ./cmd/hsmgate
+          readelf -h build/hsmgate | grep -q "AArch64"
+          build/hsmgate version
+          cd tui && CGO_ENABLED=0 go build -trimpath -buildvcs=false -o ../build/hsmgate-setup ./cmd/hsmgate-setup
+          ../build/hsmgate-setup -version
+      - name: Tests of the program and of the tool
+        run: |
+          go test $(go list ./... | grep -v /tools/)
+          cd tui && go test ./...
+
   fips:
     # the tests with the Go cryptographic module in FIPS 140-3 mode; the FIPS binary starts with require_fips and the usual one refuses to
     needs: build
