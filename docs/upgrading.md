@@ -4,6 +4,11 @@ The latest release is supported, and the previous minor release for 30 days ([SE
 
 General steps: read the notes; run `hsmgate check -config …` with the new binary (it needs no PIN); replace the binary or the image (pin the digest); restart; `hsmgate unlock`; look at the audit log. A configuration that the new version refuses is refused at the start, not at the first request. SIGHUP reloads the configuration without a restart for what a reload may change (not the listener, the admin socket, the audit file, the limits, the enabled faces).
 
+## 0.9.3 to 0.9.4
+
+- Nothing to do in the configuration or the formats. A package replaces the files in `/usr/bin` and does not restart the service; restart it yourself.
+- The deb and the rpm now install a polkit rule for the account `hsmgate` (`/usr/share/polkit-1/rules.d/50-hsmgate.rules`). If the service uses a card and `pcscd` refused it ("no matching token in the reader"), the upgrade fixes that; restart `pcscd` or the machine if the rule is not picked up. The rpm also carries an optional SELinux module: [selinux.md](selinux.md). Not run: the upgrade of an installed rpm with the module already loaded.
+
 ## 0.9.2 to 0.9.3
 
 - Nothing to do in the configuration or the formats. A package replaces the files in `/usr/bin` and does not restart the service. 0.9.2 had two faults in the directories (`hsmgate-setup -auto` gave `/etc/hsmgate` to the service account, and the unit made `/var/log/hsmgate` 0755; `rpm -V hsmgate` showed both): **`dnf upgrade` to 0.9.3 puts both right by itself** (tried on AlmaLinux 10, 2026-11-19; the service is restarted by you, and the new unit keeps the mode). For a deb that was not tried: if `dpkg -V hsmgate` shows a difference, `sudo chown root:hsmgate /etc/hsmgate` and `sudo chmod 0750 /var/log/hsmgate` do it by hand.

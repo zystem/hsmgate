@@ -1,11 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.9.4 — 2026-11-20
 
 ### Added
 - **A SELinux module for the service** (the rpm; optional): the service runs as `hsmgate_t` instead of `unconfined_service_t`. The sources and `install.sh` are in `/usr/share/hsmgate/selinux/`; CI compiles the module on AlmaLinux 10. [docs/selinux.md](docs/selinux.md). Run on AlmaLinux 10.2 with a card in the enforcing mode, also after a reboot: no denial.
 - **A polkit rule for the service account** in the deb and the rpm (`/usr/share/polkit-1/rules.d/50-hsmgate.rules`): without it `pcscd` refuses the account `hsmgate`, and a card is "no matching token in the reader" on a clean machine (found on AlmaLinux 10.2 with a card, 2026-11-20).
 - `tools/retry-net.sh`: what CI downloads is run again when the network fails, and only then.
+- A CI job `arm64` builds both programs and runs the tests on a native arm64 runner. The release still ships amd64 only.
 
 ### Fixed
 - **`hsmgate-setup -auto -mode card` as a person without root** did not look for the OpenSC module and said only "a card needs the PKCS#11 module, the label … and the CKA_ID …"; it now looks for the module as root does and names what is missing.
