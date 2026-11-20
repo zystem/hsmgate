@@ -4,6 +4,12 @@ The latest release is supported, and the previous minor release for 30 days ([SE
 
 General steps: read the notes; run `hsmgate check -config …` with the new binary (it needs no PIN); replace the binary or the image (pin the digest); restart; `hsmgate unlock`; look at the audit log. A configuration that the new version refuses is refused at the start, not at the first request. SIGHUP reloads the configuration without a restart for what a reload may change (not the listener, the admin socket, the audit file, the limits, the enabled faces).
 
+## 0.9.4 to the next release (Unreleased)
+
+- **A REST client assertion must carry `sub` equal to the client id** (and `iss` as before). The official Azure client libraries write both; a hand-made assertion without `sub` is now refused (`bad_subject` in the audit line). A gRPC JWT whose `sub` is another account than its `iss` is refused too; a JWT with no `sub` still passes.
+- New settings, all empty by default (nothing checked, as before): `kmsgrpc.token_audiences`, `kmsgrpc.bearer_audiences`, `kmsrest.audiences` ([configuration.md](configuration.md)). Set them when several gateways or environments trust one issuer. Find the values your clients write before you set a list: look at the `aud` of a token they send (`cut -d. -f2 | base64 -d`). The Go client library for the gRPC face writes no `aud` for its default bearer, only a `scope`; give it `option.WithAudiences(...)` first, or a list of bearer audiences refuses it.
+- **Not covered, known:** the REST face takes RS256 only and needs `iat` in an assertion; the official Azure Go library signs a certificate assertion with PS256 and writes `nbf` and no `iat`, so a client that proves itself that way with that library is refused (found on 2026-11-21, with a test against the library; not changed here). A client secret is not affected.
+
 ## 0.9.3 to 0.9.4
 
 - Nothing to do in the configuration or the formats. A package replaces the files in `/usr/bin` and does not restart the service; restart it yourself.

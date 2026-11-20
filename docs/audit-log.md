@@ -39,6 +39,7 @@ The class is what `hsmgate_requests_total{outcome=...}` counts at the `basic` le
 | `forbidden_context` | denied | the context is outside the `contexts:` of this client |
 | `unauthenticated` | denied | no valid credential for this call |
 | `unknown_access_key`, `bad_signature`, `unsigned`, `malformed_signature`, `credential_mismatch` | denied | the signed faces: the credential does not check, or does not agree with the certificate |
+| `bad_audience`, `bad_subject` | denied | a signed JWT that is for another audience than the ones listed (`kmsgrpc.token_audiences`, `kmsgrpc.bearer_audiences`, `kmsrest.audiences`), or whose subject is not the client ([configuration.md](configuration.md)) |
 | `address_refused` | denied | a credential used from an address it is not allowed from (`allow_from`) |
 | `bad_usage`, `bad_algorithm` | denied | the key does not do that (its `kmsjson_usage`, or another algorithm than the key has) |
 | `not_lockable` | denied | an unlock for a token that has no PIN (a software token, or an unknown name) |

@@ -27,15 +27,55 @@ const (
 )
 
 var (
-	ErrJWT     = errors.New("the token is not valid")
-	ErrExpired = errors.New("the token has expired")
+	ErrJWT      = errors.New("the token is not valid")
+	ErrExpired  = errors.New("the token has expired")
+	ErrAudience = errors.New("the token is for another audience")
+	ErrSubject  = errors.New("the subject of the token is not its issuer")
 )
 
+// Audience is the "aud" claim: a string or a list of strings (RFC 7519 section 4.1.3).
+type Audience []string
+
+func (a *Audience) UnmarshalJSON(b []byte) error {
+	var one string
+	if json.Unmarshal(b, &one) == nil {
+		*a = Audience{one}
+		return nil
+	}
+	var many []string
+	if err := json.Unmarshal(b, &many); err != nil {
+		return err
+	}
+	*a = many
+	return nil
+}
+
 type Claims struct {
-	Iss string `json:"iss"`
-	Sub string `json:"sub"`
-	Iat int64  `json:"iat"`
-	Exp int64  `json:"exp"`
+	Iss string   `json:"iss"`
+	Sub string   `json:"sub"`
+	Aud Audience `json:"aud"`
+	Iat int64    `json:"iat"`
+	Exp int64    `json:"exp"`
+}
+
+// Subject says what the "sub" claim of a token must be.
+type Subject int
+
+const (
+	// SubjectAny: not checked (what a token without a claim "sub" is).
+	SubjectAny Subject = iota
+	// SubjectOptional: absent, or the issuer itself (a token for another subject is a request to act for someone else, which the service does not do).
+	SubjectOptional
+	// SubjectIssuer: present and equal to the issuer (RFC 7523 section 3 for the authentication of a client).
+	SubjectIssuer
+)
+
+// Expect is what a face asks of a token besides the signature and the dates. Audiences: when not empty, the token must name one of them in "aud" (an exact match, no
+// normalisation); empty: not checked. The audience is the part of a token that says for whom it was made: without it a token made for one service is good for every
+// service that trusts the same issuer.
+type Expect struct {
+	Audiences []string
+	Sub       Subject
 }
 
 // PeekIssuer reads the issuer of a token without trusting it (to find the key to check it with).
@@ -55,8 +95,9 @@ func PeekIssuer(tok string) (string, bool) {
 	return c.Iss, true
 }
 
-// VerifyJWT checks a token against the public key of its issuer: RS256 only, within its life, issued no later than now (plus the skew).
-func VerifyJWT(tok string, pub *rsa.PublicKey, now time.Time) (Claims, error) {
+// VerifyJWT checks a token against the public key of its issuer: RS256 only, within its life, issued no later than now (plus the skew), and what is asked in exp (the audience
+// and the subject).
+func VerifyJWT(tok string, pub *rsa.PublicKey, now time.Time, exp Expect) (Claims, error) {
 	parts := strings.Split(tok, ".")
 	if len(parts) != 3 {
 		return Claims{}, ErrJWT
@@ -87,14 +128,38 @@ func VerifyJWT(tok string, pub *rsa.PublicKey, now time.Time) (Claims, error) {
 	if json.Unmarshal(raw, &c) != nil {
 		return Claims{}, ErrJWT
 	}
-	exp, iat := time.Unix(c.Exp, 0), time.Unix(c.Iat, 0)
-	if c.Exp == 0 || !now.Before(exp.Add(skew)) {
+	end, iat := time.Unix(c.Exp, 0), time.Unix(c.Iat, 0)
+	if c.Exp == 0 || !now.Before(end.Add(skew)) {
 		return Claims{}, ErrExpired
 	}
-	if iat.After(now.Add(skew)) || exp.Sub(iat) > maxJWTLife || exp.Before(iat) {
+	if iat.After(now.Add(skew)) || end.Sub(iat) > maxJWTLife || end.Before(iat) {
 		return Claims{}, ErrJWT
 	}
+	if len(exp.Audiences) > 0 && !c.Aud.hasAny(exp.Audiences) {
+		return c, ErrAudience
+	}
+	switch exp.Sub {
+	case SubjectOptional:
+		if c.Sub != "" && c.Sub != c.Iss {
+			return c, ErrSubject
+		}
+	case SubjectIssuer:
+		if c.Sub == "" || c.Sub != c.Iss {
+			return c, ErrSubject
+		}
+	}
 	return c, nil
+}
+
+func (a Audience) hasAny(want []string) bool {
+	for _, have := range a {
+		for _, w := range want {
+			if have == w {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 type tokenInfo struct {

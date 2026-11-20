@@ -104,6 +104,9 @@ A client that is not in the list gets 403, whatever its certificate says. A clie
 | `kmsgrpc.enabled` | `false` | the gRPC face ([kms-grpc.md](specs/kms-grpc.md)) |
 | `kmsgrpc.project`, `location`, `key_ring` | `hsmgate`, `global`, `main` | make the resource names `projects/P/locations/L/keyRings/R/cryptoKeys/KEY` |
 | `kmsgrpc.token_path` | `/oauth2/token` | where clients ask for a bearer token |
+| `kmsgrpc.token_audiences` | empty: **not checked** | the values of `aud` that the JWT assertion of a token exchange may carry: the token endpoint as the client library knows it (the `token_uri` of the service account file, for example `https://kms.example.org/oauth2/token`). Exact match, at most 20 values. A JWT that names none of them is refused (`bad_audience`). Applies at a reload |
+| `kmsgrpc.bearer_audiences` | empty: **not checked** | the same for a JWT that the client signs and sends itself as the bearer (the service the library names, set with the library's audience option). The Go client library writes a `scope` and **no** `aud` unless its audience option is given, so a client that does not set it is refused once this list is set. Applies at a reload |
+| `kmsrest.audiences` | empty: **not checked** | the values of `aud` that a client assertion may carry: the token endpoint (RFC 7523 section 3), for example `https://kms.example.org/hsmgate/oauth2/v2.0/token`. Exact match. Applies at a reload |
 | `kmsrest.enabled` | `false` | the REST face ([kms-rest.md](specs/kms-rest.md)) |
 | `kmsrest.tenant` | `hsmgate` | the directory identifier in the token path |
 

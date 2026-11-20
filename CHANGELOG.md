@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Security
+- **The audience and the subject of a JWT** (the review of 2026-11-21, finding 1). A JWT that a client signs was checked for its signature and its dates only, so one made for one service was good for every service that trusts the same issuer. Now there are `kmsgrpc.token_audiences` and `kmsgrpc.bearer_audiences` (the assertion of the token exchange and a JWT used as the bearer have their own lists) and `kmsrest.audiences` (the client assertion). When a list is set, a token that names none of its values is refused (`bad_audience`). **The lists are empty by default and then nothing is checked, as before**: set them when more than one gateway or environment trusts the same issuer, and, better, give each its own service account. The **subject** is checked always: on the gRPC face it is the issuer or absent; on the REST face it must be the client id (RFC 7523 section 3: the documentation said so, the code did not check), and a REST client assertion without `sub`, or with another one, is refused (`bad_subject`). [upgrading.md](docs/upgrading.md).
+
 ## 0.9.4 — 2026-11-20
 
 ### Added

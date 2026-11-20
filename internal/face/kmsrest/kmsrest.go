@@ -17,6 +17,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
@@ -263,9 +264,10 @@ func (f *Face) token(w http.ResponseWriter, r *http.Request, s *snap, rid string
 			refuse(401, "invalid_client", "the credential is not valid", "bad_token")
 			return
 		}
-		if _, err := oauth.VerifyJWT(assertion, c.Pub, f.now()); err != nil {
+		// RFC 7523 section 3: for the authentication of a client the subject is the client itself, and the audience is the token endpoint
+		if _, err := oauth.VerifyJWT(assertion, c.Pub, f.now(), oauth.Expect{Audiences: s.cfg.KMSRest.Audiences, Sub: oauth.SubjectIssuer}); err != nil {
 			f.failed(l)
-			refuse(401, "invalid_client", "the credential is not valid", "bad_token")
+			refuse(401, "invalid_client", "the credential is not valid", jwtResult(err))
 			return
 		}
 	default:
@@ -843,4 +845,15 @@ func LoadCreds(cfg *config.Config) (map[string]Cred, error) {
 		creds[o.ClientID] = c
 	}
 	return creds, nil
+}
+
+// jwtResult is the word of the audit line for an assertion that did not pass: the audience and the subject have their own words, everything else is "bad_token".
+func jwtResult(err error) string {
+	switch {
+	case errors.Is(err, oauth.ErrAudience):
+		return "bad_audience"
+	case errors.Is(err, oauth.ErrSubject):
+		return "bad_subject"
+	}
+	return "bad_token"
 }

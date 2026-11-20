@@ -13,6 +13,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -41,7 +42,7 @@ func TestVerifyJWT(t *testing.T) {
 		return map[string]any{"iss": "me", "iat": iat.Unix(), "exp": exp.Unix()}
 	}
 	ok := sign(t, key, "RS256", claims(now, now.Add(time.Hour)))
-	if c, err := VerifyJWT(ok, &key.PublicKey, now); err != nil || c.Iss != "me" {
+	if c, err := VerifyJWT(ok, &key.PublicKey, now, Expect{}); err != nil || c.Iss != "me" {
 		t.Fatalf("%v", err)
 	}
 	if iss, good := PeekIssuer(ok); !good || iss != "me" {
@@ -58,7 +59,7 @@ func TestVerifyJWT(t *testing.T) {
 		"garbage":     "a.b.c",
 		"two parts":   "a.b",
 	} {
-		if _, err := VerifyJWT(tok, &key.PublicKey, now); err == nil {
+		if _, err := VerifyJWT(tok, &key.PublicKey, now, Expect{}); err == nil {
 			t.Errorf("%s was accepted", name)
 		}
 	}
@@ -127,8 +128,51 @@ func FuzzVerifyJWT(f *testing.F) {
 	f.Add(good[:len(good)-4] + "AAAA")
 	f.Fuzz(func(t *testing.T, tok string) {
 		PeekIssuer(tok)
-		if c, err := VerifyJWT(tok, &key.PublicKey, now); err == nil && tok != good && c.Iss != "me" {
+		if c, err := VerifyJWT(tok, &key.PublicKey, now, Expect{}); err == nil && tok != good && c.Iss != "me" {
 			t.Fatalf("a token that this key did not sign was accepted: %q", tok)
 		}
 	})
+}
+
+// A token that is signed and alive is still for somebody: the audience says for whom, the subject for what.
+func TestJWTAudienceAndSubject(t *testing.T) {
+	key, _ := rsa.GenerateKey(rand.Reader, 2048)
+	now := time.Now()
+	mk := func(extra map[string]any) string {
+		c := map[string]any{"iss": "me", "iat": now.Unix(), "exp": now.Add(time.Hour).Unix()}
+		for k, v := range extra {
+			c[k] = v
+		}
+		return sign(t, key, "RS256", c)
+	}
+	const endpoint, api = "https://kms.example.org/oauth2/token", "https://cloudkms.googleapis.com/"
+	for _, tc := range []struct {
+		name string
+		tok  string
+		exp  Expect
+		want error
+	}{
+		{"no expectation, no aud", mk(nil), Expect{}, nil},
+		{"aud as a string", mk(map[string]any{"aud": endpoint}), Expect{Audiences: []string{endpoint}}, nil},
+		{"aud as a list", mk(map[string]any{"aud": []string{"x", endpoint}}), Expect{Audiences: []string{endpoint}}, nil},
+		{"one of several expected", mk(map[string]any{"aud": api}), Expect{Audiences: []string{endpoint, api}}, nil},
+		{"the other service", mk(map[string]any{"aud": api}), Expect{Audiences: []string{endpoint}}, ErrAudience},
+		{"no aud when one is asked", mk(nil), Expect{Audiences: []string{endpoint}}, ErrAudience},
+		{"empty aud list", mk(map[string]any{"aud": []string{}}), Expect{Audiences: []string{endpoint}}, ErrAudience},
+		{"aud is a prefix only", mk(map[string]any{"aud": endpoint + "/x"}), Expect{Audiences: []string{endpoint}}, ErrAudience},
+		{"aud of another case", mk(map[string]any{"aud": "HTTPS://KMS.example.org/oauth2/token"}), Expect{Audiences: []string{endpoint}}, ErrAudience},
+		{"aud of a wrong type", mk(map[string]any{"aud": 7}), Expect{Audiences: []string{endpoint}}, ErrJWT},
+		{"sub absent, optional", mk(nil), Expect{Sub: SubjectOptional}, nil},
+		{"sub the issuer, optional", mk(map[string]any{"sub": "me"}), Expect{Sub: SubjectOptional}, nil},
+		{"sub another, optional", mk(map[string]any{"sub": "you"}), Expect{Sub: SubjectOptional}, ErrSubject},
+		{"sub absent, required", mk(nil), Expect{Sub: SubjectIssuer}, ErrSubject},
+		{"sub the issuer, required", mk(map[string]any{"sub": "me"}), Expect{Sub: SubjectIssuer}, nil},
+		{"sub another, required", mk(map[string]any{"sub": "you"}), Expect{Sub: SubjectIssuer}, ErrSubject},
+		{"sub another, not checked", mk(map[string]any{"sub": "you"}), Expect{}, nil},
+	} {
+		_, err := VerifyJWT(tc.tok, &key.PublicKey, now, tc.exp)
+		if !errors.Is(err, tc.want) || (tc.want == nil && err != nil) {
+			t.Errorf("%s: got %v, want %v", tc.name, err, tc.want)
+		}
+	}
 }

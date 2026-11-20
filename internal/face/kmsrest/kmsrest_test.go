@@ -124,10 +124,14 @@ func (r *rig) do(method, path, bearer string, body any) (int, map[string]any, ht
 }
 
 func (r *rig) assertion(id string, key *rsa.PrivateKey) string {
+	now := time.Now()
+	return r.assertionClaims(key, map[string]any{"iss": id, "sub": id, "aud": r.srv.URL + r.f.tokenPath(), "iat": now.Unix(), "exp": now.Add(10 * time.Minute).Unix()})
+}
+
+func (r *rig) assertionClaims(key *rsa.PrivateKey, claims map[string]any) string {
 	b64 := func(b []byte) string { return b64.EncodeToString(b) }
 	hdr, _ := json.Marshal(map[string]string{"alg": "RS256", "typ": "JWT"})
-	now := time.Now()
-	cl, _ := json.Marshal(map[string]any{"iss": id, "sub": id, "aud": r.srv.URL + r.f.tokenPath(), "iat": now.Unix(), "exp": now.Add(10 * time.Minute).Unix()})
+	cl, _ := json.Marshal(claims)
 	in := b64(hdr) + "." + b64(cl)
 	sum := sha256.Sum256([]byte(in))
 	sig, _ := rsa.SignPKCS1v15(rand.Reader, key, crypto.SHA256, sum[:])
@@ -373,5 +377,55 @@ func TestMacHashIsChosenPerKey(t *testing.T) {
 	// the key says it is a MAC key; the other keys know no HS name
 	if st, _, _ := r.do("POST", "/keys/seal//sign", bearer, map[string]string{"alg": "HS384", "value": val}); st != 400 {
 		t.Errorf("HS384 for a sealing key: %d", st)
+	}
+}
+
+// The audience and the subject of a client assertion (RFC 7523 section 3; the review of 2026-11-21, finding 1): the subject is the client itself, and when the audiences are
+// listed, the token endpoint of this service is one of them.
+func TestAssertionAudienceAndSubject(t *testing.T) {
+	r := newRig(t)
+	endpoint := r.srv.URL + r.f.tokenPath()
+	now := time.Now()
+	mk := func(extra map[string]any, drop ...string) string {
+		c := map[string]any{"iss": "cert-client", "sub": "cert-client", "aud": endpoint, "iat": now.Unix(), "exp": now.Add(10 * time.Minute).Unix()}
+		for k, v := range extra {
+			c[k] = v
+		}
+		for _, k := range drop {
+			delete(c, k)
+		}
+		return r.assertionClaims(r.rsaKey, c)
+	}
+	post := func(a string) int {
+		code, _ := r.token(url.Values{"grant_type": {"client_credentials"}, "client_id": {"cert-client"}, "client_assertion_type": {assertionTy}, "client_assertion": {a}})
+		return code
+	}
+	// the audiences are not listed: as before, any audience, but the subject is always the client
+	if post(mk(map[string]any{"aud": "https://elsewhere.example/"})) != 200 {
+		t.Error("with no audiences listed an audience is not checked")
+	}
+	for name, a := range map[string]string{"no subject": mk(nil, "sub"), "another subject": mk(map[string]any{"sub": "app-client"})} {
+		r.log.Reset()
+		if post(a) == 200 || !strings.Contains(r.log.String(), `"result":"bad_subject"`) {
+			t.Errorf("%s was accepted or is not named in the audit line: %s", name, r.log.String())
+		}
+	}
+	r.cfg.KMSRest.Audiences = []string{endpoint}
+	creds, err := LoadCreds(r.cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.f.Reload(r.cfg, nil, policy.New(r.cfg, nil), func(*http.Request) (string, bool) { return "", true }, creds)
+	if post(mk(nil)) != 200 {
+		t.Error("the right audience was refused")
+	}
+	if post(mk(map[string]any{"aud": []string{"x", endpoint}})) != 200 {
+		t.Error("a list with the right audience was refused")
+	}
+	for name, a := range map[string]string{"another audience": mk(map[string]any{"aud": "https://login.example/oauth2/v2.0/token"}), "no audience": mk(nil, "aud")} {
+		r.log.Reset()
+		if post(a) == 200 || !strings.Contains(r.log.String(), `"result":"bad_audience"`) {
+			t.Errorf("%s was accepted or is not named in the audit line: %s", name, r.log.String())
+		}
 	}
 }
