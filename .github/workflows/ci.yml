@@ -25,6 +25,8 @@ jobs:
         with:
           persist-credentials: false
       - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - run: tools/retry-net-test.sh
+      - run: tools/retry-net.sh go mod download
       - run: test -z "$(gofmt -l .)"
       - run: go vet ./...
       # the coverage gate is for the program; the tools (tools/soak is a load generator) are tested but not counted
@@ -35,7 +37,7 @@ jobs:
           total=$(go tool cover -func=cover.out | awk '/^total:/ {gsub("%","",$3); print $3}')
           echo "statement coverage: ${total}%"
           awk -v t="$total" 'BEGIN { exit (t >= 80) ? 0 : 1 }'
-      - run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+      - run: tools/retry-net.sh go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
 
   static:
     # staticcheck with all its checks, and gosec without G104 (unchecked errors: closing files and the best-effort audit line of a refusal, on purpose); each exception in the code has its reason
@@ -47,8 +49,9 @@ jobs:
         with:
           persist-credentials: false
       - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
-      - run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 -checks all ./...
-      - run: go run github.com/securego/gosec/v2/cmd/gosec@v2.29.0 -quiet -exclude=G104 -exclude-dir=test -exclude-dir=tools -exclude-generated ./...
+      - run: tools/retry-net.sh go mod download
+      - run: tools/retry-net.sh go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 -checks all ./...
+      - run: tools/retry-net.sh go run github.com/securego/gosec/v2/cmd/gosec@v2.29.0 -quiet -exclude=G104 -exclude-dir=test -exclude-dir=tools -exclude-generated ./...
 
   tui:
     # the terminal tool, hsmgate-setup (tui/ is a module of its own, so that the service does not carry tview and tcell): the same checks as the program, and a floor for the coverage that is
@@ -60,6 +63,7 @@ jobs:
         with:
           persist-credentials: false
       - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - run: cd tui && ../tools/retry-net.sh go mod download
       - run: cd tui && go vet ./...
       - run: cd tui && go test -race -count=1 -coverprofile=cover.out ./...
       - name: Statement coverage of the tool must stay at 60% or more
@@ -68,9 +72,9 @@ jobs:
           total=$(go tool cover -func=cover.out | awk '/^total:/ {gsub("%","",$3); print $3}')
           echo "statement coverage: ${total}%"
           awk -v t="$total" 'BEGIN { exit (t >= 60) ? 0 : 1 }'
-      - run: cd tui && go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
-      - run: cd tui && go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 -checks all ./...
-      - run: cd tui && go run github.com/securego/gosec/v2/cmd/gosec@v2.29.0 -quiet -exclude=G104 -exclude-generated ./...
+      - run: cd tui && ../tools/retry-net.sh go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+      - run: cd tui && ../tools/retry-net.sh go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 -checks all ./...
+      - run: cd tui && ../tools/retry-net.sh go run github.com/securego/gosec/v2/cmd/gosec@v2.29.0 -quiet -exclude=G104 -exclude-generated ./...
 
   softhsm:
     # the PKCS#11 backend against SoftHSM2 (a software token); the card itself is run by hand with tools/card-decrypt-test.sh
@@ -82,7 +86,7 @@ jobs:
         with:
           persist-credentials: false
       - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
-      - run: apt-get update -qq && apt-get install -y -qq --no-install-recommends softhsm2 opensc
+      - run: tools/retry-net.sh sh -c "apt-get update -qq && apt-get install -y -qq --no-install-recommends softhsm2 opensc"
       - run: tools/softhsm-test.sh
 
   sdk:
@@ -99,6 +103,7 @@ jobs:
         with:
           persist-credentials: false
       - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - run: cd test/${{ matrix.module }} && ../../tools/retry-net.sh go mod download
       - run: cd test/${{ matrix.module }} && go test -count=1 ./...
 
   build:
@@ -110,6 +115,8 @@ jobs:
         with:
           persist-credentials: false
       - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - run: tools/retry-net.sh go mod download
+      - run: cd tui && ../tools/retry-net.sh go mod download
       - name: Build
         env:
           VERSION: ${{ inputs.version || 'dev' }}
@@ -153,6 +160,7 @@ jobs:
         with:
           persist-credentials: false
       - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - run: tools/retry-net.sh go mod download
       - run: GODEBUG=fips140=on go test ./...
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -195,7 +203,7 @@ jobs:
       - run: chmod +x build/hsmgate
       - run: |
           python -m venv /tmp/venv
-          /tmp/venv/bin/pip install -q --require-hashes -r test/kmsjson-boto3/requirements.txt
+          tools/retry-net.sh /tmp/venv/bin/pip install -q --require-hashes -r test/kmsjson-boto3/requirements.txt
           /tmp/venv/bin/python test/kmsjson-boto3/test_boto3.py build/hsmgate
 
   chart:
@@ -207,7 +215,7 @@ jobs:
           persist-credentials: false
       - name: kubeconform
         run: |
-          curl -fsSL -o /tmp/kc.tgz https://github.com/yannh/kubeconform/releases/download/v0.8.0/kubeconform-linux-amd64.tar.gz
+          curl -fsSL --retry 5 --retry-all-errors -o /tmp/kc.tgz https://github.com/yannh/kubeconform/releases/download/v0.8.0/kubeconform-linux-amd64.tar.gz
           echo "9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883  /tmp/kc.tgz" | sha256sum -c -
           tar -xzf /tmp/kc.tgz -C /tmp kubeconform
       - name: Lint and render
@@ -246,4 +254,4 @@ jobs:
           docker cp "$id:/usr/local/bin/hsmgate" /tmp/hsmgate-image
           docker rm "$id" > /dev/null
           go version -m /tmp/hsmgate-image | head -1
-          go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 -mode=binary /tmp/hsmgate-image
+          tools/retry-net.sh go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 -mode=binary /tmp/hsmgate-image
