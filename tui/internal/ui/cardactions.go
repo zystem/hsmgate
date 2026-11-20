@@ -368,7 +368,7 @@ func (a *App) actImportShare(d card.Domain) {
 
 func (a *App) actDeleteKEK(d card.Domain) {
 	a.cardDestroy(fmt.Sprintf("Delete the DKEK of the key domain %d", d.Number),
-		fmt.Sprintf("This deletes the key encryption key of the key domain %d. The keys in it stay on the card but can no longer be wrapped or unwrapped, and a copy of them that was wrapped under this DKEK can be opened only on a card that gets the same shares again.", d.Number), "delete",
+		fmt.Sprintf("This deletes the key encryption key of the key domain %d. The keys in it stay on the card (they still sign) but can no longer be wrapped or unwrapped. THERE IS NO WAY BACK IN PLACE: the card takes no new share into this key domain afterwards (it answers 6985, also for the same shares). To get a DKEK again, delete the keys in the domain, delete the domain, make it again, import the shares and import the keys from their backup files: so first be sure that the files of the keys and of the shares are there and open.", d.Number), "delete",
 		func(s *card.Session) (string, error) {
 			if err := s.DeleteKEK(byte(d.Number)); err != nil { // #nosec G115 -- a key domain number
 				return "", err
