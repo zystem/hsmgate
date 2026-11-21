@@ -11,6 +11,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"github.com/zystem/hsmgate/internal/keyops"
+	"github.com/zystem/hsmgate/internal/kmsops"
 	"github.com/zystem/hsmgate/internal/peer"
 	"github.com/zystem/hsmgate/internal/scheme/ecies"
 	"github.com/zystem/hsmgate/internal/sigv4"
@@ -20,7 +21,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -75,7 +75,7 @@ clients:
 		Identify: func(r *http.Request) (string, bool) { c := r.Header.Get("X-Test-Client"); return c, c != "-" },
 		Creds: map[string]Cred{akid: {Client: "app", Secret: secret}, "AKIDVIEWERVIEWER00": {Client: "reader", Secret: secret},
 			"AKIDBOTBOTBOTBOT00": {Client: "bot", Secret: secret, NoCert: true, From: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}}},
-		NoCertificate: func(r *http.Request) bool { return r.Header.Get("X-Test-NoCert") == "1" }, Fails: peer.NewFailures(), MacKeys: NewMacKeys()}
+		NoCertificate: func(r *http.Request) bool { return r.Header.Get("X-Test-NoCert") == "1" }, Fails: peer.NewFailures(), MacKeys: kmsops.NewMacCache()}
 	srv := httptest.NewServer(f)
 	t.Cleanup(srv.Close)
 	return &rig{t, srv, f, buf, cfg, now, dir}
@@ -781,43 +781,6 @@ func TestBlobCannotBeRelabelled(t *testing.T) {
 	// and the honest blob still opens
 	if st, _ := r.app("Decrypt", map[string]any{"EncryptionContext": ctx, "CiphertextBlob": base64.StdEncoding.EncodeToString(blob)}); st != 200 {
 		t.Errorf("the honest blob: %d", st)
-	}
-}
-
-// CR-03: the cache returns a copy made under its lock; put and clear wipe its own memory. Run under -race.
-func TestMacCacheIsRaceFree(t *testing.T) {
-	k := NewMacKeys()
-	key := bytes.Repeat([]byte{0x42}, 32)
-	k.put("id", key, time.Now().Add(time.Hour))
-	var wg sync.WaitGroup
-	wg.Add(3)
-	go func() {
-		defer wg.Done()
-		for i := 0; i < 5000; i++ {
-			if b, ok := k.get("id", time.Now()); ok && !bytes.Equal(b, key) {
-				t.Error("a torn key")
-				return
-			}
-		}
-	}()
-	go func() {
-		defer wg.Done()
-		for i := 0; i < 5000; i++ {
-			k.put("id", key, time.Now().Add(time.Hour))
-		}
-	}()
-	go func() {
-		defer wg.Done()
-		for i := 0; i < 500; i++ {
-			k.clear()
-			k.put("id", key, time.Now().Add(time.Hour))
-		}
-	}()
-	wg.Wait()
-	got, ok := k.get("id", time.Now())
-	k.clear()
-	if ok && !bytes.Equal(got, key) {
-		t.Error("the copy was changed by clear")
 	}
 }
 

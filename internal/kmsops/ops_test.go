@@ -244,13 +244,13 @@ func TestMac(t *testing.T) {
 func TestMacCacheIsRaceFree(t *testing.T) {
 	k := NewMacCache()
 	key := bytes.Repeat([]byte{0x42}, 32)
-	k.put("id", key, time.Now().Add(time.Hour))
+	k.Put("id", key, time.Now(), time.Hour, 0)
 	var wg sync.WaitGroup
 	wg.Add(3)
 	go func() {
 		defer wg.Done()
 		for i := 0; i < 3000; i++ {
-			if b, ok := k.get("id", time.Now()); ok && !bytes.Equal(b, key) {
+			if b, ok := k.Get("id", time.Now(), 0); ok && !bytes.Equal(b, key) {
 				t.Error("a torn key")
 				return
 			}
@@ -259,14 +259,14 @@ func TestMacCacheIsRaceFree(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := 0; i < 3000; i++ {
-			k.put("id", key, time.Now().Add(time.Hour))
+			k.Put("id", key, time.Now(), time.Hour, 0)
 		}
 	}()
 	go func() {
 		defer wg.Done()
 		for i := 0; i < 300; i++ {
 			k.Clear()
-			k.put("id", key, time.Now().Add(time.Hour))
+			k.Put("id", key, time.Now(), time.Hour, 0)
 		}
 	}()
 	wg.Wait()

@@ -16,6 +16,7 @@
 - A CI job `arm64` builds both programs and runs the tests on a native arm64 runner. The release still ships amd64 only.
 
 ### Fixed
+- **The cache of derived MAC keys** (`kmsjson.mac_cache_seconds`; the review of 2026-11-21, finding 3). A key now leaves memory when its time is up (a timer of the cache wipes it; before, it stayed in the map until it was asked for again or replaced), and a request that began before a reload and finished after it can no longer put its key into the cache of the new generation (the cache has an epoch per generation, moved on after the new generation is published). The two copies of the cache (the KMS-JSON face had its own) are one. Tested with the timer, a clock of the caller's own, and a request held inside the token across a reload. Still true, as in the documentation: a cache puts a derived secret in the memory of the process for the TTL, and the default is off.
 - **`hsmgate-setup -auto -mode card` as a person without root** did not look for the OpenSC module and said only "a card needs the PKCS#11 module, the label … and the CKA_ID …"; it now looks for the module as root does and names what is missing.
 - **The quick setup on a machine that has the programs but no systemd unit** (an unpacked archive) said "Unit hsmgate.service does not exist (see: journalctl -u hsmgate)"; it now says that there is no unit and where to get it.
 - **The deb's installation** no longer starts the wizard when `TERM` is unset or `dumb` (it printed a terminfo error from a session with no terminal).

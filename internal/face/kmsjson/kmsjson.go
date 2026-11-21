@@ -33,6 +33,7 @@ import (
 	"github.com/zystem/hsmgate/internal/config"
 	"github.com/zystem/hsmgate/internal/gate"
 	"github.com/zystem/hsmgate/internal/keyops"
+	"github.com/zystem/hsmgate/internal/kmsops"
 	"github.com/zystem/hsmgate/internal/peer"
 	"github.com/zystem/hsmgate/internal/policy"
 	"github.com/zystem/hsmgate/internal/sigv4"
@@ -70,7 +71,8 @@ type Face struct {
 	// NoCertificate says that the connection of a request showed no client certificate; nil: judged from the TLS state. For tests.
 	NoCertificate func(*http.Request) bool
 	// MacKeys keeps derived MAC keys for kmsjson.mac_cache_seconds; shared by the generations.
-	MacKeys *macCache
+	MacKeys  *kmsops.MacCache
+	macEpoch uint64 // the epoch of the generation in MacKeys: a Face made for a request carries the one of its generation
 	// Fails counts the refused signatures by the address of the peer; created by the first request, shared by the generations.
 	Fails *peer.Failures
 
@@ -86,7 +88,9 @@ func (f *Face) Reload(cfg *config.Config, tokens map[string]backend.Token, pol *
 	defer f.mu.Unlock()
 	old := f.track
 	f.Cfg, f.Tokens, f.Policy, f.Identify, f.Creds = cfg, tokens, pol, id, creds
-	f.MacKeys.clear() // a reload drops the MAC keys that were derived under the previous generation
+	epoch := f.MacKeys.Next()
+	f.macEpoch = epoch
+	f.MacKeys.Advance(epoch) // a reload wipes the MAC keys derived under the previous generation, and a request of it can put none back
 	f.track = &tracker{}
 	if old == nil {
 		return func() {}
@@ -106,7 +110,7 @@ func (f *Face) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f.mu.Unlock()
 	}
 	f.mu.RLock()
-	g := &Face{Cfg: f.Cfg, Tokens: f.Tokens, Policy: f.Policy, Audit: f.Audit, Identify: f.Identify, Creds: f.Creds, Gate: f.Gate, Created: f.Created, Now: f.Now, NoCertificate: f.NoCertificate, Fails: f.Fails, MacKeys: f.MacKeys}
+	g := &Face{Cfg: f.Cfg, Tokens: f.Tokens, Policy: f.Policy, Audit: f.Audit, Identify: f.Identify, Creds: f.Creds, Gate: f.Gate, Created: f.Created, Now: f.Now, NoCertificate: f.NoCertificate, Fails: f.Fails, MacKeys: f.MacKeys, macEpoch: f.macEpoch}
 	t := f.track
 	t.wg.Add(1) // under the read lock, as in the Transit face
 	f.mu.RUnlock()

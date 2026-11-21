@@ -42,7 +42,10 @@ type Service struct {
 	Policy *policy.Policy
 	Gate   *gate.Gate
 	Macs   *MacCache
-	Now    func() time.Time // for tests
+	// MacEpoch is the epoch of the generation this service was made for (MacCache.Next at its Reload): a service of another epoch than the cache's current one reads nothing from the
+	// cache and puts nothing into it.
+	MacEpoch uint64
+	Now      func() time.Time // for tests
 }
 
 func (s *Service) now() time.Time {
@@ -349,7 +352,7 @@ func (s *Service) macKey(ctx context.Context, name string, ver int, k config.Key
 	if ttl > 0 {
 		if point, err := keyops.PointOf(s.Tokens, k.Versions[ver-1]); err == nil { // no token operation: the public key is kept
 			id += "|" + ecies.Fingerprint(point)
-			if key, ok := s.Macs.get(id, s.now()); ok {
+			if key, ok := s.Macs.Get(id, s.now(), s.MacEpoch); ok {
 				return key, nil
 			}
 		}
@@ -364,7 +367,7 @@ func (s *Service) macKey(ctx context.Context, name string, ver int, k config.Key
 		return nil, tokenErr(err)
 	}
 	if ttl > 0 {
-		s.Macs.put(id, key, s.now().Add(ttl))
+		s.Macs.Put(id, key, s.now(), ttl, s.MacEpoch)
 	}
 	return key, nil
 }

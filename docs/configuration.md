@@ -99,7 +99,7 @@ A client that is not in the list gets 403, whatever its certificate says. A clie
 |---|---|---|
 | `kmsjson.enabled` | `false` | the KMS-JSON face on the same listener ([kms-json.md](specs/kms-json.md)) |
 | `kmsjson.region` | `local` | the region string of the credential scope that clients sign with |
-| `kmsjson.mac_cache_seconds` | 0 (0 to 3600) | how long a MAC key derived on the token stays in memory; 0 means one ECDH on the token per MAC |
+| `kmsjson.mac_cache_seconds` | 0 (0 to 3600) | how long a MAC key derived on the token stays in memory; 0 means one ECDH on the token per MAC. The key is wiped when the time is up, by the service itself (not when it is next asked for), and a reload wipes all of them; a request that began before a reload cannot put its key back into the cache |
 | `kmsjson.audit_message_prefix` | `false` | write the first 6 bytes of the hash of the message into the audit line |
 | `kmsgrpc.enabled` | `false` | the gRPC face ([kms-grpc.md](specs/kms-grpc.md)) |
 | `kmsgrpc.project`, `location`, `key_ring` | `hsmgate`, `global`, `main` | make the resource names `projects/P/locations/L/keyRings/R/cryptoKeys/KEY` |
