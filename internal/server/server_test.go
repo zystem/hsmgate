@@ -250,6 +250,44 @@ func TestRefusedReloadChangesNothing(t *testing.T) {
 	}
 }
 
+// What is set up when the process starts cannot be changed by a reload, in either direction (the review of 2026-11-21, finding 5): the profiles and the metrics are refused with a
+// word about the restart, so that "accepted" never means "applied" for them.
+func TestReloadRefusesTheProfilesAndTheMetrics(t *testing.T) {
+	for name, start := range map[string]func(*config.Config){
+		"off at start": func(*config.Config) {},
+		"on at start":  func(c *config.Config) { c.Debug.Pprof = true; c.Metrics.Enabled = true; c.Metrics.Detail = "basic" },
+	} {
+		dir := t.TempDir()
+		ca := mk(t, "ca", nil, true, false)
+		srvCert := mk(t, "hsmgate", &ca, false, true)
+		cfg := baseConfig(t, dir, ca, srvCert)
+		cfg.AdminSocket = filepath.Join(dir, "admin.sock")
+		start(cfg)
+		s, err := New(cfg, &bytes.Buffer{})
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		same := *cfg
+		if err := s.Reload(&same); err != nil {
+			t.Fatalf("%s: a reload that changes nothing was refused: %v", name, err)
+		}
+		for what, change := range map[string]func(*config.Config){
+			"pprof":           func(c *config.Config) { c.Debug.Pprof = !c.Debug.Pprof },
+			"metrics enabled": func(c *config.Config) { c.Metrics.Enabled = !c.Metrics.Enabled },
+			"metrics detail":  func(c *config.Config) { c.Metrics.Detail = "full" },
+		} {
+			c := *s.gen.cfg
+			change(&c)
+			if what == "metrics detail" && c.Metrics.Detail == s.gen.cfg.Metrics.Detail {
+				continue
+			}
+			if err := s.Reload(&c); err == nil || !strings.Contains(err.Error(), "restart") {
+				t.Errorf("%s, %s: the change was not refused with a word about the restart: %v", name, what, err)
+			}
+		}
+	}
+}
+
 // Both faces on one listener, behind the same mutual TLS: Transit by path, the other by its target header; credentials are read from files and change with a reload.
 func TestTheSecondFaceOnTheSameListener(t *testing.T) {
 	dir := t.TempDir()

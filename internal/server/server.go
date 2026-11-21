@@ -364,7 +364,7 @@ func VerifyReplicas(cfg *config.Config, tokens map[string]backend.Token) error {
 	return nil
 }
 
-// Reload applies a new configuration as a whole, or not at all. The listen address, the admin socket, the audit file and the limits need a restart.
+// Reload applies a new configuration as a whole, or not at all. The listen address, the admin socket, the audit file, the limits, the profiles and the metrics need a restart.
 func (s *Server) Reload(cfg *config.Config) error {
 	if s.Insecure {
 		return fmt.Errorf("reload is for the TLS mode")
@@ -384,6 +384,11 @@ func (s *Server) Reload(cfg *config.Config) error {
 	}
 	if cfg.KMSRest.Enabled != oc.KMSRest.Enabled || cfg.KMSRest.Tenant != oc.KMSRest.Tenant {
 		return fmt.Errorf("kmsrest.enabled and kmsrest.tenant cannot change in a reload: restart")
+	}
+	// the profiles and the metrics are set up when the process starts (the admin handler, the counters, the observer of the audit line): a reload that changed them would be accepted
+	// and do nothing, and an operator who turned the profiles off would believe that they are off
+	if cfg.Debug.Pprof != oc.Debug.Pprof || cfg.Metrics.Enabled != oc.Metrics.Enabled || cfg.Metrics.Detail != oc.Metrics.Detail {
+		return fmt.Errorf("debug.pprof, metrics.enabled and metrics.detail cannot change in a reload: restart")
 	}
 	if cfg.Listen != oc.Listen || cfg.AdminSocket != oc.AdminSocket || cfg.Audit.File != oc.Audit.File || cfg.Audit.Stdout != oc.Audit.Stdout || cfg.Audit.MaxSizeMB != oc.Audit.MaxSizeMB || cfg.Audit.MaxFiles != oc.Audit.MaxFiles || cfg.Limits != oc.Limits || cfg.Transit.Mount != oc.Transit.Mount {
 		return fmt.Errorf("listen, admin_socket, audit.*, limits and transit.mount cannot change in a reload: restart")
