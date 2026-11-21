@@ -17,7 +17,7 @@ func TestAuditLogDocNamesTheClassOfEachResult(t *testing.T) {
 		"ok": "ok", "attempt": "ok",
 		"forbidden": "denied", "forbidden_context": "denied", "unauthenticated": "denied", "unknown_access_key": "denied", "bad_signature": "denied",
 		"unsigned": "denied", "malformed_signature": "denied", "credential_mismatch": "denied", "address_refused": "denied", "bad_usage": "denied",
-		"bad_algorithm": "denied", "not_lockable": "denied",
+		"bad_algorithm": "denied", "not_lockable": "denied", "bad_audience": "denied", "bad_subject": "denied",
 		"refused": "invalid", "throttled": "throttled", "throttled_auth": "throttled", "busy": "throttled",
 		"locked": "error", "unavailable": "error", "internal_error": "error",
 		"bad_request": "invalid", "bad_context": "invalid", "too_large": "invalid", "invalid_ciphertext": "invalid", "unsupported": "invalid", "probe": "invalid",

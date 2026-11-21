@@ -62,6 +62,11 @@ type Config struct {
 		Location  string `yaml:"location"`
 		KeyRing   string `yaml:"key_ring"`
 		TokenPath string `yaml:"token_path"` // where clients ask for a token; default /oauth2/token
+		// TokenAudiences are the values of "aud" that the assertion of a token exchange may carry (the token endpoint as the client library knows it, "token_uri" of the service
+		// account file, for example "https://kms.example.org/oauth2/token"). BearerAudiences are the same for a JWT used directly as the bearer (the service the library names,
+		// for example "https://cloudkms.googleapis.com/"). Empty: not checked, as before; set both in a service with more than one gateway or one issuer.
+		TokenAudiences  []string `yaml:"token_audiences"`
+		BearerAudiences []string `yaml:"bearer_audiences"`
 	} `yaml:"kmsgrpc"`
 	// KMSRest turns on the REST face: the API of a cloud key vault as its client libraries speak it (JSON over HTTPS, authenticated by a bearer token that a client gets by
 	// proving its client secret or the private key of its credential at the token endpoint). It shares the listener with the other faces. Tenant is the directory identifier that
@@ -69,6 +74,9 @@ type Config struct {
 	KMSRest struct {
 		Enabled bool   `yaml:"enabled"`
 		Tenant  string `yaml:"tenant"`
+		// Audiences are the values of "aud" that the client assertion may carry (the token endpoint as the client library knows it, for example
+		// "https://kms.example.org/hsmgate/oauth2/v2.0/token"). Empty: not checked, as before.
+		Audiences []string `yaml:"audiences"`
 	} `yaml:"kmsrest"`
 	// AdminSocket is a unix socket (mode 0600) for unlock and status; unset: no admin door.
 	AdminSocket string `yaml:"admin_socket"`
@@ -515,6 +523,16 @@ func (c *Config) validateKMSGRPC() error {
 	if g.TokenPath == "" {
 		g.TokenPath = "/oauth2/token"
 	}
+	for what, list := range map[string][]string{"token_audiences": g.TokenAudiences, "bearer_audiences": g.BearerAudiences, "audiences": c.KMSRest.Audiences} {
+		if what == "audiences" {
+			what = "kmsrest.audiences"
+		} else {
+			what = "kmsgrpc." + what
+		}
+		if err := checkAudiences(list); err != nil {
+			return fmt.Errorf("%s: %w", what, err)
+		}
+	}
 	for what, v := range map[string]string{"project": g.Project, "location": g.Location, "key_ring": g.KeyRing} {
 		if len(v) > 63 || strings.Trim(v, idChars) != "" {
 			return fmt.Errorf("kmsgrpc.%s must be 1 to 63 letters, digits, dashes and underscores", what)
@@ -843,4 +861,22 @@ func (k Key) FixedAAD(name string) string {
 		return k.AAD.Fixed
 	}
 	return "openbao/seal/v1|" + name
+}
+
+// checkAudiences: a value of "aud" is what a client library writes, normally a URL; it is compared as it is, so a space or a control character in it is a mistake.
+func checkAudiences(list []string) error {
+	if len(list) > 20 {
+		return fmt.Errorf("at most 20 values")
+	}
+	seen := map[string]bool{}
+	for _, a := range list {
+		if a == "" || len(a) > 500 || strings.TrimSpace(a) != a || strings.ContainsFunc(a, func(r rune) bool { return r < 0x20 || r == 0x7f || r == ' ' }) {
+			return fmt.Errorf("%q is not an audience (1 to 500 characters, no spaces or control characters)", a)
+		}
+		if seen[a] {
+			return fmt.Errorf("%q is listed twice", a)
+		}
+		seen[a] = true
+	}
+	return nil
 }

@@ -14,6 +14,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"io"
 	"net/http"
 	"net/netip"
@@ -236,9 +237,9 @@ func (f *Face) token(w http.ResponseWriter, r *http.Request, s *snap, rid string
 		refuse(400, "invalid_grant", "the assertion is not valid", why)
 		return
 	}
-	if _, err := oauth.VerifyJWT(assertion, cred.Key, f.now()); err != nil {
+	if _, err := oauth.VerifyJWT(assertion, cred.Key, f.now(), oauth.Expect{Audiences: s.cfg.KMSGRPC.TokenAudiences, Sub: oauth.SubjectOptional}); err != nil {
 		f.failed(l)
-		refuse(400, "invalid_grant", "the assertion is not valid", "bad_token")
+		refuse(400, "invalid_grant", "the assertion is not valid", jwtResult(err))
 		return
 	}
 	ev.Client = cred.Client
@@ -353,10 +354,10 @@ func (f *Face) call(w http.ResponseWriter, r *http.Request, s *snap, rid string)
 		refuse(cUnauth, "no access token", "unauthenticated")
 		return
 	}
-	issuer, ok := f.issuerOf(tok, s)
-	if !ok {
+	issuer, why := f.issuerOf(tok, s)
+	if why != "" {
 		f.failed(l)
-		refuse(cUnauth, "the access token is not valid", "bad_token")
+		refuse(cUnauth, "the access token is not valid", why)
 		return
 	}
 	cred, why := f.bind(l, r, s, issuer)
@@ -400,22 +401,39 @@ func (f *Face) call(w http.ResponseWriter, r *http.Request, s *snap, rid string)
 
 // issuerOf gives the issuer of a bearer: an access token this service gave, or a JWT signed by the service account itself (the client libraries use the latter when the call is made
 // without the token exchange).
-func (f *Face) issuerOf(tok string, s *snap) (string, bool) {
+func (f *Face) issuerOf(tok string, s *snap) (issuer, why string) {
 	if strings.HasPrefix(tok, "hg.") {
-		return f.tokens.Lookup(tok, f.now())
+		iss, ok := f.tokens.Lookup(tok, f.now())
+		if !ok {
+			return "", "bad_token"
+		}
+		return iss, ""
 	}
 	issuer, ok := oauth.PeekIssuer(tok)
 	if !ok {
-		return "", false
+		return "", "bad_token"
 	}
 	c, ok := s.creds[issuer]
 	if !ok {
-		return "", false
+		return "", "bad_token"
 	}
-	if _, err := oauth.VerifyJWT(tok, c.Key, f.now()); err != nil {
-		return "", false
+	// a JWT used as the bearer has its own audience (the service of the API), not the one of the token endpoint: the two are told apart, so that an assertion made for the
+	// exchange is not good as a bearer, nor the other way round
+	if _, err := oauth.VerifyJWT(tok, c.Key, f.now(), oauth.Expect{Audiences: s.cfg.KMSGRPC.BearerAudiences, Sub: oauth.SubjectOptional}); err != nil {
+		return "", jwtResult(err)
 	}
-	return issuer, true
+	return issuer, ""
+}
+
+// jwtResult is the word of the audit line for a token that did not pass: the audience and the subject have their own words, everything else is "bad_token".
+func jwtResult(err error) string {
+	switch {
+	case errors.Is(err, oauth.ErrAudience):
+		return "bad_audience"
+	case errors.Is(err, oauth.ErrSubject):
+		return "bad_subject"
+	}
+	return "bad_token"
 }
 
 func requestID(*http.Request) string {

@@ -92,7 +92,7 @@ func run(m *testing.M) int {
 	os.WriteFile(saFile, sa, 0o600)
 	os.WriteFile(f("hsmgate.yaml"), []byte(fmt.Sprintf(`listen: %s
 tls: {cert: %s, key: %s, client_ca: %s}
-kmsgrpc: {enabled: true}
+kmsgrpc: {enabled: true, bearer_audiences: ["https://kms.hsmgate.test/"]}
 tokens: [{name: soft, type: soft, keys: {m1: %s, m2: %s, m3: %s, m4: %s}}]
 keys:
   seal: {kmsgrpc: true, kmsjson_usage: encrypt_decrypt, versions: [{token: soft, label: m1}], aad: {mode: fixed}}
@@ -121,8 +121,12 @@ clients:
 	return m.Run()
 }
 
+// audience is what the library writes into the "aud" of the JWT it signs as its bearer (option.WithAudiences), and the service lists it in kmsgrpc.bearer_audiences. Without
+// the option the library writes a "scope" and no "aud", and a service that lists audiences refuses it.
+const audience = "https://kms.hsmgate.test/"
+
 func client(t *testing.T) *kms.KeyManagementClient {
-	c, err := kms.NewKeyManagementClient(context.Background(), option.WithEndpoint(addr), option.WithCredentialsFile(saFile))
+	c, err := kms.NewKeyManagementClient(context.Background(), option.WithEndpoint(addr), option.WithCredentialsFile(saFile), option.WithAudiences(audience))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,6 +245,24 @@ func TestMetadataAndRefusals(t *testing.T) {
 	} {
 		if code(err) == codes.OK {
 			t.Errorf("%s was not refused", name)
+		}
+	}
+}
+
+// A bearer made for no audience, or for another one, is refused by a service that lists its audiences (the review of 2026-11-21, finding 1).
+func TestBearerForAnotherAudienceIsRefused(t *testing.T) {
+	for name, opts := range map[string][]option.ClientOption{
+		"no audience (a scope, as the library does by default)": nil,
+		"another audience": {option.WithAudiences("https://another.hsmgate.test/")},
+	} {
+		c, err := kms.NewKeyManagementClient(context.Background(), append([]option.ClientOption{option.WithEndpoint(addr), option.WithCredentialsFile(saFile)}, opts...)...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = c.GetPublicKey(context.Background(), &kmspb.GetPublicKeyRequest{Name: ring + "sig/cryptoKeyVersions/1"})
+		c.Close()
+		if code(err) != codes.Unauthenticated {
+			t.Errorf("%s: %v", name, err)
 		}
 	}
 }

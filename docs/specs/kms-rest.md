@@ -20,7 +20,7 @@ A key is on the face with `kmsrest: true`, with one usage (`encrypt_decrypt`, `s
 ## 2. Authentication
 
 - `GET /{tenant}/v2.0/.well-known/openid-configuration` (public): where the token endpoint is.
-- `POST /{tenant}/oauth2/v2.0/token`, grant `client_credentials`, with `client_id` and `client_secret`, or `client_assertion_type=…jwt-bearer` and `client_assertion` (RS256, `iss`/`sub` the client id, at most 24 hours long). The answer is an opaque access token (random, one hour, in memory only).
+- `POST /{tenant}/oauth2/v2.0/token`, grant `client_credentials`, with `client_id` and `client_secret`, or `client_assertion_type=…jwt-bearer` and `client_assertion` (RS256, `iss` and `sub` both the client id: a token with another `sub`, or none, is refused; at most 24 hours long; `aud` must be one of `kmsrest.audiences` when that list is set: the token endpoint, RFC 7523 section 3). The answer is an opaque access token (random, one hour, in memory only).
 - A call without a valid bearer gets `401` and `WWW-Authenticate: Bearer authorization="https://HOST/TENANT", resource="https://vault.azure.net"`, the challenge the client libraries answer by asking their credential for a token.
 
 On every call the credential must still exist, a client certificate if shown must be the client's, a call without a certificate needs `oauth.no_cert` and a listed address, and refused credentials without a certificate are counted by address. Audit before answer: if the audit line cannot be written, the call fails with `503`.

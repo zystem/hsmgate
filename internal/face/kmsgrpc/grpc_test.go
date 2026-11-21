@@ -42,9 +42,13 @@ type rig struct {
 func b64(b []byte) string { return base64.RawURLEncoding.EncodeToString(b) }
 
 func (r *rig) jwt(issuer string, key *rsa.PrivateKey, life time.Duration) string {
-	hdr, _ := json.Marshal(map[string]string{"alg": "RS256", "typ": "JWT"})
 	now := time.Now()
-	cl, _ := json.Marshal(map[string]any{"iss": issuer, "sub": issuer, "aud": "https://example.test/", "iat": now.Unix(), "exp": now.Add(life).Unix()})
+	return r.jwtClaims(key, map[string]any{"iss": issuer, "sub": issuer, "aud": "https://example.test/", "iat": now.Unix(), "exp": now.Add(life).Unix()})
+}
+
+func (r *rig) jwtClaims(key *rsa.PrivateKey, claims map[string]any) string {
+	hdr, _ := json.Marshal(map[string]string{"alg": "RS256", "typ": "JWT"})
+	cl, _ := json.Marshal(claims)
 	in := b64(hdr) + "." + b64(cl)
 	sum := sha256.Sum256([]byte(in))
 	sig, err := rsa.SignPKCS1v15(rand.Reader, key, crypto.SHA256, sum[:])
@@ -426,6 +430,67 @@ func TestMacHashIsChosenPerKey(t *testing.T) {
 		st, _, rep = r.rpc("MacVerify", bearer, (&writer{}).str(1, ring+key).bytes(2, []byte("data")).bytes(4, mac))
 		if st != 0 || rep.u64(2) != 1 {
 			t.Errorf("%s verify: %d", key, st)
+		}
+	}
+}
+
+// The audience and the subject of a token (the review of 2026-11-21, finding 1): a token made for the token endpoint is not a bearer for the API, one made for the API is not an
+// assertion for the exchange, and neither is good for another service or for another subject.
+func TestAudienceAndSubject(t *testing.T) {
+	r := newRig(t)
+	const endpoint, api = "https://kms.example.test/oauth2/token", "https://cloudkms.example.test/"
+	r.cfg.KMSGRPC.TokenAudiences = []string{endpoint}
+	r.cfg.KMSGRPC.BearerAudiences = []string{api}
+	r.f.Reload(r.cfg, nil, policy.New(r.cfg, nil), func(*http.Request) (string, bool) { return "", true }, mustCreds(t, r.cfg))
+	now := time.Now()
+	mk := func(extra map[string]any) string {
+		c := map[string]any{"iss": "app@example.test", "iat": now.Unix(), "exp": now.Add(time.Hour).Unix()}
+		for k, v := range extra {
+			c[k] = v
+		}
+		return r.jwtClaims(r.rsaKey, c)
+	}
+	exchange := func(assertion string) int {
+		resp, err := r.client.PostForm(r.srv.URL+r.f.TokenPath, url.Values{"grant_type": {"urn:ietf:params:oauth:grant-type:jwt-bearer"}, "assertion": {assertion}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	call := func(bearer string) int {
+		code, _, _ := r.rpc("GenerateRandomBytes", bearer, (&writer{}).str(1, "projects/hsmgate/locations/global").u64(2, 8))
+		return code
+	}
+	for _, tc := range []struct {
+		name   string
+		claims map[string]any
+		exch   int // the token endpoint
+		bearer int // a call with the JWT as it is
+		word   string
+	}{
+		{"made for the endpoint", map[string]any{"aud": endpoint}, 200, cUnauth, "bad_audience"},
+		{"made for the API", map[string]any{"aud": api}, 400, 0, "bad_audience"},
+		{"the endpoint and the API", map[string]any{"aud": []string{endpoint, api}}, 200, 0, ""},
+		{"made for another service", map[string]any{"aud": "https://other.example.test/"}, 400, cUnauth, "bad_audience"},
+		{"no audience", nil, 400, cUnauth, "bad_audience"},
+		{"for another subject", map[string]any{"aud": []string{endpoint, api}, "sub": "boss@example.test"}, 400, cUnauth, "bad_subject"},
+		{"the subject is the issuer", map[string]any{"aud": []string{endpoint, api}, "sub": "app@example.test"}, 200, 0, ""},
+	} {
+		tok := mk(tc.claims)
+		r.log.Reset()
+		if got := exchange(tok); got != tc.exch {
+			t.Errorf("%s: the exchange answered %d, want %d", tc.name, got, tc.exch)
+		}
+		if tc.exch != 200 && tc.word != "" && !strings.Contains(r.log.String(), `"result":"`+tc.word+`"`) {
+			t.Errorf("%s: the audit line of the exchange has no %q: %s", tc.name, tc.word, r.log.String())
+		}
+		r.log.Reset()
+		if got := call(tok); got != tc.bearer {
+			t.Errorf("%s: the call as a bearer gave %d, want %d", tc.name, got, tc.bearer)
+		}
+		if tc.bearer != 0 && tc.word != "" && !strings.Contains(r.log.String(), `"result":"`+tc.word+`"`) {
+			t.Errorf("%s: the audit line of the call has no %q: %s", tc.name, tc.word, r.log.String())
 		}
 	}
 }

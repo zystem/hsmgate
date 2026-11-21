@@ -17,7 +17,7 @@ func BenchmarkVerifyJWT(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		if _, err := VerifyJWT(tok, &key.PublicKey, now); err != nil {
+		if _, err := VerifyJWT(tok, &key.PublicKey, now, Expect{}); err != nil {
 			b.Fatal(err)
 		}
 	}
