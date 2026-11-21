@@ -247,7 +247,7 @@ func (f *Face) token(w http.ResponseWriter, r *http.Request, s *snap, rid string
 		oauthError(w, 503, "temporarily_unavailable", "audit log unavailable")
 		return
 	}
-	tok, exp := f.tokens.Issue(issuer, f.now())
+	tok, exp := f.tokens.Issue(issuer, cred.Stamp, f.now())
 	ev.Result = "ok"
 	if err := f.Audit.Write(ev); err != nil {
 		oauthError(w, 503, "temporarily_unavailable", "audit log unavailable")
@@ -403,9 +403,12 @@ func (f *Face) call(w http.ResponseWriter, r *http.Request, s *snap, rid string)
 // without the token exchange).
 func (f *Face) issuerOf(tok string, s *snap) (issuer, why string) {
 	if strings.HasPrefix(tok, "hg.") {
-		iss, ok := f.tokens.Lookup(tok, f.now())
+		iss, stamp, ok := f.tokens.Lookup(tok, f.now())
 		if !ok {
 			return "", "bad_token"
+		}
+		if c, known := s.creds[iss]; known && c.Stamp != stamp { // given for a credential that has been replaced since (a new key, another client behind the issuer)
+			return "", "credential_changed"
 		}
 		return iss, ""
 	}

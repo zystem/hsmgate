@@ -68,14 +68,14 @@ func TestVerifyJWT(t *testing.T) {
 func TestTokens(t *testing.T) {
 	ts := NewTokens()
 	now := time.Now()
-	tok, exp := ts.Issue("me", now)
-	if iss, ok := ts.Lookup(tok, now.Add(time.Minute)); !ok || iss != "me" || exp.Sub(now) != time.Hour {
+	tok, exp := ts.Issue("me", "s", now)
+	if iss, stamp, ok := ts.Lookup(tok, now.Add(time.Minute)); !ok || iss != "me" || stamp != "s" || exp.Sub(now) != time.Hour {
 		t.Fatal("lookup")
 	}
-	if _, ok := ts.Lookup(tok, now.Add(2*time.Hour)); ok {
+	if _, _, ok := ts.Lookup(tok, now.Add(2*time.Hour)); ok {
 		t.Error("an expired token was found")
 	}
-	if _, ok := ts.Lookup("hg.nope", now); ok {
+	if _, _, ok := ts.Lookup("hg.nope", now); ok {
 		t.Error("an unknown token was found")
 	}
 }
@@ -173,6 +173,25 @@ func TestJWTAudienceAndSubject(t *testing.T) {
 		_, err := VerifyJWT(tc.tok, &key.PublicKey, now, tc.exp)
 		if !errors.Is(err, tc.want) || (tc.want == nil && err != nil) {
 			t.Errorf("%s: got %v, want %v", tc.name, err, tc.want)
+		}
+	}
+}
+
+// A stamp changes with every part of a credential, and the parts cannot be shifted into each other.
+func TestStamp(t *testing.T) {
+	base := Stamp("app", "id", []byte("material"))
+	if base != Stamp("app", "id", []byte("material")) {
+		t.Error("a stamp is not stable")
+	}
+	for name, other := range map[string]string{
+		"another client":   Stamp("app2", "id", []byte("material")),
+		"another id":       Stamp("app", "id2", []byte("material")),
+		"other material":   Stamp("app", "id", []byte("materiaL")),
+		"a shifted split":  Stamp("ap", "pid", []byte("material")),
+		"a shifted split2": Stamp("app", "idm", []byte("aterial")),
+	} {
+		if other == base {
+			t.Errorf("%s has the same stamp", name)
 		}
 	}
 }

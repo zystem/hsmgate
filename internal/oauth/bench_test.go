@@ -28,8 +28,8 @@ func BenchmarkTokensIssueLookup(b *testing.B) {
 	now := time.Now()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		tok, _ := ts.Issue("me", now)
-		if _, ok := ts.Lookup(tok, now); !ok {
+		tok, _ := ts.Issue("me", "s", now)
+		if _, _, ok := ts.Lookup(tok, now); !ok {
 			b.Fatal("lost")
 		}
 	}

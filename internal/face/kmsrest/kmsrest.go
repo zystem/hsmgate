@@ -52,6 +52,7 @@ const (
 type Cred struct {
 	Client string
 	ID     string
+	Stamp  string // the name of this credential as it is now (oauth.Stamp): the tokens given for another one are not good
 	Secret []byte
 	Pub    *rsa.PublicKey
 	NoCert bool
@@ -283,7 +284,7 @@ func (f *Face) token(w http.ResponseWriter, r *http.Request, s *snap, rid string
 		oauthError(w, 503, "temporarily_unavailable", "audit log unavailable")
 		return
 	}
-	tok, exp := f.tokens.Issue(id, f.now())
+	tok, exp := f.tokens.Issue(id, c.Stamp, f.now())
 	ev.Result = "ok"
 	if err := f.Audit.Write(ev); err != nil {
 		oauthError(w, 503, "temporarily_unavailable", "audit log unavailable")
@@ -453,11 +454,17 @@ func (f *Face) call(w http.ResponseWriter, r *http.Request, s *snap, rid string)
 		refuse(401, "Unauthorized", "Request is missing a Bearer token.", "unauthenticated")
 		return
 	}
-	id, ok := f.tokens.Lookup(strings.TrimSpace(h[7:]), f.now())
+	id, stamp, ok := f.tokens.Lookup(strings.TrimSpace(h[7:]), f.now())
 	if !ok {
 		f.failed(l)
 		f.challenge(w, r)
 		refuse(401, "Unauthorized", "The access token is not valid.", "bad_token")
+		return
+	}
+	if c, known := s.creds[id]; known && c.Stamp != stamp { // given for a credential that has been replaced since (a new secret or key, another client behind the id)
+		f.failed(l)
+		f.challenge(w, r)
+		refuse(401, "Unauthorized", "The access token is not valid.", "credential_changed")
 		return
 	}
 	cred, why := f.bind(l, s, id)
@@ -842,6 +849,15 @@ func LoadCreds(cfg *config.Config) (map[string]Cred, error) {
 			return nil, fmt.Errorf("client %s: %w", cl.Name, err)
 		}
 		c.From = from
+		material := c.Secret
+		if c.Pub != nil {
+			der, err := x509.MarshalPKIXPublicKey(c.Pub)
+			if err != nil {
+				return nil, fmt.Errorf("client %s: oauth.public_key_file: %w", cl.Name, err)
+			}
+			material = der
+		}
+		c.Stamp = oauth.Stamp(cl.Name, o.ClientID, material)
 		creds[o.ClientID] = c
 	}
 	return creds, nil
