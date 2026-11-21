@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Fixed
+- **A reload no longer accepts a change of `debug.pprof`, `metrics.enabled` or `metrics.detail`** (the review of 2026-11-21, finding 5). They are set up when the process starts, so a reload that changed one was accepted and did nothing: an operator who turned the profiles off with SIGHUP still had them. The reload is now refused with "cannot change in a reload: restart", in both directions, and the running configuration stays as it was.
+
 ### Security
 - **The table of access tokens no longer empties itself** (the review of 2026-11-21, finding 4). At 10 000 live tokens the table was replaced by an empty one, so that one client that asked for many tokens made every other client ask again at once. Now a client holds at most 100 live tokens (the next one ends its own oldest), and when the whole table is full the oldest token of the client that holds the most ends; the expired ones are dropped first. Tested: one busy client keeps the sessions of the others; a full table gives up one token for one new one.
 - **An access token ends with the credential it was given for** (the review of 2026-11-21, finding 2). A token lived for its hour even after the secret or the key of its client was replaced; now every token carries a stamp of the client, the issuer and the secret or public key, and a call with a token whose stamp is not the one of the credential now is refused (`credential_changed`). A new secret, a new key, or another client behind the same client id or issuer ends the old tokens at the next call, without waiting for the hour and without a restart; a reload that changes nothing leaves them, and the tokens of other clients are not touched. Tested with rotation and rebinding on both faces. [upgrading.md](docs/upgrading.md).
