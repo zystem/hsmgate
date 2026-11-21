@@ -65,6 +65,7 @@ type snap struct {
 	pol      *policy.Policy
 	identify func(*http.Request) (string, bool)
 	creds    map[string]Cred
+	macEpoch uint64 // the epoch of this generation in the cache of MAC keys
 }
 
 // Face is the REST face.
@@ -91,8 +92,10 @@ func New(a *audit.Log, g *gate.Gate, tenant string) *Face {
 // Reload replaces the generation for the requests that come after; the returned function waits for the requests of the previous one. Access tokens stay valid, but every request is
 // judged again against the credentials of the new generation.
 func (f *Face) Reload(cfg *config.Config, tokens map[string]backend.Token, pol *policy.Policy, id func(*http.Request) (string, bool), creds map[string]Cred) func() {
-	f.Macs.Clear()
-	return f.gen.Set(&snap{cfg: cfg, tokens: tokens, pol: pol, identify: id, creds: creds})
+	epoch := f.Macs.Next()
+	wait := f.gen.Set(&snap{cfg: cfg, tokens: tokens, pol: pol, identify: id, creds: creds, macEpoch: epoch})
+	f.Macs.Advance(epoch) // after the new generation is published: what the old one derived is wiped, and it can put nothing back
+	return wait
 }
 
 func (f *Face) tokenPath() string { return "/" + f.Tenant + tokenSuffix }
@@ -502,7 +505,7 @@ func (f *Face) call(w http.ResponseWriter, r *http.Request, s *snap, rid string)
 		return
 	}
 	c := &call{f: f, s: s, r: r, client: cred.Client, body: body, ev: &ev, host: r.Host,
-		svc: &kmsops.Service{Face: face, Cfg: s.cfg, Tokens: s.tokens, Policy: s.pol, Gate: f.Gate, Macs: f.Macs, Now: f.Now}}
+		svc: &kmsops.Service{Face: face, Cfg: s.cfg, Tokens: s.tokens, Policy: s.pol, Gate: f.Gate, Macs: f.Macs, MacEpoch: s.macEpoch, Now: f.Now}}
 	out, ke := rt.handler(c, name, ver)
 	if ke != nil {
 		refuse(ke.status, ke.code, ke.msg, ke.result)

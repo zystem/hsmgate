@@ -19,7 +19,6 @@ import (
 	"net/http"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/zystem/hsmgate/internal/audit"
@@ -624,67 +623,6 @@ func (c *call) messageMark(label string, hash []byte) {
 
 const maxMacMessage = 4096
 
-type macEntry struct {
-	key     []byte
-	expires time.Time
-}
-
-// macCache keeps the MAC keys derived from the keys on the token for kmsjson.mac_cache_seconds. Shared by the generations; an entry is named by the fingerprint of the public key
-// and the version, so a key that was replaced is never answered from the old entry.
-type macCache struct {
-	mu sync.Mutex
-	m  map[string]macEntry
-}
-
-func (k *macCache) get(id string, now time.Time) ([]byte, bool) {
-	if k == nil {
-		return nil, false
-	}
-	k.mu.Lock()
-	defer k.mu.Unlock()
-	e, ok := k.m[id]
-	if !ok {
-		return nil, false
-	}
-	if !now.Before(e.expires) {
-		wipe(e.key)
-		delete(k.m, id)
-		return nil, false
-	}
-	return append([]byte{}, e.key...), true // a copy made under the lock: put and clear wipe the cache's own memory (audit 2026-10-21, CR-03)
-}
-
-// clear drops every derived key (a reload: the configuration, the clients or the tokens may have changed).
-func (k *macCache) clear() {
-	if k == nil {
-		return
-	}
-	k.mu.Lock()
-	defer k.mu.Unlock()
-	for id, e := range k.m {
-		wipe(e.key)
-		delete(k.m, id)
-	}
-}
-
-func (k *macCache) put(id string, key []byte, until time.Time) {
-	if k == nil {
-		return
-	}
-	k.mu.Lock()
-	defer k.mu.Unlock()
-	if k.m == nil {
-		k.m = map[string]macEntry{}
-	}
-	if old, ok := k.m[id]; ok {
-		wipe(old.key)
-	}
-	k.m[id] = macEntry{append([]byte{}, key...), until}
-}
-
-// NewMacKeys makes the cache of derived MAC keys.
-func NewMacKeys() *macCache { return &macCache{m: map[string]macEntry{}} }
-
 // macKey is the MAC key of a version, from the cache or from the token.
 func (c *call) macKey(name string, ver int, key config.Key) ([]byte, bool) {
 	f := c.f
@@ -693,7 +631,7 @@ func (c *call) macKey(name string, ver int, key config.Key) ([]byte, bool) {
 	if ttl > 0 {
 		if point, err := keyops.PointOf(f.Tokens, key.Versions[ver-1]); err == nil { // no token operation: the public key is kept
 			id += "|" + ecies.Fingerprint(point)
-			if k, ok := f.MacKeys.get(id, f.now()); ok {
+			if k, ok := f.MacKeys.Get(id, f.now(), f.macEpoch); ok {
 				return k, true
 			}
 		}
@@ -710,7 +648,7 @@ func (c *call) macKey(name string, ver int, key config.Key) ([]byte, bool) {
 		return nil, false
 	}
 	if ttl > 0 {
-		f.MacKeys.put(id, k, f.now().Add(ttl))
+		f.MacKeys.Put(id, k, f.now(), ttl, f.macEpoch)
 	}
 	return k, true
 }

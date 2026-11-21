@@ -27,6 +27,7 @@ import (
 	"github.com/zystem/hsmgate/internal/face/kmsrest"
 	"github.com/zystem/hsmgate/internal/face/transit"
 	"github.com/zystem/hsmgate/internal/gate"
+	"github.com/zystem/hsmgate/internal/kmsops"
 	"github.com/zystem/hsmgate/internal/metrics"
 	"github.com/zystem/hsmgate/internal/peer"
 	"github.com/zystem/hsmgate/internal/policy"
@@ -104,7 +105,7 @@ func New(cfg *config.Config, auditOut io.Writer) (*Server, error) {
 	s.face.Limit(s.gate)
 	var handler http.Handler = s.face
 	if cfg.KMSJSON.Enabled {
-		s.kms = &kmsjson.Face{Cfg: cfg, Tokens: gen.tokens, Policy: gen.pol, Audit: s.audit, Creds: gen.creds, Gate: s.gate, Created: time.Now(), Fails: peer.NewFailures(), MacKeys: kmsjson.NewMacKeys()}
+		s.kms = &kmsjson.Face{Cfg: cfg, Tokens: gen.tokens, Policy: gen.pol, Audit: s.audit, Creds: gen.creds, Gate: s.gate, Created: time.Now(), Fails: peer.NewFailures(), MacKeys: kmsops.NewMacCache()}
 		handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if kmsjson.IsKMSJSON(r) {
 				s.kms.ServeHTTP(w, r)
