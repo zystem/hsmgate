@@ -109,6 +109,12 @@ func Fingerprint(masterPoint []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
+func wipe(b []byte) {
+	for i := range b {
+		b[i] = 0
+	}
+}
+
 func deriveKey(st suite, tag string, secret []byte, fp string, ephPoint []byte) ([]byte, error) {
 	return hkdf.Key(st.hash, secret, []byte("hsmgate/"+tag), fp+"|"+hex.EncodeToString(ephPoint), 32)
 }
@@ -142,12 +148,14 @@ func WrapSuite(tag string, masterPoint, plain, aad []byte) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	defer wipe(z) // the shared secret and the key made of it are zeroed when the text is sealed (what the AEAD and the curve code copy inside is not in reach)
 	fp := Fingerprint(masterPoint)
 	ephPoint := eph.PublicKey().Bytes()
 	k, err := deriveKey(st, tag, z, fp, ephPoint)
 	if err != nil {
 		return "", err
 	}
+	defer wipe(k)
 	a, err := st.aead(k)
 	if err != nil {
 		return "", err
@@ -194,10 +202,12 @@ func Unwrap(masterPoint []byte, d Deriver, wrapped string, aad []byte) ([]byte, 
 	if err != nil {
 		return nil, err
 	}
+	defer wipe(z) // as in WrapSuite
 	k, err := deriveKey(st, tag, z, fp, eph)
 	if err != nil {
 		return nil, err
 	}
+	defer wipe(k)
 	a, err := st.aead(k)
 	if err != nil {
 		return nil, err

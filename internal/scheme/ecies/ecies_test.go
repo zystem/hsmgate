@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/ecdh"
 	"crypto/fips140"
+	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -220,5 +221,37 @@ func TestEverySuiteSealsAndOpens(t *testing.T) {
 	}
 	if !Approved("ecies2") || !Approved("ecies3") || Approved("ecies4") || Approved("nope") {
 		t.Error("Approved")
+	}
+}
+
+// recordingDeriver keeps the slice of the shared secret that it hands out.
+type recordingDeriver struct {
+	Deriver
+	z []byte
+}
+
+func (r *recordingDeriver) Derive(peer []byte) ([]byte, error) {
+	z, err := r.Deriver.Derive(peer)
+	r.z = z
+	return z, err
+}
+
+// The shared secret is zeroed when the text is opened, on success and on a refusal alike (the review of 2026-11-21, finding 3).
+func TestUnwrapWipesTheSharedSecret(t *testing.T) {
+	key, _ := ecdh.P256().GenerateKey(rand.Reader)
+	point := key.PublicKey().Bytes()
+	text, err := Wrap(point, []byte("plain"), []byte("aad"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, aad := range map[string][]byte{"opens": []byte("aad"), "refused (another aad)": []byte("other")} {
+		d := &recordingDeriver{Deriver: SoftKey{key}}
+		_, err := Unwrap(point, d, text, aad)
+		if (err == nil) != (name == "opens") {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if len(d.z) == 0 || !bytes.Equal(d.z, make([]byte, len(d.z))) {
+			t.Errorf("%s: the shared secret was not zeroed: %x", name, d.z)
+		}
 	}
 }

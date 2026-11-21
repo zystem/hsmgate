@@ -24,6 +24,19 @@ Rule one: **a compromised client can do exactly what its policy allows and no mo
 | KMS-JSON face: MAC key | the MAC key is derived on the token and used by the service, so it is in memory while it works (and for `mac_cache_seconds`) | derived from the token's key with a point of unknown logarithm; not stored; the token key is dedicated to it; the cache is off by default | host memory reveals the MAC key (not the token key) for the time it is there |
 | KMS-JSON face: the service seals | sees the plaintext while it seals or opens (as the Transit face) | not logged; the audit holds the key, client and context only; plaintext wiped after use | memory of the host while the request runs |
 
+## Secrets in the memory of the process: what is wiped and what is not
+
+Written after the review of 2026-11-21 (finding 3); the code is the reference, the test of each line is named. A process that holds a secret for a moment cannot promise that no copy of it is left anywhere; this says which copies the service controls.
+
+| Secret | Wiped by the service | Not in its reach |
+|---|---|---|
+| The PIN of a card, on the admin socket | the request body and the PIN cut out of it are never a Go string and are zeroed when the request is done; the PIN kept for a new login is zeroed when the token refuses it and when the token is closed (`TestAdminUnlockWipesThePIN`, `TestRefusedPINIsWipedFromMemory`) | the PKCS#11 binding takes the PIN as a Go string (`C_Login`), so the binding and the module make their own copies; the PIN kept to log in again lives for as long as the token is unlocked |
+| The ECDH shared secret and the key made from it (ECIES wrap and unwrap) | both are zeroed when the text is sealed or opened, on success and on refusal (`TestUnwrapWipesTheSharedSecret`) | the key schedule inside the AEAD, the ephemeral private key and the curve code of the Go library keep their own copies until the garbage collector reuses the memory |
+| A derived MAC key in the cache (`kmsjson.mac_cache_seconds`) | wiped when its time is up, by the cache itself, and at a reload; the previous generation cannot put one back (`TestMacCacheWipesTheExpiredByItself`, `TestMacKeyOfThePreviousGenerationIsNotCachedAfterAReload`) | the copy a request is using while it runs; the default is no cache |
+| Plaintext in transit through the service | not kept or logged. The Transit and KMS-JSON faces zero the plaintext they opened (and the data keys) when the answer is written | the gRPC and REST faces (`internal/kmsops`) do **not** zero the plaintext they open yet; the copies the HTTP library and the JSON decoder make of a body are never in reach |
+
+`LimitCORE=0` is set in both systemd units, so a crash does not write the memory to a file; a root user on an unlocked host can still read the process. None of this replaces the rule that a heap profile (`debug.pprof`) and a core dump are treated as if they held the secrets.
+
 ## Attack surface (reviewed for release 0.4.0)
 
 | Entry | Who can reach it | Parsers and checks | Notes |

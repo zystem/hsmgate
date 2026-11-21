@@ -135,6 +135,9 @@ func (p *core) login(pin []byte) error {
 		return nil
 	case isErr(err, pkcs11.CKR_PIN_INCORRECT), isErr(err, pkcs11.CKR_PIN_LOCKED), isErr(err, pkcs11.CKR_PIN_LEN_RANGE):
 		p.refused = true
+		for i := range p.pin { // a PIN kept from an earlier login is forgotten, and wiped first
+			p.pin[i] = 0
+		}
 		p.pin = nil
 		return fmt.Errorf("%w: %v", ErrPINRefused, err)
 	}
