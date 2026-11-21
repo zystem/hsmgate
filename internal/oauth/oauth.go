@@ -164,7 +164,20 @@ func (a Audience) hasAny(want []string) bool {
 
 type tokenInfo struct {
 	issuer  string
+	stamp   string
 	expires time.Time
+}
+
+// Stamp is a short name of a credential as it is now: the client it belongs to, the issuer (or client id) and the material that proves it (the public key, or the secret).
+// A face writes it into every access token it gives and compares it again at every call, so that a token does not outlive the credential it was given for: a new key or secret,
+// another client behind the same issuer, are another stamp. The material is hashed with its length, so that two different splits of the same bytes are not the same stamp.
+func Stamp(client, issuer string, material []byte) string {
+	h := sha256.New()
+	for _, p := range [][]byte{[]byte("hsmgate/credential/v1"), []byte(client), []byte(issuer), material} {
+		fmt.Fprintf(h, "%d:", len(p))
+		h.Write(p)
+	}
+	return base64.RawURLEncoding.EncodeToString(h.Sum(nil))
 }
 
 // Tokens are the access tokens this service has given: opaque, random, in memory only (a restart ends them; a client then asks again).
@@ -175,7 +188,8 @@ type Tokens struct {
 
 func NewTokens() *Tokens { return &Tokens{m: map[string]tokenInfo{}} }
 
-func (t *Tokens) Issue(issuer string, now time.Time) (string, time.Time) {
+// Issue gives a token to an issuer whose credential has the stamp.
+func (t *Tokens) Issue(issuer, stamp string, now time.Time) (string, time.Time) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if len(t.m) >= maxTokens {
@@ -194,22 +208,23 @@ func (t *Tokens) Issue(issuer string, now time.Time) (string, time.Time) {
 	}
 	tok := "hg." + strings.TrimRight(base64.RawURLEncoding.EncodeToString(b), "=")
 	exp := now.Add(tokenTTL)
-	t.m[tok] = tokenInfo{issuer: issuer, expires: exp}
+	t.m[tok] = tokenInfo{issuer: issuer, stamp: stamp, expires: exp}
 	return tok, exp
 }
 
-func (t *Tokens) Lookup(tok string, now time.Time) (string, bool) {
+// Lookup gives the issuer of a token and the stamp of the credential it was given for; the caller compares the stamp with the one of the credential now.
+func (t *Tokens) Lookup(tok string, now time.Time) (issuer, stamp string, ok bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	v, ok := t.m[tok]
 	if !ok {
-		return "", false
+		return "", "", false
 	}
 	if !now.Before(v.expires) {
 		delete(t.m, tok)
-		return "", false
+		return "", "", false
 	}
-	return v.issuer, true
+	return v.issuer, v.stamp, true
 }
 
 // ReadRSAPublic reads a PEM file with an RSA public key (PKIX or PKCS#1) or a certificate, of 2048 bits or more.

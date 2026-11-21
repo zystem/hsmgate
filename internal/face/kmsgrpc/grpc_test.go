@@ -494,3 +494,50 @@ func TestAudienceAndSubject(t *testing.T) {
 		}
 	}
 }
+
+// A token does not outlive the credential it was given for (the review of 2026-11-21, finding 2): a new key for the issuer ends it at the next call; a reload that changes
+// nothing does not.
+func TestTokenDiesWithItsKey(t *testing.T) {
+	r := newRig(t)
+	reload := func() {
+		r.f.Reload(r.cfg, nil, policy.New(r.cfg, nil), func(*http.Request) (string, bool) { return "", true }, mustCreds(t, r.cfg))
+	}
+	exchange := func(key *rsa.PrivateKey) (int, string) {
+		resp, err := r.client.PostForm(r.srv.URL+r.f.TokenPath, url.Values{"grant_type": {"urn:ietf:params:oauth:grant-type:jwt-bearer"}, "assertion": {r.jwt("app@example.test", key, time.Hour)}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		var tk struct {
+			AccessToken string `json:"access_token"`
+		}
+		json.NewDecoder(resp.Body).Decode(&tk)
+		return resp.StatusCode, tk.AccessToken
+	}
+	call := func(tok string) int {
+		code, _, _ := r.rpc("GenerateRandomBytes", tok, (&writer{}).str(1, "projects/hsmgate/locations/global").u64(2, 8))
+		return code
+	}
+	code, tok := exchange(r.rsaKey)
+	if code != 200 || call(tok) != 0 {
+		t.Fatalf("the token is good before: %d", code)
+	}
+	reload() // nothing changed
+	if call(tok) != 0 {
+		t.Fatal("a reload that changes nothing ended the token")
+	}
+	other, _ := rsa.GenerateKey(rand.Reader, 2048)
+	der, _ := x509.MarshalPKIXPublicKey(&other.PublicKey)
+	os.WriteFile(r.cfg.Clients[0].JWT.PublicKeyFile, pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der}), 0o644)
+	reload()
+	r.log.Reset()
+	if c := call(tok); c != cUnauth || !strings.Contains(r.log.String(), `"result":"credential_changed"`) {
+		t.Errorf("the token of the replaced key: %d %s", c, r.log.String())
+	}
+	if code, _ := exchange(r.rsaKey); code == 200 {
+		t.Error("the old key still gives a token")
+	}
+	if code, tok2 := exchange(other); code != 200 || call(tok2) != 0 {
+		t.Error("the new key does not work")
+	}
+}

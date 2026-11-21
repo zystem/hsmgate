@@ -8,6 +8,7 @@ package kmsgrpc
 
 import (
 	"crypto/rsa"
+	"crypto/x509"
 	"fmt"
 	"net/netip"
 
@@ -19,6 +20,7 @@ import (
 type Cred struct {
 	Client string
 	Issuer string
+	Stamp  string // the name of this credential as it is now (oauth.Stamp): the tokens given for another one are not good
 	Key    *rsa.PublicKey
 	NoCert bool
 	From   []netip.Prefix
@@ -39,7 +41,11 @@ func LoadCreds(cfg *config.Config) (map[string]Cred, error) {
 		if err != nil {
 			return nil, fmt.Errorf("client %s: %w", c.Name, err)
 		}
-		creds[c.JWT.Issuer] = Cred{Client: c.Name, Issuer: c.JWT.Issuer, Key: pub, NoCert: c.JWT.NoCert, From: from}
+		der, err := x509.MarshalPKIXPublicKey(pub)
+		if err != nil {
+			return nil, fmt.Errorf("client %s: jwt.public_key_file: %w", c.Name, err)
+		}
+		creds[c.JWT.Issuer] = Cred{Client: c.Name, Issuer: c.JWT.Issuer, Stamp: oauth.Stamp(c.Name, c.JWT.Issuer, der), Key: pub, NoCert: c.JWT.NoCert, From: from}
 	}
 	return creds, nil
 }

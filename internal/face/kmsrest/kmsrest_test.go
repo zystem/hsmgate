@@ -429,3 +429,69 @@ func TestAssertionAudienceAndSubject(t *testing.T) {
 		}
 	}
 }
+
+// A token does not outlive the credential it was given for (the review of 2026-11-21, finding 2): a new secret or key, or another client behind the same client id, ends it at the
+// next call; a reload that changes nothing does not, and the token of another client is not touched.
+func TestTokenDiesWithItsCredential(t *testing.T) {
+	r := newRig(t)
+	reload := func() {
+		creds, err := LoadCreds(r.cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.f.Reload(r.cfg, nil, policy.New(r.cfg, nil), func(*http.Request) (string, bool) { return "", true }, creds)
+	}
+	secretToken := func(sec string) (int, string) {
+		return r.token(url.Values{"grant_type": {"client_credentials"}, "client_id": {"app-client"}, "client_secret": {sec}})
+	}
+	assertToken := func() string {
+		code, tok := r.token(url.Values{"grant_type": {"client_credentials"}, "client_id": {"cert-client"}, "client_assertion_type": {assertionTy}, "client_assertion": {r.assertion("cert-client", r.rsaKey)}})
+		if code != 200 {
+			t.Fatalf("assertion: %d", code)
+		}
+		return tok
+	}
+	_, app := secretToken(secret)
+	cert := assertToken()
+	status := func(tok string) int { st, _, _ := r.do("GET", "/keys", tok, nil); return st }
+	if status(app) != 200 || status(cert) != 200 {
+		t.Fatalf("both tokens are good before: %d %d", status(app), status(cert))
+	}
+	reload() // nothing changed
+	if status(app) != 200 || status(cert) != 200 {
+		t.Fatal("a reload that changes nothing ended a token")
+	}
+	// a new secret for app-client: its token ends, the other client's does not, the old secret is no way in, the new one is
+	const fresh = "another-client-secret-of-the-test-0123456789"
+	os.WriteFile(r.cfg.Clients[0].OAuth.SecretFile, []byte(fresh+"\n"), 0o600)
+	reload()
+	r.log.Reset()
+	if st := status(app); st != 401 || !strings.Contains(r.log.String(), `"result":"credential_changed"`) {
+		t.Errorf("the token of the replaced secret: %d %s", st, r.log.String())
+	}
+	if status(cert) != 200 {
+		t.Error("the token of another client was ended")
+	}
+	if code, _ := secretToken(secret); code == 200 {
+		t.Error("the old secret still gives a token")
+	}
+	if code, tok := secretToken(fresh); code != 200 || status(tok) != 200 {
+		t.Error("the new secret does not work")
+	}
+	// the same client id given to another client: the token given before is not good for the new holder
+	r.cfg.Clients[1].Name = "cert-two"
+	reload()
+	r.log.Reset()
+	if st := status(cert); st != 401 || !strings.Contains(r.log.String(), `"result":"credential_changed"`) {
+		t.Errorf("the token of the former holder: %d %s", st, r.log.String())
+	}
+	// a new public key for cert-client
+	other, _ := rsa.GenerateKey(rand.Reader, 2048)
+	der, _ := x509.MarshalPKIXPublicKey(&other.PublicKey)
+	cert = assertToken()
+	os.WriteFile(r.cfg.Clients[1].OAuth.PublicKeyFile, pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der}), 0o644)
+	reload()
+	if status(cert) != 401 {
+		t.Error("the token of the replaced key is still good")
+	}
+}

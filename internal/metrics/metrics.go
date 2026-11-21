@@ -31,7 +31,7 @@ func Outcome(result string) string {
 	switch result {
 	case "ok", "attempt":
 		return "ok"
-	case "forbidden", "forbidden_context", "unauthenticated", "unknown_access_key", "bad_signature", "unsigned", "malformed_signature", "credential_mismatch", "address_refused", "bad_usage", "bad_algorithm", "not_lockable", "bad_audience", "bad_subject":
+	case "forbidden", "forbidden_context", "unauthenticated", "unknown_access_key", "bad_signature", "unsigned", "malformed_signature", "credential_mismatch", "address_refused", "bad_usage", "bad_algorithm", "not_lockable", "bad_audience", "bad_subject", "credential_changed":
 		return "denied"
 	case "throttled", "busy", "throttled_auth":
 		return "throttled"
