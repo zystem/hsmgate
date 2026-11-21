@@ -356,3 +356,28 @@ func TestSignGivesDERThatVerifies(t *testing.T) {
 		t.Error("a short digest was signed")
 	}
 }
+
+// A PIN kept from an earlier login is wiped when the token refuses it, not only dropped (the review of 2026-11-21, finding 3).
+func TestRefusedPINIsWipedFromMemory(t *testing.T) {
+	f := newFake()
+	p := newPKCS11(cfg(), f)
+	if err := p.Unlock([]byte("123456")); err != nil {
+		t.Fatal(err)
+	}
+	kept := p.core.pin
+	if string(kept) != "123456" {
+		t.Fatalf("no PIN kept: %q", kept)
+	}
+	// the session is lost and the PIN that is kept is refused now (the card was changed)
+	f.pin = "654321"
+	p.core.mu.Lock()
+	p.core.loggedIn = false
+	err := p.core.login(p.core.pin)
+	p.core.mu.Unlock()
+	if !errors.Is(err, ErrPINRefused) {
+		t.Fatalf("%v", err)
+	}
+	if !bytes.Equal(kept, make([]byte, len(kept))) || p.core.pin != nil {
+		t.Errorf("the kept PIN was not wiped: %q", kept)
+	}
+}

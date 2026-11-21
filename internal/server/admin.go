@@ -2,13 +2,17 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
 	"sort"
 	"syscall"
 	"time"
+	"unicode/utf16"
+	"unicode/utf8"
 
 	"github.com/zystem/hsmgate/internal/audit"
 	"github.com/zystem/hsmgate/internal/backend"
@@ -40,8 +44,27 @@ func adminHandler(current func() map[string]backend.Token, log *audit.Log, metri
 		json.NewEncoder(w).Encode(st)
 	})
 	mux.HandleFunc("POST /unlock", func(w http.ResponseWriter, r *http.Request) {
-		var b struct{ Token, Pin string }
-		if json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024)).Decode(&b) != nil {
+		// The PIN is read as bytes and never as a Go string (a string cannot be wiped): the body is read into a buffer of its own, the PIN is cut out of it as raw JSON and
+		// unescaped into another, and both are zeroed when the request is done.
+		body, n, err := readSmallBody(r.Body, 1024)
+		defer wipe(body)
+		if err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		var b struct {
+			Token string
+			Pin   json.RawMessage
+		}
+		err = json.Unmarshal(body[:n], &b)
+		defer wipe(b.Pin)
+		if err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		pin, err := jsonStringBytes(b.Pin)
+		defer wipe(pin)
+		if err != nil {
 			http.Error(w, "bad request", http.StatusBadRequest)
 			return
 		}
@@ -59,12 +82,7 @@ func adminHandler(current func() map[string]backend.Token, log *audit.Log, metri
 			http.Error(w, "audit log unavailable", http.StatusServiceUnavailable)
 			return
 		}
-		pin := []byte(b.Pin)
-		err := u.Unlock(pin)
-		for i := range pin {
-			pin[i] = 0
-		}
-		if err != nil {
+		if err := u.Unlock(pin); err != nil {
 			ev.Result = "refused"
 			log.Write(ev)
 			http.Error(w, err.Error(), http.StatusForbidden)
@@ -110,4 +128,102 @@ func (s *Server) ServeAdmin(path string) error {
 	}
 	srv := &http.Server{Handler: h, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 20 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 8 << 10}
 	return srv.Serve(l)
+}
+
+// readSmallBody reads a body of at most max bytes into one buffer that is not grown (a grown buffer leaves copies behind), and gives the buffer and the number of bytes in it. The
+// buffer is returned whatever happens, so that the caller can wipe it.
+func readSmallBody(r io.Reader, max int) ([]byte, int, error) {
+	buf := make([]byte, max+1)
+	n, err := io.ReadFull(r, buf)
+	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.EOF) {
+		return buf, 0, err
+	}
+	if n > max {
+		return buf, 0, errors.New("the body is too large")
+	}
+	return buf, n, nil
+}
+
+// jsonStringBytes unescapes a JSON string into a new buffer of bytes without making a Go string of it. Nothing (an absent field) is an empty value; anything but a string is an error.
+func jsonStringBytes(raw []byte) ([]byte, error) {
+	if len(raw) == 0 {
+		return []byte{}, nil
+	}
+	if len(raw) < 2 || raw[0] != '"' || raw[len(raw)-1] != '"' {
+		return nil, errors.New("not a string")
+	}
+	in := raw[1 : len(raw)-1]
+	out := make([]byte, 0, len(in))
+	for i := 0; i < len(in); i++ {
+		c := in[i]
+		if c != '\\' {
+			out = append(out, c)
+			continue
+		}
+		if i++; i >= len(in) {
+			return out, errors.New("bad escape")
+		}
+		switch in[i] {
+		case '"', '\\', '/':
+			out = append(out, in[i])
+		case 'b':
+			out = append(out, '\b')
+		case 'f':
+			out = append(out, '\f')
+		case 'n':
+			out = append(out, '\n')
+		case 'r':
+			out = append(out, '\r')
+		case 't':
+			out = append(out, '\t')
+		case 'u':
+			r, ok := hex4(in, i+1)
+			if !ok {
+				return out, errors.New("bad escape")
+			}
+			i += 4
+			if utf16.IsSurrogate(r) { // a pair: \uD83D\uDE00
+				if i+6 < len(in) && in[i+1] == '\\' && in[i+2] == 'u' {
+					if r2, ok := hex4(in, i+3); ok {
+						if dec := utf16.DecodeRune(r, r2); dec != utf8.RuneError {
+							out = utf8.AppendRune(out, dec)
+							i += 6
+							break
+						}
+					}
+				}
+				r = utf8.RuneError
+			}
+			out = utf8.AppendRune(out, r)
+		default:
+			return out, errors.New("bad escape")
+		}
+	}
+	return out, nil
+}
+
+func hex4(b []byte, at int) (rune, bool) {
+	if at+4 > len(b) {
+		return 0, false
+	}
+	var r rune
+	for _, c := range b[at : at+4] {
+		switch {
+		case c >= '0' && c <= '9':
+			r = r<<4 | rune(c-'0')
+		case c >= 'a' && c <= 'f':
+			r = r<<4 | rune(c-'a'+10)
+		case c >= 'A' && c <= 'F':
+			r = r<<4 | rune(c-'A'+10)
+		default:
+			return 0, false
+		}
+	}
+	return r, true
+}
+
+func wipe(b []byte) {
+	for i := range b {
+		b[i] = 0
+	}
 }
