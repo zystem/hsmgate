@@ -4,7 +4,7 @@ The configuration is one YAML file (`hsmgate.yaml`, `-config` on every command).
 
 The smallest working file is the one `hsmgate dev -dir DIR` writes (`DIR/hsmgate.yaml`); a larger one for a card is [deploy/hsmgate.example.yaml](../deploy/hsmgate.example.yaml). This page lists every setting, what happens when it is left out, and whether a change needs a restart or a reload (`kill -HUP`, [operations.md](operations.md)).
 
-**Reload or restart.** A reload (SIGHUP) takes a new file as a whole or not at all (a refused file leaves the old one running). It changes the tokens' keys, the keys, the clients, the policy and the certificates. These need a **restart**: `listen`, `admin_socket`, `audit.file`, `audit.stdout`, `audit.max_size_mb`, `audit.max_files`, `limits`, `transit.mount`, `kmsjson.enabled`, `kmsgrpc.enabled` and `kmsgrpc.token_path`, `kmsrest.enabled` and `kmsrest.tenant`, and the module or slot of a `pkcs11` token.
+**Reload or restart.** A reload (SIGHUP) takes a new file as a whole or not at all (a refused file leaves the old one running). It changes the tokens' keys, the keys, the clients, the policy and the certificates. These need a **restart**: `listen`, `admin_socket`, `audit.file`, `audit.stdout`, `audit.max_size_mb`, `audit.max_files`, `limits`, `transit.mount`, `debug.pprof`, `metrics.enabled` and `metrics.detail`, `kmsjson.enabled`, `kmsgrpc.enabled` and `kmsgrpc.token_path`, `kmsrest.enabled` and `kmsrest.tenant`, and the module or slot of a `pkcs11` token. A reload that changes one of these is **refused** with a word about the restart (it is never accepted and then not applied).
 
 ## The service
 
