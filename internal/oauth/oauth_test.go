@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -193,5 +194,80 @@ func TestStamp(t *testing.T) {
 		if other == base {
 			t.Errorf("%s has the same stamp", name)
 		}
+	}
+}
+
+// The table is bounded, and a client that asks for many tokens ends only its own (the review of 2026-11-21, finding 4).
+func TestTokensOfOneIssuerAreBounded(t *testing.T) {
+	ts := NewTokens()
+	now := time.Now()
+	other, _ := ts.Issue("other", "s", now)
+	var mine []string
+	for i := 0; i < maxPerIssuer+50; i++ {
+		tok, _ := ts.Issue("busy", "s", now.Add(time.Duration(i)*time.Millisecond))
+		mine = append(mine, tok)
+	}
+	at := now.Add(time.Second)
+	if _, _, ok := ts.Lookup(other, at); !ok {
+		t.Fatal("the token of another issuer was given up")
+	}
+	for i, tok := range mine {
+		_, _, ok := ts.Lookup(tok, at)
+		if want := i >= 50; ok != want {
+			t.Fatalf("token %d of the busy issuer: live %v, want %v", i, ok, want)
+		}
+	}
+	if len(ts.m) != maxPerIssuer+1 {
+		t.Errorf("the table holds %d tokens", len(ts.m))
+	}
+}
+
+func TestTokensTableFullKeepsTheSessionsOfOthers(t *testing.T) {
+	ts := NewTokens()
+	now := time.Now()
+	var all []string
+	for i := 0; i < maxTokens/maxPerIssuer; i++ { // the table full: every issuer at its limit
+		for j := 0; j < maxPerIssuer; j++ {
+			tok, _ := ts.Issue(fmt.Sprintf("client-%03d", i), "s", now)
+			all = append(all, tok)
+		}
+	}
+	if len(ts.m) != maxTokens {
+		t.Fatalf("the table holds %d tokens, not %d", len(ts.m), maxTokens)
+	}
+	fresh, _ := ts.Issue("newcomer", "s", now.Add(time.Second))
+	at := now.Add(2 * time.Second)
+	if _, _, ok := ts.Lookup(fresh, at); !ok {
+		t.Fatal("the new token is not good")
+	}
+	gone := 0
+	for _, tok := range all {
+		if _, _, ok := ts.Lookup(tok, at); !ok {
+			gone++
+		}
+	}
+	if gone != 1 {
+		t.Errorf("%d of %d tokens were given up for one new one, want 1", gone, len(all))
+	}
+	if len(ts.m) > maxTokens {
+		t.Errorf("the table holds %d tokens", len(ts.m))
+	}
+}
+
+func TestTokensExpiredAreDroppedFirst(t *testing.T) {
+	ts := NewTokens()
+	now := time.Now()
+	for i := 0; i < maxTokens/maxPerIssuer; i++ {
+		for j := 0; j < maxPerIssuer; j++ {
+			ts.Issue(fmt.Sprintf("client-%03d", i), "s", now)
+		}
+	}
+	later := now.Add(2 * time.Hour) // all of them have expired
+	fresh, _ := ts.Issue("newcomer", "s", later)
+	if _, _, ok := ts.Lookup(fresh, later); !ok {
+		t.Fatal("the new token is not good")
+	}
+	if len(ts.m) != 1 {
+		t.Errorf("the table holds %d tokens, the expired ones were not dropped", len(ts.m))
 	}
 }

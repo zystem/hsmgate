@@ -20,10 +20,11 @@ import (
 )
 
 const (
-	tokenTTL   = time.Hour
-	maxTokens  = 10000
-	maxJWTLife = 24 * time.Hour
-	skew       = 5 * time.Minute
+	tokenTTL     = time.Hour
+	maxTokens    = 10000 // in the table
+	maxPerIssuer = 100   // live tokens of one issuer
+	maxJWTLife   = 24 * time.Hour
+	skew         = 5 * time.Minute
 )
 
 var (
@@ -181,25 +182,70 @@ func Stamp(client, issuer string, material []byte) string {
 }
 
 // Tokens are the access tokens this service has given: opaque, random, in memory only (a restart ends them; a client then asks again).
+//
+// The table is bounded twice, and neither bound lets one client end the sessions of the others: an issuer holds at most maxPerIssuer live tokens (asking for another gives up
+// its own oldest), and the whole table holds at most maxTokens (when it is full of live tokens the oldest token of the issuer that holds the most is given up). A token that
+// is given up is a client that asks again; a table that was emptied at its limit (what this did before) was every client asking again at once.
 type Tokens struct {
 	mu sync.Mutex
 	m  map[string]tokenInfo
+	q  map[string][]string // per issuer, the tokens in the order they were given; they all live as long, so the expired ones are always the first
 }
 
-func NewTokens() *Tokens { return &Tokens{m: map[string]tokenInfo{}} }
+func NewTokens() *Tokens { return &Tokens{m: map[string]tokenInfo{}, q: map[string][]string{}} }
+
+// live drops the expired tokens at the front of the queue of an issuer.
+func (t *Tokens) live(issuer string, now time.Time) []string {
+	q := t.q[issuer]
+	for len(q) > 0 {
+		v, ok := t.m[q[0]]
+		if ok && now.Before(v.expires) {
+			break
+		}
+		delete(t.m, q[0])
+		q = q[1:]
+	}
+	if len(q) == 0 {
+		delete(t.q, issuer)
+		return nil
+	}
+	t.q[issuer] = q
+	return q
+}
+
+// dropOldest gives up the oldest token of an issuer.
+func (t *Tokens) dropOldest(issuer string) {
+	q := t.q[issuer]
+	if len(q) == 0 {
+		return
+	}
+	delete(t.m, q[0])
+	if q = q[1:]; len(q) == 0 {
+		delete(t.q, issuer)
+	} else {
+		t.q[issuer] = q
+	}
+}
 
 // Issue gives a token to an issuer whose credential has the stamp.
 func (t *Tokens) Issue(issuer, stamp string, now time.Time) (string, time.Time) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	if len(t.live(issuer, now)) >= maxPerIssuer {
+		t.dropOldest(issuer)
+	}
 	if len(t.m) >= maxTokens {
-		for k, v := range t.m { // drop the expired; if that is not enough, the whole table: clients ask again
-			if !now.Before(v.expires) {
-				delete(t.m, k)
-			}
+		for iss := range t.q { // the expired of every issuer
+			t.live(iss, now)
 		}
-		if len(t.m) >= maxTokens {
-			t.m = map[string]tokenInfo{}
+		if len(t.m) >= maxTokens { // still full of live tokens: the issuer that holds the most gives one up
+			most, n := "", 0
+			for iss, q := range t.q {
+				if len(q) > n || (len(q) == n && iss < most) {
+					most, n = iss, len(q)
+				}
+			}
+			t.dropOldest(most)
 		}
 	}
 	b := make([]byte, 32)
@@ -209,6 +255,7 @@ func (t *Tokens) Issue(issuer, stamp string, now time.Time) (string, time.Time) 
 	tok := "hg." + strings.TrimRight(base64.RawURLEncoding.EncodeToString(b), "=")
 	exp := now.Add(tokenTTL)
 	t.m[tok] = tokenInfo{issuer: issuer, stamp: stamp, expires: exp}
+	t.q[issuer] = append(t.q[issuer], tok)
 	return tok, exp
 }
 
@@ -221,7 +268,7 @@ func (t *Tokens) Lookup(tok string, now time.Time) (issuer, stamp string, ok boo
 		return "", "", false
 	}
 	if !now.Before(v.expires) {
-		delete(t.m, tok)
+		delete(t.m, tok) // its place in the queue goes when it comes to the front
 		return "", "", false
 	}
 	return v.issuer, v.stamp, true
