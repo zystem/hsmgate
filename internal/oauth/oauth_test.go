@@ -271,3 +271,72 @@ func TestTokensExpiredAreDroppedFirst(t *testing.T) {
 		t.Errorf("the table holds %d tokens, the expired ones were not dropped", len(ts.m))
 	}
 }
+
+func signPSS(t testing.TB, key *rsa.PrivateKey, alg string, salt int, c map[string]any) string {
+	e := base64.RawURLEncoding
+	h, _ := json.Marshal(map[string]string{"alg": alg})
+	p, _ := json.Marshal(c)
+	in := e.EncodeToString(h) + "." + e.EncodeToString(p)
+	sum := sha256.Sum256([]byte(in))
+	sig, err := rsa.SignPSS(rand.Reader, key, crypto.SHA256, sum[:], &rsa.PSSOptions{SaltLength: salt})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return in + "." + e.EncodeToString(sig)
+}
+
+// PS256 is taken only where a face asks for it, and only as RFC 7518 section 3.5 says (salt as long as the hash); the Azure libraries sign a client assertion with it.
+func TestPS256(t *testing.T) {
+	key, _ := rsa.GenerateKey(rand.Reader, 2048)
+	now := time.Now()
+	cl := map[string]any{"iss": "me", "iat": now.Unix(), "exp": now.Add(time.Hour).Unix()}
+	ps := signPSS(t, key, "PS256", rsa.PSSSaltLengthEqualsHash, cl)
+	if _, err := VerifyJWT(ps, &key.PublicKey, now, Expect{PS256: true}); err != nil {
+		t.Errorf("PS256 where it is asked for: %v", err)
+	}
+	if _, err := VerifyJWT(ps, &key.PublicKey, now, Expect{}); err == nil {
+		t.Error("PS256 was taken where it is not asked for")
+	}
+	for name, tok := range map[string]string{
+		"PS256 header, PKCS1 signature":  sign(t, key, "PS256", cl),
+		"RS256 header, PSS signature":    signPSS(t, key, "RS256", rsa.PSSSaltLengthEqualsHash, cl),
+		"PSS with another salt length":   signPSS(t, key, "PS256", 10, cl),
+		"PS384 (a hash of another size)": signPSS(t, key, "PS384", rsa.PSSSaltLengthEqualsHash, cl),
+	} {
+		if _, err := VerifyJWT(tok, &key.PublicKey, now, Expect{PS256: true}); err == nil {
+			t.Errorf("%s was accepted", name)
+		}
+	}
+	other, _ := rsa.GenerateKey(rand.Reader, 2048)
+	if _, err := VerifyJWT(signPSS(t, other, "PS256", rsa.PSSSaltLengthEqualsHash, cl), &key.PublicKey, now, Expect{PS256: true}); err == nil {
+		t.Error("PS256 of another key was accepted")
+	}
+}
+
+// "nbf" stands for "iat" when there is no "iat" (the Azure libraries write the one and not the other); with neither the life cannot be bounded.
+func TestNotBefore(t *testing.T) {
+	key, _ := rsa.GenerateKey(rand.Reader, 2048)
+	now := time.Now()
+	mk := func(c map[string]any) string {
+		c["iss"] = "me"
+		return sign(t, key, "RS256", c)
+	}
+	u := func(d time.Duration) int64 { return now.Add(d).Unix() }
+	for name, tc := range map[string]struct {
+		tok string
+		ok  bool
+	}{
+		"nbf and exp, no iat":       {mk(map[string]any{"nbf": u(0), "exp": u(10 * time.Minute)}), true},
+		"nbf a little ahead (skew)": {mk(map[string]any{"nbf": u(2 * time.Minute), "exp": u(10 * time.Minute)}), true},
+		"nbf well ahead":            {mk(map[string]any{"nbf": u(time.Hour), "exp": u(2 * time.Hour)}), false},
+		"neither iat nor nbf":       {mk(map[string]any{"exp": u(10 * time.Minute)}), false},
+		"nbf, a life of 48 hours":   {mk(map[string]any{"nbf": u(0), "exp": u(48 * time.Hour)}), false},
+		"iat and nbf, both good":    {mk(map[string]any{"iat": u(0), "nbf": u(0), "exp": u(time.Hour)}), true},
+		"iat good, nbf ahead":       {mk(map[string]any{"iat": u(0), "nbf": u(time.Hour), "exp": u(2 * time.Hour)}), false},
+	} {
+		_, err := VerifyJWT(tc.tok, &key.PublicKey, now, Expect{})
+		if (err == nil) != tc.ok {
+			t.Errorf("%s: %v, accepted %v, want %v", name, err, err == nil, tc.ok)
+		}
+	}
+}

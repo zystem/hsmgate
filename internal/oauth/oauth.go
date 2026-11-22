@@ -1,4 +1,4 @@
-// Package oauth is what the faces with a token endpoint share: the check of a JWT signed by a client (RS256 only), the table of access tokens a service gives, and the reading
+// Package oauth is what the faces with a token endpoint share: the check of a JWT signed by a client (RS256; PS256 where a face asks for it), the table of access tokens a service gives, and the reading
 // of a public key of a credential. A face decides what an issuer is and what a token may do.
 package oauth
 
@@ -56,6 +56,7 @@ type Claims struct {
 	Sub string   `json:"sub"`
 	Aud Audience `json:"aud"`
 	Iat int64    `json:"iat"`
+	Nbf int64    `json:"nbf"`
 	Exp int64    `json:"exp"`
 }
 
@@ -77,6 +78,9 @@ const (
 type Expect struct {
 	Audiences []string
 	Sub       Subject
+	// PS256: also take RSASSA-PSS with SHA-256 (RFC 7518 section 3.5), as the Azure client libraries sign a client assertion with a certificate. RS256 is always taken; nothing
+	// else is.
+	PS256 bool
 }
 
 // PeekIssuer reads the issuer of a token without trusting it (to find the key to check it with).
@@ -96,8 +100,9 @@ func PeekIssuer(tok string) (string, bool) {
 	return c.Iss, true
 }
 
-// VerifyJWT checks a token against the public key of its issuer: RS256 only, within its life, issued no later than now (plus the skew), and what is asked in exp (the audience
-// and the subject).
+// VerifyJWT checks a token against the public key of its issuer: RS256 (and PS256 when exp asks for it, nothing else), within its life, issued no later than now (plus the skew),
+// and what is asked in exp (the audience and the subject). The time of issue is "iat", or "nbf" when there is no "iat" (the Azure libraries write "nbf" and no "iat"); a token with
+// neither is refused, since its life cannot be bounded; a token whose "nbf" is still ahead (plus the skew) is not valid yet.
 func VerifyJWT(tok string, pub *rsa.PublicKey, now time.Time, exp Expect) (Claims, error) {
 	parts := strings.Split(tok, ".")
 	if len(parts) != 3 {
@@ -110,7 +115,7 @@ func VerifyJWT(tok string, pub *rsa.PublicKey, now time.Time, exp Expect) (Claim
 	var h struct {
 		Alg string `json:"alg"`
 	}
-	if json.Unmarshal(hdr, &h) != nil || h.Alg != "RS256" { // never "none", never a symmetric algorithm
+	if json.Unmarshal(hdr, &h) != nil || (h.Alg != "RS256" && !(h.Alg == "PS256" && exp.PS256)) { // never "none", never a symmetric algorithm
 		return Claims{}, ErrJWT
 	}
 	sig, err := base64.RawURLEncoding.DecodeString(parts[2])
@@ -118,7 +123,13 @@ func VerifyJWT(tok string, pub *rsa.PublicKey, now time.Time, exp Expect) (Claim
 		return Claims{}, ErrJWT
 	}
 	sum := sha256.Sum256([]byte(parts[0] + "." + parts[1]))
-	if rsa.VerifyPKCS1v15(pub, crypto.SHA256, sum[:], sig) != nil {
+	var bad error
+	if h.Alg == "PS256" {
+		bad = rsa.VerifyPSS(pub, crypto.SHA256, sum[:], sig, &rsa.PSSOptions{SaltLength: rsa.PSSSaltLengthEqualsHash})
+	} else {
+		bad = rsa.VerifyPKCS1v15(pub, crypto.SHA256, sum[:], sig)
+	}
+	if bad != nil {
 		return Claims{}, ErrJWT
 	}
 	raw, err := base64.RawURLEncoding.DecodeString(parts[1])
@@ -129,9 +140,16 @@ func VerifyJWT(tok string, pub *rsa.PublicKey, now time.Time, exp Expect) (Claim
 	if json.Unmarshal(raw, &c) != nil {
 		return Claims{}, ErrJWT
 	}
-	end, iat := time.Unix(c.Exp, 0), time.Unix(c.Iat, 0)
+	issued := c.Iat
+	if issued == 0 {
+		issued = c.Nbf
+	}
+	end, iat := time.Unix(c.Exp, 0), time.Unix(issued, 0)
 	if c.Exp == 0 || !now.Before(end.Add(skew)) {
 		return Claims{}, ErrExpired
+	}
+	if c.Nbf != 0 && time.Unix(c.Nbf, 0).After(now.Add(skew)) {
+		return Claims{}, ErrJWT
 	}
 	if iat.After(now.Add(skew)) || end.Sub(iat) > maxJWTLife || end.Before(iat) {
 		return Claims{}, ErrJWT
