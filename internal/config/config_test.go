@@ -351,6 +351,8 @@ func TestKeyServiceFacesAreChecked(t *testing.T) {
 		"key agreement on grpc":         {"keys: {k: {kmsgrpc: true, versions: [{token: t, label: m}], aad: {mode: fixed}}}\n", false},
 		"key agreement on rest":         {"keys: {k: {kmsrest: true, versions: [{token: t, label: m}], aad: {mode: fixed}}}\n", false},
 		"a bad project":                 {"kmsgrpc: {enabled: true, project: 'a b'}\n" + okKey, false},
+		"audit sync with a file":        {"audit: {file: /tmp/a.log, sync: true}\nkmsgrpc: {enabled: true}\n" + okKey, true},
+		"audit sync with no file":       {"audit: {sync: true}\nkmsgrpc: {enabled: true}\n" + okKey, false},
 		"audiences, all three lists":    {"kmsgrpc: {enabled: true, token_audiences: ['https://k.example/oauth2/token'], bearer_audiences: ['https://cloudkms.example/']}\nkmsrest: {enabled: true, audiences: ['https://k.example/hsmgate/oauth2/v2.0/token']}\n" + okKey, true},
 		"an audience with a space":      {"kmsgrpc: {enabled: true, bearer_audiences: ['https://k.example/ x']}\n" + okKey, false},
 		"an empty audience":             {"kmsgrpc: {enabled: true, token_audiences: ['']}\n" + okKey, false},

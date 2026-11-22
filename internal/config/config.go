@@ -90,6 +90,9 @@ type Config struct {
 		// (audit.log.1 is the newest) are kept; 0 means 5. Both need File.
 		MaxSizeMB int `yaml:"max_size_mb"`
 		MaxFiles  int `yaml:"max_files"`
+		// Sync: write every line to the disk (fsync) before the call is answered, so that a line that was answered for survives a power loss (without it the line is in the cache of
+		// the kernel, which a crash of the process does not lose and a power loss does, for some seconds). Needs File. It costs an fsync for every call.
+		Sync bool `yaml:"sync"`
 	} `yaml:"audit"`
 	Tokens  []Token        `yaml:"tokens"`
 	Keys    map[string]Key `yaml:"keys"`
@@ -350,6 +353,9 @@ func (c *Config) Validate() error {
 	}
 	if (c.Audit.MaxSizeMB > 0 || c.Audit.MaxFiles > 0) && c.Audit.File == "" {
 		return fmt.Errorf("audit.max_size_mb and audit.max_files need audit.file")
+	}
+	if c.Audit.Sync && c.Audit.File == "" {
+		return fmt.Errorf("audit.sync needs audit.file")
 	}
 	if c.Audit.MaxSizeMB > 0 && c.Audit.MaxFiles == 0 {
 		c.Audit.MaxFiles = 5

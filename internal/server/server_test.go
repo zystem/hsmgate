@@ -250,6 +250,28 @@ func TestRefusedReloadChangesNothing(t *testing.T) {
 	}
 }
 
+// audit.sync is a setting of the open file: a reload that changes it is refused with a word about the restart.
+func TestReloadRefusesAChangeOfAuditSync(t *testing.T) {
+	dir := t.TempDir()
+	ca := mk(t, "ca", nil, true, false)
+	srvCert := mk(t, "hsmgate", &ca, false, true)
+	cfg := baseConfig(t, dir, ca, srvCert)
+	cfg.Audit.File = filepath.Join(dir, "audit.log")
+	s, err := New(cfg, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	same := *cfg
+	if err := s.Reload(&same); err != nil {
+		t.Fatalf("a reload that changes nothing: %v", err)
+	}
+	synced := *cfg
+	synced.Audit.Sync = true
+	if err := s.Reload(&synced); err == nil || !strings.Contains(err.Error(), "restart") {
+		t.Errorf("a change of audit.sync was applied without a restart: %v", err)
+	}
+}
+
 // What is set up when the process starts cannot be changed by a reload, in either direction (the review of 2026-11-21, finding 5): the profiles and the metrics are refused with a
 // word about the restart, so that "accepted" never means "applied" for them.
 func TestReloadRefusesTheProfilesAndTheMetrics(t *testing.T) {
