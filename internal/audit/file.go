@@ -3,6 +3,7 @@ package audit
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 )
@@ -19,6 +20,39 @@ type File struct {
 	// Warn, when set, is told (at most once a minute) that a rotation failed and the file is still in use: the file then grows past its limit until the cause is gone.
 	Warn     func(error)
 	lastWarn time.Time
+	sync     bool
+	syncFile func(*os.File) error // the fsync of the file; a test replaces it
+	syncDir  func(string) error   // the fsync of the directory, after a file was created or renamed in it; a test replaces it
+}
+
+// SetSync makes every Write wait until the line is on the disk (fsync) before it returns, and the directory is synced after a rotation: a line that was answered for survives a
+// power loss and not only the crash of the process. It costs the time of an fsync for every line. Off by default (the line is then in the cache of the kernel when the answer goes).
+func (a *File) SetSync(on bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.sync = on
+	if on {
+		_ = a.dirSync() // the file may have just been created: its entry in the directory must be on the disk too
+	}
+}
+
+func (a *File) dirSync() error {
+	if a.syncDir != nil {
+		return a.syncDir(filepath.Dir(a.path))
+	}
+	d, err := os.Open(filepath.Dir(a.path)) // #nosec G304 -- the directory of the operator's audit file
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	return d.Sync()
+}
+
+func (a *File) fsync() error {
+	if a.syncFile != nil {
+		return a.syncFile(a.f)
+	}
+	return a.f.Sync()
 }
 
 // OpenFile opens (creating if needed) the file. maxBytes 0 means no rotation by the service; keep is how many older files are kept when it rotates (at least 1).
@@ -82,6 +116,9 @@ func (a *File) Write(p []byte) (int, error) {
 	}
 	n, err := a.f.Write(p)
 	a.size += int64(n)
+	if err == nil && a.sync {
+		err = a.fsync() // an error here is an error of the write: the caller does not answer (the audit is written before the answer)
+	}
 	return n, err
 }
 
@@ -99,7 +136,13 @@ func (a *File) rotate() error {
 	old := a.f
 	a.f, a.size = nil, 0
 	_ = old.Close()
-	return a.open()
+	if err := a.open(); err != nil {
+		return err
+	}
+	if a.sync {
+		return a.dirSync() // the rename and the new file are in the directory: it goes to the disk too
+	}
+	return nil
 }
 
 // Close closes the file.

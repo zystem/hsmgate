@@ -541,3 +541,53 @@ func TestTokenDiesWithItsKey(t *testing.T) {
 		t.Error("the new key does not work")
 	}
 }
+
+// recordingWriter keeps what the face hands to Write, by reference, to see what the face does with it afterwards.
+type recordingWriter struct {
+	httptest.ResponseRecorder
+	frames [][]byte
+	copies [][]byte
+}
+
+func (w *recordingWriter) Write(p []byte) (int, error) {
+	w.frames = append(w.frames, p)
+	w.copies = append(w.copies, append([]byte{}, p...))
+	return len(p), nil
+}
+
+// The reply of a decryption holds the plaintext; the frame the face builds for it is zeroed once it has been handed to the writer (the review of 2026-11-21, finding 3).
+func TestDecryptReplyFrameIsWipedAfterTheWrite(t *testing.T) {
+	r := newRig(t)
+	bearer := r.jwt("app@example.test", r.rsaKey, time.Hour)
+	plain := []byte("a plaintext that must not stay in the buffer")
+	code, msg, rep := r.rpc("Encrypt", bearer, (&writer{}).str(1, ring+"seal").bytes(2, plain).int64Value(7, crc32c(plain)))
+	if code != 0 {
+		t.Fatalf("encrypt: %d %s", code, msg)
+	}
+	blob := rep.raw(2)
+	req := (&writer{}).str(1, ring+"seal").bytes(2, blob).int64Value(5, crc32c(blob))
+	body := make([]byte, 5, 5+len(req.b))
+	body[3], body[4] = byte(len(req.b)>>8), byte(len(req.b))
+	body = append(body, req.b...)
+	hr := httptest.NewRequest("POST", servicePath+"Decrypt", bytes.NewReader(body))
+	hr.ProtoMajor, hr.ProtoMinor = 2, 0
+	hr.Header.Set("Content-Type", "application/grpc")
+	hr.Header.Set("Authorization", "Bearer "+bearer)
+	w := &recordingWriter{}
+	r.f.ServeHTTP(w, hr)
+	if len(w.frames) == 0 {
+		t.Fatal("the face wrote nothing")
+	}
+	var said bool
+	for i, c := range w.copies {
+		if bytes.Contains(c, plain) {
+			said = true
+			if !bytes.Equal(w.frames[i], make([]byte, len(w.frames[i]))) {
+				t.Errorf("the frame with the plaintext was not zeroed after the write")
+			}
+		}
+	}
+	if !said {
+		t.Fatal("the plaintext did not come out of the face (the test does not test what it says)")
+	}
+}
