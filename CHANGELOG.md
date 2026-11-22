@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Added
+- **`audit.sync`** (the review of 2026-11-21; off by default; needs `audit.file`; a restart): every audit line is written to the disk (`fsync`, and the directory after a rotation) before the call is answered, so that a line that was answered for survives a power loss. A failed `fsync` fails the call (503 `audit log unavailable`). Measured on an NVMe disk with ext4: 0.67 ms a line against 1.1 µs without it. [docs/audit-log.md](docs/audit-log.md) now says exactly what the log promises without it (a crash of the process loses nothing, a power loss can lose the last seconds) and what shipping by UDP does not. Not run: a real power cut; the shipper of the chart after such a cut.
+
 ### Fixed
 - **Secrets in memory: what the service wipes** (the review of 2026-11-21, finding 3, the second part). The PIN on the admin socket was decoded into a Go string, which cannot be wiped; it is now read as bytes (the body and the PIN cut out of it) and both are zeroed when the request is done. A PIN kept for the next login is zeroed when the card refuses it (it was only dropped). The ECDH shared secret and the key made from it in ECIES wrap and unwrap are zeroed. What is not in reach (the PKCS#11 binding takes the PIN as a Go string, the AEAD and curve code keep their own copies) is written in [docs/threat-model.md](docs/threat-model.md). The `unlock` request is the same JSON as before; a `pin` that is not a string (`null`, a number) is now a 400.
 - **A reload no longer accepts a change of `debug.pprof`, `metrics.enabled` or `metrics.detail`** (the review of 2026-11-21, finding 5). They are set up when the process starts, so a reload that changed one was accepted and did nothing: an operator who turned the profiles off with SIGHUP still had them. The reload is now refused with "cannot change in a reload: restart", in both directions, and the running configuration stays as it was.

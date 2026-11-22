@@ -391,7 +391,7 @@ func (s *Server) Reload(cfg *config.Config) error {
 	if cfg.Debug.Pprof != oc.Debug.Pprof || cfg.Metrics.Enabled != oc.Metrics.Enabled || cfg.Metrics.Detail != oc.Metrics.Detail {
 		return fmt.Errorf("debug.pprof, metrics.enabled and metrics.detail cannot change in a reload: restart")
 	}
-	if cfg.Listen != oc.Listen || cfg.AdminSocket != oc.AdminSocket || cfg.Audit.File != oc.Audit.File || cfg.Audit.Stdout != oc.Audit.Stdout || cfg.Audit.MaxSizeMB != oc.Audit.MaxSizeMB || cfg.Audit.MaxFiles != oc.Audit.MaxFiles || cfg.Limits != oc.Limits || cfg.Transit.Mount != oc.Transit.Mount {
+	if cfg.Listen != oc.Listen || cfg.AdminSocket != oc.AdminSocket || cfg.Audit.File != oc.Audit.File || cfg.Audit.Stdout != oc.Audit.Stdout || cfg.Audit.MaxSizeMB != oc.Audit.MaxSizeMB || cfg.Audit.MaxFiles != oc.Audit.MaxFiles || cfg.Audit.Sync != oc.Audit.Sync || cfg.Limits != oc.Limits || cfg.Transit.Mount != oc.Transit.Mount {
 		return fmt.Errorf("listen, admin_socket, audit.*, limits and transit.mount cannot change in a reload: restart")
 	}
 	if err := checkFIPS(cfg); err != nil {
@@ -521,6 +521,7 @@ func openAudit(cfg *config.Config, out, stdout io.Writer) (*audit.File, io.Write
 	if err != nil {
 		return nil, nil, err
 	}
+	f.SetSync(cfg.Audit.Sync)
 	f.Warn = func(err error) {
 		fmt.Fprintln(os.Stderr, "hsmgate: audit rotation failed, the file stays in use and grows:", err)
 	}
