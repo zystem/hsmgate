@@ -11,6 +11,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/subtle"
 	"crypto/x509"
 	"encoding/asn1"
@@ -53,10 +54,13 @@ type Cred struct {
 	Client string
 	ID     string
 	Stamp  string // the name of this credential as it is now (oauth.Stamp): the tokens given for another one are not good
-	Secret []byte
-	Pub    *rsa.PublicKey
-	NoCert bool
-	From   []netip.Prefix
+	// SecretSum is the SHA-256 of the client secret, and HasSecret says that there is one (a client of a certificate has none). The secret itself is not kept: a presented secret is
+	// hashed and the two sums of 32 bytes are compared in constant time, so that neither the length of the secret nor the length of a wrong try shows in the time of the answer.
+	SecretSum [sha256.Size]byte
+	HasSecret bool
+	Pub       *rsa.PublicKey
+	NoCert    bool
+	From      []netip.Prefix
 }
 
 type snap struct {
@@ -275,8 +279,9 @@ func (f *Face) token(w http.ResponseWriter, r *http.Request, s *snap, rid string
 			return
 		}
 	default:
-		sec := form.Get("client_secret")
-		if c.Secret == nil || subtle.ConstantTimeCompare([]byte(sec), c.Secret) != 1 {
+		sum := sha256.Sum256([]byte(form.Get("client_secret")))
+		// both parts are always computed: a client of a certificate (no secret) is answered after the same work as a client with one
+		if subtle.ConstantTimeCompare(sum[:], c.SecretSum[:])&subtle.ConstantTimeSelect(boolInt(c.HasSecret), 1, 0) != 1 {
 			f.failed(l)
 			refuse(401, "invalid_client", "the credential is not valid", "bad_secret")
 			return
@@ -836,9 +841,13 @@ func LoadCreds(cfg *config.Config) (map[string]Cred, error) {
 			if err != nil {
 				return nil, fmt.Errorf("client %s: oauth.secret_file: %w", cl.Name, err)
 			}
-			c.Secret = []byte(strings.TrimSpace(string(b)))
-			if len(c.Secret) < 32 {
+			secret := []byte(strings.TrimSpace(string(b)))
+			if len(secret) < 32 {
 				return nil, fmt.Errorf("client %s: the client secret is shorter than 32 bytes", cl.Name)
+			}
+			c.SecretSum, c.HasSecret = sha256.Sum256(secret), true
+			for i := range secret { // only the sum is kept
+				secret[i] = 0
 			}
 		} else {
 			pub, err := oauth.ReadRSAPublic(o.PublicKeyFile)
@@ -852,7 +861,7 @@ func LoadCreds(cfg *config.Config) (map[string]Cred, error) {
 			return nil, fmt.Errorf("client %s: %w", cl.Name, err)
 		}
 		c.From = from
-		material := c.Secret
+		material := c.SecretSum[:]
 		if c.Pub != nil {
 			der, err := x509.MarshalPKIXPublicKey(c.Pub)
 			if err != nil {
@@ -875,4 +884,11 @@ func jwtResult(err error) string {
 		return "bad_subject"
 	}
 	return "bad_token"
+}
+
+func boolInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }

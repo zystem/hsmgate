@@ -495,3 +495,36 @@ func TestTokenDiesWithItsCredential(t *testing.T) {
 		t.Error("the token of the replaced key is still good")
 	}
 }
+
+// The client secret is kept as a digest, and a presented secret is judged by the digests (the review of 2026-11-21): a try that is shorter, longer, a prefix or empty is refused the
+// same way, and the right secret passes.
+func TestClientSecretIsComparedAsADigest(t *testing.T) {
+	r := newRig(t)
+	creds, err := LoadCreds(r.cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := creds["app-client"]
+	if !c.HasSecret || c.SecretSum != sha256.Sum256([]byte(secret)) {
+		t.Error("the credential does not hold the digest of the secret")
+	}
+	if creds["cert-client"].HasSecret {
+		t.Error("a client of a certificate has a secret")
+	}
+	for name, try := range map[string]string{
+		"empty": "", "a prefix": secret[:len(secret)-1], "longer": secret + "x", "another of the same length": strings.Repeat("z", len(secret)), "the digest itself": string(c.SecretSum[:]),
+	} {
+		if code, tok := r.token(url.Values{"grant_type": {"client_credentials"}, "client_id": {"app-client"}, "client_secret": {try}}); code == 200 || tok != "" {
+			t.Errorf("%s was accepted: %d", name, code)
+		}
+	}
+	if code, tok := r.token(url.Values{"grant_type": {"client_credentials"}, "client_id": {"app-client"}, "client_secret": {secret}}); code != 200 || tok == "" {
+		t.Errorf("the right secret: %d", code)
+	}
+	// a client of a certificate: any secret is refused, and the same answer is given
+	for _, try := range []string{"", secret, strings.Repeat("\x00", 32)} {
+		if code, _ := r.token(url.Values{"grant_type": {"client_credentials"}, "client_id": {"cert-client"}, "client_secret": {try}}); code == 200 {
+			t.Errorf("a secret was taken for a client of a certificate: %q", try)
+		}
+	}
+}
