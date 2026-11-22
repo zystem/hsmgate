@@ -312,7 +312,9 @@ func grpcReply(w http.ResponseWriter, msg []byte) {
 	w.WriteHeader(200)
 	frame := make([]byte, 5, 5+len(msg))
 	binary.BigEndian.PutUint32(frame[1:], uint32(len(msg))) // #nosec G115 -- a reply is small
-	w.Write(append(frame, msg...))
+	frame = append(frame, msg...)
+	w.Write(frame)
+	kmsops.Wipe(frame) // a reply may hold a plaintext: the copy made here is zeroed once it has been handed over (the writer must not keep it)
 	h.Set(http.TrailerPrefix+"Grpc-Status", "0")
 }
 
@@ -375,6 +377,7 @@ func (f *Face) call(w http.ResponseWriter, r *http.Request, s *snap, rid string)
 		return
 	}
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBody))
+	defer kmsops.Wipe(body) // the request may hold a plaintext; a buffer that ReadAll grew on the way is not in reach
 	if err != nil || len(body) < 5 || body[0] != 0 || int(binary.BigEndian.Uint32(body[1:5])) != len(body)-5 {
 		refuse(cInvalid, "the request is not a single uncompressed message", "bad_request")
 		return
@@ -400,6 +403,7 @@ func (f *Face) call(w http.ResponseWriter, r *http.Request, s *snap, rid string)
 		return
 	}
 	grpcReply(w, out)
+	kmsops.Wipe(out) // the message of the reply (a decrypted plaintext is in it)
 }
 
 // issuerOf gives the issuer of a bearer: an access token this service gave, or a JWT signed by the service account itself (the client libraries use the latter when the call is made
