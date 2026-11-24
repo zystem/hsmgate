@@ -9,6 +9,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
@@ -31,14 +32,17 @@ import (
 )
 
 const (
-	tenant   = "hsmgate"
-	clientID = "sdk-client"
-	secret   = "a-client-secret-of-the-test-0123456789"
+	tenant       = "hsmgate"
+	clientID     = "sdk-client"
+	certClientID = "sdk-cert-client"
+	secret       = "a-client-secret-of-the-test-0123456789"
 )
 
 var (
-	addr  string
-	httpc *http.Client
+	addr          string
+	httpc         *http.Client
+	certClientPEM []byte
+	certClientKey *rsa.PrivateKey
 )
 
 func TestMain(m *testing.M) { os.Exit(run(m)) }
@@ -68,6 +72,14 @@ func run(m *testing.M) int {
 	os.WriteFile(f("srv.pem"), certPEM, 0o600)
 	os.WriteFile(f("srv.key"), pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: kb}), 0o600)
 	os.WriteFile(f("secret"), []byte(secret+"\n"), 0o600)
+	// the credential of a second client: a certificate with an RSA key, which the client proves by a signed assertion (the library signs it with PS256 and writes "nbf" and no "iat";
+	// the service checks its subject and its audience)
+	ck, _ := rsa.GenerateKey(rand.Reader, 2048)
+	ctpl := &x509.Certificate{SerialNumber: big.NewInt(2), Subject: pkix.Name{CommonName: certClientID}, NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour)}
+	cder, _ := x509.CreateCertificate(rand.Reader, ctpl, ctpl, &ck.PublicKey, ck)
+	certClientPEM = pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cder})
+	certClientKey = ck
+	os.WriteFile(f("client.pem"), certClientPEM, 0o600)
 	for i, n := range []string{"k1", "k2", "k3", "k4"} {
 		os.WriteFile(f(n+".hex"), bytes.Repeat([]byte{"0a0b0c0d"[2*i], "0a0b0c0d"[2*i+1]}, 32), 0o600)
 	}
@@ -76,7 +88,7 @@ func run(m *testing.M) int {
 	l.Close()
 	os.WriteFile(f("hsmgate.yaml"), []byte(fmt.Sprintf(`listen: %s
 tls: {cert: %s, key: %s, client_ca: %s}
-kmsrest: {enabled: true, tenant: %s}
+kmsrest: {enabled: true, tenant: %s, audiences: ["https://%s/%s/oauth2/v2.0/token"]}
 tokens: [{name: soft, type: soft, keys: {m1: %s, m2: %s, m3: %s, m4: %s}}]
 keys:
   seal: {kmsrest: true, kmsjson_usage: encrypt_decrypt, versions: [{token: soft, label: m1}], aad: {mode: fixed}}
@@ -87,7 +99,10 @@ clients:
   - name: sdk
     oauth: {client_id: %s, secret_file: %s, no_cert: true, allow_from: ["127.0.0.1"]}
     keys: {seal: {ops: [encrypt, decrypt]}, sig: {ops: [sign, verify]}, mac: {ops: [generate_mac, verify_mac]}}
-`, addr, f("srv.pem"), f("srv.key"), f("srv.pem"), tenant, f("k1.hex"), f("k2.hex"), f("k3.hex"), f("k4.hex"), clientID, f("secret"))), 0o600)
+  - name: sdkcert
+    oauth: {client_id: %s, public_key_file: %s, no_cert: true, allow_from: ["127.0.0.1"]}
+    keys: {sig: {ops: [sign, verify]}}
+`, addr, f("srv.pem"), f("srv.key"), f("srv.pem"), tenant, addr, tenant, f("k1.hex"), f("k2.hex"), f("k3.hex"), f("k4.hex"), clientID, f("secret"), certClientID, f("client.pem"))), 0o600)
 	cmd := exec.Command(bin, "serve", "-config", f("hsmgate.yaml"))
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
@@ -184,5 +199,27 @@ func TestMacListAndRefusals(t *testing.T) {
 	}
 	if _, err := client(t, secret+"x").GetKey(ctx, "sig", "", nil); err == nil {
 		t.Error("a wrong secret was accepted")
+	}
+}
+
+// A client that proves itself with a certificate sends a signed assertion. The official library signs it with PS256 and writes "nbf" and no "iat"; the service takes it only with the
+// client as its subject and its own token endpoint as its audience (RFC 7523 section 3), and answers.
+func TestCertificateAssertion(t *testing.T) {
+	blk, _ := pem.Decode(certClientPEM)
+	cert, err := x509.ParseCertificate(blk.Bytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	co := azcore.ClientOptions{Transport: httpc, Cloud: cloud.Configuration{ActiveDirectoryAuthorityHost: "https://" + addr}}
+	cred, err := azidentity.NewClientCertificateCredential(tenant, certClientID, []*x509.Certificate{cert}, certClientKey, &azidentity.ClientCertificateCredentialOptions{ClientOptions: co, DisableInstanceDiscovery: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := azkeys.NewClient("https://"+addr, cred, &azkeys.ClientOptions{ClientOptions: azcore.ClientOptions{Transport: httpc}, DisableChallengeResourceVerification: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if k, err := c.GetKey(context.Background(), "sig", "", nil); err != nil || k.Key == nil {
+		t.Fatalf("%v", err)
 	}
 }

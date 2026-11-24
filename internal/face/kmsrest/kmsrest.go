@@ -273,7 +273,7 @@ func (f *Face) token(w http.ResponseWriter, r *http.Request, s *snap, rid string
 			return
 		}
 		// RFC 7523 section 3: for the authentication of a client the subject is the client itself, and the audience is the token endpoint
-		if _, err := oauth.VerifyJWT(assertion, c.Pub, f.now(), oauth.Expect{Audiences: s.cfg.KMSRest.Audiences, Sub: oauth.SubjectIssuer}); err != nil {
+		if _, err := oauth.VerifyJWT(assertion, c.Pub, f.now(), oauth.Expect{Audiences: s.cfg.KMSRest.Audiences, Sub: oauth.SubjectIssuer, PS256: true}); err != nil {
 			f.failed(l)
 			refuse(401, "invalid_client", "the credential is not valid", jwtResult(err))
 			return

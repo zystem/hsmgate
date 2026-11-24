@@ -13,7 +13,7 @@ hsmgate follows these two as guidance; nothing here is a certification. Part 1 o
 | Authentication of clients | TLS 1.3, RSA ≥ 2048 for JWT assertions, secrets ≥ 32 bytes | 112 bits or more | approved; RSA 2048 is acceptable through 2030 |
 | Random numbers | the operating system's generator through `crypto/rand` (in FIPS mode, the module's DRBG) | | approved in FIPS mode |
 
-Not used: SHA-1, 3DES, RSA below 2048, P-192, MD5. The service refuses a JWT with any algorithm other than RS256.
+Not used: SHA-1, 3DES, RSA below 2048, P-192, MD5. The service refuses a JWT with any algorithm other than RS256 (the REST face also takes PS256, which the Azure client libraries use for a certificate assertion).
 
 ## Key life cycle (SP 800-57 Part 1, section 7)
 
@@ -44,7 +44,7 @@ If an algorithm is broken, the project can move to another one with a change of 
 | **Sealing: the hash** of the key derivation | SHA-256 (`ecies2`), SHA-512 (`ecies3`) | `seal_suite: ecies3`, reload | every suite is read; `rewrap` moves texts to the new one |
 | **Sealing: the cipher** | AES-256-GCM (`ecies2`, `ecies3`), XChaCha20-Poly1305 (`ecies4`, another family, not FIPS-approved) | `seal_suite: ecies4`, reload | the same |
 | **MAC: the hash of the HMAC** (keys with `kmsjson_usage: generate_verify_mac`) | SHA-256, SHA-384, SHA-512 | `mac_hash: sha384` on the key; the faces name it (`HMAC_SHA_384`, `HS384`, `HMAC_SHA384`) | a MAC made with another hash does not verify under the new one: make a new key (or version) with the new hash, and verify old MACs with the old key until they are gone |
-| **Authentication of clients** | RS256 JWT; TLS 1.3 only (its own negotiation); SigV4 (HMAC-SHA-256, the scheme of the clients) | the JWT algorithm is checked, one is accepted; the other two are what the clients speak | none stored |
+| **Authentication of clients** | RS256 JWT (PS256 too on the REST face); TLS 1.3 only (its own negotiation); SigV4 (HMAC-SHA-256, the scheme of the clients) | the JWT algorithm is checked, one is accepted; the other two are what the clients speak | none stored |
 | **Signatures** | ECDSA P-256 with SHA-256 | **not switchable**: another curve (P-384) needs the card's keys and a new face contract | none stored (signatures are verified by the client's copy of the public key) |
 | **The key agreement** | ECDH P-256 | **not switchable** for the same reason | sealed texts name the key by its fingerprint |
 
