@@ -74,7 +74,7 @@ func newRig(t *testing.T) *rig {
 	pubFile := filepath.Join(dir, "sa.pub")
 	os.WriteFile(pubFile, pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der}), 0o644)
 	cfg, err := config.Parse([]byte(`
-kmsgrpc: {enabled: true}
+kmsgrpc: {enabled: true, allow_any_audience: true}
 tokens: [{name: soft, type: soft, keys: {m1: ` + files["m1"] + `, m2: ` + files["m2"] + `, m3: ` + files["m3"] + `, m4: ` + files["m4"] + `, m5: ` + files["m5"] + `}}]
 keys:
   seal: {kmsgrpc: true, kmsjson_usage: encrypt_decrypt, versions: [{token: soft, label: m1}], aad: {mode: fixed}}

@@ -49,6 +49,14 @@ Run `check` as the user the service runs as (`runuser -u hsmgate -- hsmgate chec
 | `hsmgate: reload refused, nothing changed: ...` (after SIGHUP) | The new configuration does not load; the old one is still in use | Fix the file and send SIGHUP again |
 | `ConfigurationDirectory 'hsmgate' already exists but the mode is different` (systemd) | A warning about the mode of `/etc/hsmgate` (750 against 755 in the unit) | Harmless; set `ConfigurationDirectoryMode=0750` in the unit to silence it |
 
+## The service does not start: audiences
+
+| Message | Meaning | What to do |
+|---|---|---|
+| `a client has a jwt credential: set kmsgrpc.token_audiences and kmsgrpc.bearer_audiences (…)` | A gRPC client signs JWTs and a list of accepted `aud` values is empty | Set the lists it names: the `token_uri` of the service account file, and the audience your client is given (`option.WithAudiences` in the Go library). Or `kmsgrpc.allow_any_audience: true` (dangerous) |
+| `client NAME proves itself with a key: set kmsrest.audiences (…)` | The same for the REST face | Set the token endpoint, `https://HOST/TENANT/oauth2/v2.0/token`. Or `kmsrest.allow_any_audience: true` (dangerous) |
+| `warning: … is empty: the "aud" of a JWT is not checked there` | Not an error: `allow_any_audience` is on | Set the list when your clients can write `aud` |
+
 ## The setup tool and the packages
 
 | Message | Meaning | What to do |

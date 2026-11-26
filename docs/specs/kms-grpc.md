@@ -7,7 +7,14 @@ A third face, on the same listener as [Transit](transit.md) and the [KMS-JSON fa
 ## 1. Configuration
 
 ```yaml
-kmsgrpc: {enabled: true, project: hsmgate, location: global, key_ring: main, token_path: /oauth2/token}
+kmsgrpc:
+  enabled: true
+  project: hsmgate
+  location: global
+  key_ring: main
+  token_path: /oauth2/token
+  token_audiences: ["https://kms.example.org/oauth2/token"]
+  bearer_audiences: ["https://kms.example.org/"]
 keys:
   seal: {kmsgrpc: true, kmsjson_usage: encrypt_decrypt, versions: [...], aad: {mode: fixed}}
 clients:
@@ -24,7 +31,7 @@ The client holds a **service account**: an RSA private key; the service knows it
 1. the client trades a JWT assertion (RS256) at the token endpoint (`POST token_path`, `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer`) for an opaque access token (random, ten minutes, in memory only). A client holds at most 100 live access tokens (asking for another ends its own oldest), and the service holds at most 10 000 (when that is reached the oldest token of the client that holds the most ends), so at that point, and only then, a client can lose a token because of the load of others. A client whose token ended (also by a restart of the service) gets `UNAUTHENTICATED` and has to ask again; not every library does that at once ([troubleshooting.md](../troubleshooting.md)).  it is what the client libraries do with the `token_uri` of a service account file;
 2. the client sends a JWT that it signed itself as the bearer.
 
-A JWT is refused when it is not RS256 (PS256 is taken on the REST face only), is expired (5 minutes of clock skew), is issued in the future, or lives longer than 24 hours. The audience is checked when it is listed: `kmsgrpc.token_audiences` for the assertion of the exchange, `kmsgrpc.bearer_audiences` for a JWT used as the bearer (two lists, so that a token made for the token endpoint is no bearer, and one made for the API is no assertion); empty lists mean no check, which is the default. The Go client library writes `aud` only when it is given an audience (`option.WithAudiences`), otherwise a `scope`: a service that lists bearer audiences refuses that. The subject, when there is one, must be the issuer (a token for another subject is refused: the service does not act for someone else). An access token is bound to the credential it was given for (the client, the issuer and the public key): when the key is replaced, or another client holds the issuer, the token is refused at the next call (`credential_changed`) and the client asks for a new one; a reload that changes nothing leaves the tokens alone. On every call, not only at login: the credential must still exist, a client certificate if shown must be the client's, a call without a certificate needs `jwt.no_cert` and a listed address (`allow_from`), and refused tokens without a certificate are counted by address (as in the KMS-JSON face). Audit before answer: if the audit line cannot be written, the call fails with `UNAVAILABLE`.
+A JWT is refused when it is not RS256 (PS256 is taken on the REST face only), is expired (5 minutes of clock skew), is issued in the future, or lives longer than 24 hours. The audience is required: `kmsgrpc.token_audiences` for the assertion of the exchange, `kmsgrpc.bearer_audiences` for a JWT used as the bearer (two lists, so that a token made for the token endpoint is no bearer, and one made for the API is no assertion); with a `jwt` client and an empty list the service does not start, unless `kmsgrpc.allow_any_audience: true` turns the check off for the empty lists. The Go client library writes `aud` only when it is given an audience (`option.WithAudiences`), otherwise a `scope`: such a bearer is refused (`bad_audience`) where bearer audiences are listed. The subject, when there is one, must be the issuer (a token for another subject is refused: the service does not act for someone else). An access token is bound to the credential it was given for (the client, the issuer and the public key): when the key is replaced, or another client holds the issuer, the token is refused at the next call (`credential_changed`) and the client asks for a new one; a reload that changes nothing leaves the tokens alone. On every call, not only at login: the credential must still exist, a client certificate if shown must be the client's, a call without a certificate needs `jwt.no_cert` and a listed address (`allow_from`), and refused tokens without a certificate are counted by address (as in the KMS-JSON face). Audit before answer: if the audit line cannot be written, the call fails with `UNAVAILABLE`.
 
 ## 3. Methods, and the client function each one serves
 

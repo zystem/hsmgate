@@ -218,7 +218,7 @@ audit: {file: %s}
 metrics: {enabled: true}
 debug: {pprof: true}
 kmsjson: {enabled: true}
-kmsgrpc: {enabled: true}
+kmsgrpc: {enabled: true, token_audiences: ["https://soak.test/token"], bearer_audiences: ["https://soak.test/"]}
 kmsrest: {enabled: true}
 tokens: [{name: soft, type: soft, keys: {m1: %s, m2: %s, m3: %s, m4: %s}}]
 keys:
