@@ -20,7 +20,9 @@ import (
 )
 
 const (
-	tokenTTL     = time.Hour
+	// tokenTTL is short on purpose: the tokens live in memory, so a restart ends them all, and a client library that caches its token (the Azure Go one does) goes on sending a dead
+	// token until it has less than five minutes left. With ten minutes such a client is back after five at most. Five or less would make that library cache nothing.
+	tokenTTL     = 10 * time.Minute
 	maxTokens    = 10000 // in the table
 	maxPerIssuer = 100   // live tokens of one issuer
 	maxJWTLife   = 24 * time.Hour
