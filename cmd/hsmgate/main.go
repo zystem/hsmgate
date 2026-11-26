@@ -117,6 +117,7 @@ func main() {
 	if err != nil {
 		die(err)
 	}
+	warnAudiences(os.Stderr, cfg)
 	if os.Args[1] == "check" {
 		for _, line := range s.Describe() {
 			fmt.Println(line)
@@ -126,6 +127,13 @@ func main() {
 	}
 	if err := serve(s, cfg, *path, nil); err != nil {
 		die(err)
+	}
+}
+
+// warnAudiences says which "aud" checks are off (allow_any_audience): at start, at `check` and after a reload.
+func warnAudiences(w io.Writer, cfg *config.Config) {
+	for _, name := range cfg.UncheckedAudiences() {
+		fmt.Fprintf(w, "hsmgate: warning: %s is empty: the \"aud\" of a JWT is not checked there, a JWT signed for another service with the same key is taken\n", name)
 	}
 }
 
@@ -150,6 +158,7 @@ func serve(s *server.Server, cfg *config.Config, path string, listening func(net
 				fmt.Fprintln(os.Stderr, "hsmgate: reload refused, nothing changed:", err)
 			} else {
 				fmt.Fprintln(os.Stderr, "hsmgate: configuration reloaded")
+				warnAudiences(os.Stderr, next)
 			}
 		}
 	}()

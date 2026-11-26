@@ -92,7 +92,7 @@ func run(m *testing.M) int {
 	os.WriteFile(saFile, sa, 0o600)
 	os.WriteFile(f("hsmgate.yaml"), []byte(fmt.Sprintf(`listen: %s
 tls: {cert: %s, key: %s, client_ca: %s}
-kmsgrpc: {enabled: true, bearer_audiences: ["https://kms.hsmgate.test/"]}
+kmsgrpc: {enabled: true, token_audiences: ["https://%s/oauth2/token"], bearer_audiences: ["https://kms.hsmgate.test/"]}
 tokens: [{name: soft, type: soft, keys: {m1: %s, m2: %s, m3: %s, m4: %s}}]
 keys:
   seal: {kmsgrpc: true, kmsjson_usage: encrypt_decrypt, versions: [{token: soft, label: m1}], aad: {mode: fixed}}
@@ -103,7 +103,7 @@ clients:
   - name: sdk
     jwt: {issuer: sdk@example.test, public_key_file: %s, no_cert: true, allow_from: ["127.0.0.1"]}
     keys: {seal: {ops: [encrypt, decrypt]}, sig: {ops: [sign]}, mac: {ops: [generate_mac, verify_mac]}}
-`, addr, f("srv.pem"), f("srv.key"), f("ca.pem"), f("k1.hex"), f("k2.hex"), f("k3.hex"), f("k4.hex"), f("sa.pub"))), 0o600)
+`, addr, f("srv.pem"), f("srv.key"), f("ca.pem"), addr, f("k1.hex"), f("k2.hex"), f("k3.hex"), f("k4.hex"), f("sa.pub"))), 0o600)
 	cmd := exec.Command(bin, "serve", "-config", f("hsmgate.yaml"))
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {

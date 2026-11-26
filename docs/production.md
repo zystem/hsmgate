@@ -17,6 +17,7 @@ A checklist, in the order that costs least to fix. Each line says what to do and
 
 - [ ] **One client per application**, named for it. A shared client makes the audit say nothing.
 - [ ] **The identity is `uri` (a SPIFFE-like name) or `sha256`**, not `cn`, unless your CA gives each name to one holder only.
+- [ ] **Audiences are set and `allow_any_audience` is off** (gRPC and REST faces, clients that sign JWTs): `kmsgrpc.token_audiences`, `kmsgrpc.bearer_audiences`, `kmsrest.audiences`, with values that **no other service or environment uses**. The same value in staging and production protects nothing.
 - [ ] **The least operations**: a client that only opens secrets gets `decrypt` only; one that only stores them, `encrypt`.
 - [ ] **Contexts**: keys in `aad.mode: context` with `allow:` prefixes, and `contexts:` per client, so one application cannot open another's data. A `fixed` key has no such separation: give it one client, or few.
 - [ ] **Every client key has `per_minute` (and `per_day`).** Without them there is **no limit**, and a stolen client key then decrypts as fast as the card goes ([configuration.md](configuration.md), "Clients").

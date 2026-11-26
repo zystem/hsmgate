@@ -64,9 +64,11 @@ type Config struct {
 		TokenPath string `yaml:"token_path"` // where clients ask for a token; default /oauth2/token
 		// TokenAudiences are the values of "aud" that the assertion of a token exchange may carry (the token endpoint as the client library knows it, "token_uri" of the service
 		// account file, for example "https://kms.example.org/oauth2/token"). BearerAudiences are the same for a JWT used directly as the bearer (the service the library names,
-		// for example "https://cloudkms.googleapis.com/"). Empty: not checked, as before; set both in a service with more than one gateway or one issuer.
-		TokenAudiences  []string `yaml:"token_audiences"`
-		BearerAudiences []string `yaml:"bearer_audiences"`
+		// for example "https://cloudkms.googleapis.com/"). Both are required when a client has a jwt credential: without them a JWT that was signed for another service that trusts
+		// the same key is taken here. AllowAnyAudience lets them be empty, and then "aud" is not checked, for clients that write none (the default of the Go client library).
+		TokenAudiences   []string `yaml:"token_audiences"`
+		BearerAudiences  []string `yaml:"bearer_audiences"`
+		AllowAnyAudience bool     `yaml:"allow_any_audience"`
 	} `yaml:"kmsgrpc"`
 	// KMSRest turns on the REST face: the API of a cloud key vault as its client libraries speak it (JSON over HTTPS, authenticated by a bearer token that a client gets by
 	// proving its client secret or the private key of its credential at the token endpoint). It shares the listener with the other faces. Tenant is the directory identifier that
@@ -75,8 +77,10 @@ type Config struct {
 		Enabled bool   `yaml:"enabled"`
 		Tenant  string `yaml:"tenant"`
 		// Audiences are the values of "aud" that the client assertion may carry (the token endpoint as the client library knows it, for example
-		// "https://kms.example.org/hsmgate/oauth2/v2.0/token"). Empty: not checked, as before.
-		Audiences []string `yaml:"audiences"`
+		// "https://kms.example.org/hsmgate/oauth2/v2.0/token"). Required when a client proves itself with a key (oauth.public_key_file); a client secret has no "aud".
+		// AllowAnyAudience lets the list be empty, and then "aud" is not checked.
+		Audiences        []string `yaml:"audiences"`
+		AllowAnyAudience bool     `yaml:"allow_any_audience"`
 	} `yaml:"kmsrest"`
 	// AdminSocket is a unix socket (mode 0600) for unlock and status; unset: no admin door.
 	AdminSocket string `yaml:"admin_socket"`
@@ -597,6 +601,18 @@ func (c *Config) validateKMSGRPC() error {
 			}
 		}
 	}
+	if len(issuers) > 0 && !g.AllowAnyAudience {
+		var missing []string
+		if len(g.TokenAudiences) == 0 {
+			missing = append(missing, "kmsgrpc.token_audiences")
+		}
+		if len(g.BearerAudiences) == 0 {
+			missing = append(missing, "kmsgrpc.bearer_audiences")
+		}
+		if len(missing) > 0 {
+			return fmt.Errorf("a client has a jwt credential: set %s (the values of \"aud\" that its JWT may carry), or kmsgrpc.allow_any_audience: true to take a JWT whatever it was signed for", strings.Join(missing, " and "))
+		}
+	}
 	return nil
 }
 
@@ -659,7 +675,37 @@ func (c *Config) validateKMSRest() error {
 			}
 		}
 	}
+	if len(r.Audiences) == 0 && !r.AllowAnyAudience {
+		for _, cl := range c.Clients {
+			if cl.OAuth != nil && cl.OAuth.PublicKeyFile != "" {
+				return fmt.Errorf("client %s proves itself with a key: set kmsrest.audiences (the values of \"aud\" that its assertion may carry: the token endpoint), or kmsrest.allow_any_audience: true to take an assertion whatever it was signed for", cl.Name)
+			}
+		}
+	}
 	return nil
+}
+
+// UncheckedAudiences names the audience settings that are empty although a client signs JWTs for their face, so that "aud" is not checked there. The service starts like that only
+// with allow_any_audience, and says so.
+func (c *Config) UncheckedAudiences() []string {
+	var jwt, key bool
+	for _, cl := range c.Clients {
+		jwt = jwt || cl.JWT != nil
+		key = key || (cl.OAuth != nil && cl.OAuth.PublicKeyFile != "")
+	}
+	var out []string
+	if jwt {
+		if len(c.KMSGRPC.TokenAudiences) == 0 {
+			out = append(out, "kmsgrpc.token_audiences")
+		}
+		if len(c.KMSGRPC.BearerAudiences) == 0 {
+			out = append(out, "kmsgrpc.bearer_audiences")
+		}
+	}
+	if key && len(c.KMSRest.Audiences) == 0 {
+		out = append(out, "kmsrest.audiences")
+	}
+	return out
 }
 
 // validateKMSJSON: the second face has rules of its own.
