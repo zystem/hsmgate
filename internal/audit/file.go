@@ -21,19 +21,37 @@ type File struct {
 	Warn     func(error)
 	lastWarn time.Time
 	sync     bool
+	dirDirty bool                 // a file was opened or renamed in the directory since its last successful fsync: with sync on, nothing is written until one succeeds
 	syncFile func(*os.File) error // the fsync of the file; a test replaces it
 	syncDir  func(string) error   // the fsync of the directory, after a file was created or renamed in it; a test replaces it
 }
 
 // SetSync makes every Write wait until the line is on the disk (fsync) before it returns, and the directory is synced after a rotation: a line that was answered for survives a
 // power loss and not only the crash of the process. It costs the time of an fsync for every line. Off by default (the line is then in the cache of the kernel when the answer goes).
-func (a *File) SetSync(on bool) {
+//
+// The name of the file must be on the disk as well as its content: after a file is created, renamed or reopened the directory is synced before the next line is written, and while
+// that fails every Write fails. Turning sync on does it at once and returns its error (the service does not start on a directory that cannot be synced).
+func (a *File) SetSync(on bool) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.sync = on
-	if on {
-		_ = a.dirSync() // the file may have just been created: its entry in the directory must be on the disk too
+	if !on {
+		return nil
 	}
+	a.dirDirty = true // the file may have just been created
+	return a.dirBarrier()
+}
+
+// dirBarrier syncs the directory if something changed in it since the last time that succeeded; a failure leaves it pending. With the lock held.
+func (a *File) dirBarrier() error {
+	if !a.sync || !a.dirDirty {
+		return nil
+	}
+	if err := a.dirSync(); err != nil {
+		return fmt.Errorf("sync the directory of the audit file: %w", err)
+	}
+	a.dirDirty = false
+	return nil
 }
 
 func (a *File) dirSync() error {
@@ -78,6 +96,7 @@ func (a *File) open() error {
 		return err
 	}
 	a.f, a.size = f, st.Size()
+	a.dirDirty = true // it may have been created, or another file now has the name
 	return nil
 }
 
@@ -114,6 +133,10 @@ func (a *File) Write(p []byte) (int, error) {
 			}
 		}
 	}
+	// before the line is written: it is not answered for while the name of the file it goes to may be lost
+	if err := a.dirBarrier(); err != nil {
+		return 0, err
+	}
 	n, err := a.f.Write(p)
 	a.size += int64(n)
 	if err == nil && a.sync {
@@ -129,20 +152,18 @@ func (a *File) rotate() error {
 			from = fmt.Sprintf("%s.%d", a.path, i-1)
 		}
 		to := fmt.Sprintf("%s.%d", a.path, i)
-		if err := os.Rename(from, to); err != nil && !os.IsNotExist(err) {
-			return err // the file is still in use
+		if err := os.Rename(from, to); err != nil {
+			if !os.IsNotExist(err) {
+				return err // the file is still in use
+			}
+		} else {
+			a.dirDirty = true
 		}
 	}
 	old := a.f
 	a.f, a.size = nil, 0
 	_ = old.Close()
-	if err := a.open(); err != nil {
-		return err
-	}
-	if a.sync {
-		return a.dirSync() // the rename and the new file are in the directory: it goes to the disk too
-	}
-	return nil
+	return a.open() // the directory is synced by the Write that follows (dirBarrier)
 }
 
 // Close closes the file.
