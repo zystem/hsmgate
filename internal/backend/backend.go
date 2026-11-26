@@ -2,6 +2,7 @@
 package backend
 
 import (
+	"bytes"
 	"crypto/ecdh"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -9,7 +10,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"strings"
 )
 
 var (
@@ -34,6 +34,18 @@ type Soft struct {
 	sig  map[string]*ecdsa.PrivateKey
 }
 
+// decodeKey turns the hex text of a key file into the bytes of the key and clears the text. It makes no Go string of it: a string cannot be cleared.
+func decodeKey(text []byte) ([]byte, error) {
+	defer clear(text)
+	h := bytes.TrimSpace(text)
+	b := make([]byte, hex.DecodedLen(len(h)))
+	if _, err := hex.Decode(b, h); err != nil {
+		clear(b)
+		return nil, err
+	}
+	return b, nil
+}
+
 // NewSoft reads keys of 64 hex digits from files.
 func NewSoft(files map[string]string) (*Soft, error) {
 	s := &Soft{keys: map[string]*ecdh.PrivateKey{}, sig: map[string]*ecdsa.PrivateKey{}}
@@ -42,10 +54,11 @@ func NewSoft(files map[string]string) (*Soft, error) {
 		if err != nil {
 			return nil, err
 		}
-		b, err := hex.DecodeString(strings.TrimSpace(string(raw)))
+		b, err := decodeKey(raw)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", path, err)
 		}
+		defer clear(b) // the key objects below keep their own copies
 		k, err := ecdh.P256().NewPrivateKey(b)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", path, err)

@@ -8,6 +8,7 @@
 package kmsrest
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/rand"
 	"crypto/rsa"
@@ -827,6 +828,17 @@ func (c *call) random(string, int) (any, *kerr) {
 	return map[string]any{"value": b64.EncodeToString(b)}, nil
 }
 
+// secretDigest is the SHA-256 of the client secret in the content of its file, without the white space around it. It takes the buffer over and clears all of it, whether it
+// accepts the secret or not: only the digest is kept.
+func secretDigest(content []byte) ([sha256.Size]byte, error) {
+	defer clear(content)
+	secret := bytes.TrimSpace(content)
+	if len(secret) < 32 {
+		return [sha256.Size]byte{}, errors.New("the client secret is shorter than 32 bytes")
+	}
+	return sha256.Sum256(secret), nil
+}
+
 // LoadCreds reads the secrets and the public keys of the credentials of the clients, by client id.
 func LoadCreds(cfg *config.Config) (map[string]Cred, error) {
 	creds := map[string]Cred{}
@@ -841,14 +853,11 @@ func LoadCreds(cfg *config.Config) (map[string]Cred, error) {
 			if err != nil {
 				return nil, fmt.Errorf("client %s: oauth.secret_file: %w", cl.Name, err)
 			}
-			secret := []byte(strings.TrimSpace(string(b)))
-			if len(secret) < 32 {
-				return nil, fmt.Errorf("client %s: the client secret is shorter than 32 bytes", cl.Name)
+			sum, err := secretDigest(b)
+			if err != nil {
+				return nil, fmt.Errorf("client %s: %w", cl.Name, err)
 			}
-			c.SecretSum, c.HasSecret = sha256.Sum256(secret), true
-			for i := range secret { // only the sum is kept
-				secret[i] = 0
-			}
+			c.SecretSum, c.HasSecret = sum, true
 		} else {
 			pub, err := oauth.ReadRSAPublic(o.PublicKeyFile)
 			if err != nil {
