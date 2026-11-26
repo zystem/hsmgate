@@ -31,7 +31,7 @@ paths:
       operationId: token
       tags:
       - auth
-      summary: Trade a JWT assertion (RS256) for an access token (one hour, in memory only)
+      summary: Trade a JWT assertion (RS256) for an access token (ten minutes, in memory only)
       description: The path is `kmsgrpc.token_path` (default `/oauth2/token`).
       security: []
       requestBody:

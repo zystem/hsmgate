@@ -162,11 +162,12 @@ func (r *rest) token() (string, error) {
 	}
 	var m struct {
 		AccessToken string `json:"access_token"`
+		ExpiresIn   int    `json:"expires_in"`
 	}
 	if st != 200 || json.Unmarshal(b, &m) != nil || m.AccessToken == "" {
 		return "", fmt.Errorf("rest token: HTTP %d %.80s", st, b)
 	}
-	r.tok, r.exp = m.AccessToken, time.Now().Add(40*time.Minute) // a token lasts an hour
+	r.tok, r.exp = m.AccessToken, time.Now().Add(time.Duration(m.ExpiresIn)*time.Second*2/3) // asked again well before it ends
 	return r.tok, nil
 }
 

@@ -25,7 +25,7 @@ Not an audit; a map of the claims to the code and the open points. "N/A": the pr
 |---|---|---|
 | V1 Architecture | Partial | threat model [threat-model.md](threat-model.md); one trust boundary (the listener); no formal data-flow diagrams per release |
 | V2 Authentication | Met for machine clients | mutual TLS (client identity by CN/URI/hash), request signing, client secrets of 32+ bytes from files with strict modes, JWT RS256 with expiry; no passwords, no human login; refused credentials counted by address and blocked |
-| V3 Session | N/A / Met | no cookies; access tokens are random, 256 bits, one hour, in memory, bound to the credential and re-judged on every call |
+| V3 Session | N/A / Met | no cookies; access tokens are random, 256 bits, ten minutes, in memory, bound to the credential and re-judged on every call |
 | V4 Access control | Met | deny by default; the policy per client, key and operation; one answer for "no such key" and "not allowed"; budgets per minute |
 | V5 Validation, encoding | Met | strict parsers, size limits on every body, the names of keys restricted to a set, fuzz tests (signature, blob, bodies); no templates, no SQL, no shell |
 | V6 Cryptography | Met, with the points of section 1 | approved algorithms, key on the token, AEAD binds the key name, version and context, constant-time compares, crypto/rand only |

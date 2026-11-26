@@ -38,7 +38,7 @@ paths:
     post:
       operationId: token
       tags: [auth]
-      summary: Trade a client secret or an RS256 assertion for an access token (one hour, in memory only)
+      summary: Trade a client secret or an RS256 assertion for an access token (ten minutes, in memory only)
       security: []
       parameters: [{$ref: '#/components/parameters/tenant'}]
       requestBody:

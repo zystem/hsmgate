@@ -70,7 +70,7 @@ func TestTokens(t *testing.T) {
 	ts := NewTokens()
 	now := time.Now()
 	tok, exp := ts.Issue("me", "s", now)
-	if iss, stamp, ok := ts.Lookup(tok, now.Add(time.Minute)); !ok || iss != "me" || stamp != "s" || exp.Sub(now) != time.Hour {
+	if iss, stamp, ok := ts.Lookup(tok, now.Add(time.Minute)); !ok || iss != "me" || stamp != "s" || exp.Sub(now) != 10*time.Minute {
 		t.Fatal("lookup")
 	}
 	if _, _, ok := ts.Lookup(tok, now.Add(2*time.Hour)); ok {

@@ -170,7 +170,7 @@ func TestEndToEnd(t *testing.T) {
 	}
 	json.NewDecoder(resp.Body).Decode(&tk)
 	resp.Body.Close()
-	if resp.StatusCode != 200 || tk.TokenType != "Bearer" || tk.AccessToken == "" || tk.ExpiresIn < 3000 {
+	if resp.StatusCode != 200 || tk.TokenType != "Bearer" || tk.AccessToken == "" || tk.ExpiresIn < 590 || tk.ExpiresIn > 600 {
 		t.Fatalf("token: %d %+v", resp.StatusCode, tk)
 	}
 	self := r.jwt("app@example.test", r.rsaKey, time.Hour) // the other way in: a bearer signed by the client itself
