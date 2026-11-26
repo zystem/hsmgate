@@ -521,7 +521,10 @@ func openAudit(cfg *config.Config, out, stdout io.Writer) (*audit.File, io.Write
 	if err != nil {
 		return nil, nil, err
 	}
-	f.SetSync(cfg.Audit.Sync)
+	if err := f.SetSync(cfg.Audit.Sync); err != nil {
+		_ = f.Close()
+		return nil, nil, fmt.Errorf("audit.sync: %w", err)
+	}
 	f.Warn = func(err error) {
 		fmt.Fprintln(os.Stderr, "hsmgate: audit rotation failed, the file stays in use and grows:", err)
 	}

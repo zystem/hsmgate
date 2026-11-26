@@ -197,3 +197,97 @@ func benchmarkWrite(b *testing.B, sync bool) {
 
 func BenchmarkFileWrite(b *testing.B)     { benchmarkWrite(b, false) }
 func BenchmarkFileWriteSync(b *testing.B) { benchmarkWrite(b, true) }
+
+// The name of the file must reach the disk too (the review of 2026-11-22, finding 1): while the directory cannot be synced, after the file was created, rotated or reopened, nothing
+// is written and every Write is an error, so that nothing is answered for; a later success restores the service.
+func TestFileRefusesWhileTheDirectoryCannotBeSynced(t *testing.T) {
+	broken := errors.New("input/output error")
+	var fail bool
+	dirs := 0
+	open := func(t *testing.T, maxBytes int64) (*File, string) {
+		p := filepath.Join(t.TempDir(), "audit.log")
+		f, err := OpenFile(p, maxBytes, 3)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { f.Close() })
+		f.syncDir = func(string) error {
+			dirs++
+			if fail {
+				return broken
+			}
+			return nil
+		}
+		return f, p
+	}
+	refused := func(t *testing.T, f *File, p, line string) {
+		t.Helper()
+		for i := 0; i < 2; i++ { // and again: a failure is not forgotten
+			if _, err := f.Write([]byte(line)); !errors.Is(err, broken) {
+				t.Fatalf("write %d was not refused: %v", i, err)
+			}
+		}
+		if strings.Contains(read(t, p), line) {
+			t.Errorf("a refused line is in the file: %q", read(t, p))
+		}
+	}
+	recovers := func(t *testing.T, f *File, p, line string) {
+		t.Helper()
+		fail = false
+		if _, err := f.Write([]byte(line)); err != nil {
+			t.Fatalf("after the directory can be synced again: %v", err)
+		}
+		before := dirs
+		f.Write([]byte("z\n"))
+		if !strings.Contains(read(t, p), "z\n") || (f.maxBytes == 0 && dirs != before) {
+			t.Errorf("the directory is synced again for every line: %d, %d", before, dirs)
+		}
+	}
+	t.Run("when sync is turned on", func(t *testing.T) {
+		f, p := open(t, 0)
+		fail = true
+		if err := f.SetSync(true); !errors.Is(err, broken) {
+			t.Fatalf("SetSync: %v", err)
+		}
+		refused(t, f, p, "first\n")
+		recovers(t, f, p, "first\n")
+	})
+	t.Run("after a rotation", func(t *testing.T) {
+		fail = false
+		f, p := open(t, 10)
+		if err := f.SetSync(true); err != nil {
+			t.Fatal(err)
+		}
+		f.Write([]byte("aaaaaaaa\n"))
+		fail = true
+		refused(t, f, p, "bbbbbbbb\n")
+		recovers(t, f, p, "bbbbbbbb\n")
+	})
+	t.Run("after a reopen (logrotate)", func(t *testing.T) {
+		fail = false
+		f, p := open(t, 0)
+		if err := f.SetSync(true); err != nil {
+			t.Fatal(err)
+		}
+		f.Write([]byte("before\n"))
+		if err := os.Rename(p, p+".moved"); err != nil {
+			t.Fatal(err)
+		}
+		if err := f.Reopen(); err != nil {
+			t.Fatal(err)
+		}
+		fail = true
+		refused(t, f, p, "after\n")
+		recovers(t, f, p, "after\n")
+	})
+	t.Run("sync off", func(t *testing.T) {
+		fail = true
+		f, _ := open(t, 10)
+		for _, l := range []string{"aaaaaaaa\n", "bbbbbbbb\n"} {
+			if _, err := f.Write([]byte(l)); err != nil {
+				t.Fatalf("with sync off the directory is nothing to the write: %v", err)
+			}
+		}
+		fail = false
+	})
+}
