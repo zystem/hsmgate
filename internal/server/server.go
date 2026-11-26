@@ -5,6 +5,7 @@
 package server
 
 import (
+	"bytes"
 	"crypto/fips140"
 	"crypto/tls"
 	"crypto/x509"
@@ -14,7 +15,6 @@ import (
 	"net/http"
 	"os"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 
@@ -554,6 +554,17 @@ func sameToken(a, b backend.Token) bool {
 	return oka && okb && ia.Identity() == ib.Identity()
 }
 
+// signingSecret is a copy of the SigV4 secret in the content of its file, without the white space around it; the service keeps it, because a signature is checked with it. It
+// takes the buffer over and clears all of it, whether it accepts the secret or not.
+func signingSecret(content []byte, shortest int) ([]byte, error) {
+	defer clear(content)
+	sec := bytes.TrimSpace(content)
+	if len(sec) < shortest {
+		return nil, fmt.Errorf("the signing secret is shorter than %d bytes", shortest)
+	}
+	return append([]byte(nil), sec...), nil
+}
+
 // loadCreds reads the signing secrets of the clients that have a credential: each from its own file, which must be the kind of file a key is (owner, mode, size).
 func loadCreds(cfg *config.Config) (map[string]kmsjson.Cred, error) {
 	creds := map[string]kmsjson.Cred{}
@@ -565,9 +576,13 @@ func loadCreds(cfg *config.Config) (map[string]kmsjson.Cred, error) {
 		if err != nil {
 			return nil, fmt.Errorf("client %s: sigv4.secret_file: %w", c.Name, err)
 		}
-		sec := []byte(strings.TrimSpace(string(b)))
-		if len(sec) < 20 || (c.SigV4.NoCert && len(sec) < 32) {
-			return nil, fmt.Errorf("client %s: the signing secret is shorter than %d bytes", c.Name, map[bool]int{false: 20, true: 32}[c.SigV4.NoCert])
+		shortest := 20
+		if c.SigV4.NoCert {
+			shortest = 32
+		}
+		sec, err := signingSecret(b, shortest)
+		if err != nil {
+			return nil, fmt.Errorf("client %s: %w", c.Name, err)
 		}
 		from, err := c.SigV4.Prefixes()
 		if err != nil {
