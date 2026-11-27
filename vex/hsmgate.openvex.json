@@ -3,8 +3,8 @@
   "@id": "https://github.com/zystem/hsmgate/blob/main/vex/hsmgate.openvex.json",
   "author": "zystem (the maintainer of hsmgate)",
   "role": "Maintainer",
-  "timestamp": "2026-11-20T21:30:00Z",
-  "version": 14,
+  "timestamp": "2026-11-26T23:59:00Z",
+  "version": 15,
   "statements": [
     {
       "vulnerability": {
@@ -95,6 +95,12 @@
         },
         {
           "@id": "pkg:oci/hsmgate?repository_url=ghcr.io/zystem/hsmgate&tag=v0.9.4-fips"
+        },
+        {
+          "@id": "pkg:oci/hsmgate?repository_url=ghcr.io/zystem/hsmgate&tag=v0.10.0"
+        },
+        {
+          "@id": "pkg:oci/hsmgate?repository_url=ghcr.io/zystem/hsmgate&tag=v0.10.0-fips"
         }
       ],
       "status": "fixed",
@@ -191,6 +197,12 @@
         },
         {
           "@id": "pkg:oci/hsmgate?repository_url=ghcr.io/zystem/hsmgate&tag=v0.9.4-fips"
+        },
+        {
+          "@id": "pkg:oci/hsmgate?repository_url=ghcr.io/zystem/hsmgate&tag=v0.10.0"
+        },
+        {
+          "@id": "pkg:oci/hsmgate?repository_url=ghcr.io/zystem/hsmgate&tag=v0.10.0-fips"
         }
       ],
       "status": "fixed",
