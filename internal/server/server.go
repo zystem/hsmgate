@@ -593,6 +593,16 @@ func loadCreds(cfg *config.Config) (map[string]kmsjson.Cred, error) {
 	return creds, nil
 }
 
+// evicted renders the count of the access tokens a face gave up while they were live.
+func evicted(face string, count func() (clientLimit, tableFull uint64)) []metrics.Gauge {
+	c, t := count()
+	const name, help = "hsmgate_tokens_evicted_total", "Live access tokens given up for a new one, by face and by the limit that was met."
+	return []metrics.Gauge{
+		{Name: name, Help: help, Counter: true, Labels: fmt.Sprintf("face=%q,reason=%q", face, "client_limit"), Value: float64(c)},
+		{Name: name, Help: help, Counter: true, Labels: fmt.Sprintf("face=%q,reason=%q", face, "table_full"), Value: float64(t)},
+	}
+}
+
 // metricsHandler renders the counters and the state of the tokens and of the line to them, for the admin socket.
 func (s *Server) metricsHandler() http.Handler {
 	if s.stats == nil { // off unless the configuration turns it on
@@ -619,6 +629,12 @@ func (s *Server) metricsHandler() http.Handler {
 		g = append(g,
 			metrics.Gauge{Name: "hsmgate_gate_running", Help: "Operations at the tokens now.", Value: float64(s.gate.Running())},
 			metrics.Gauge{Name: "hsmgate_gate_waiting", Help: "Operations waiting for their turn at the tokens.", Value: float64(s.gate.InLine())})
+		if s.grpc != nil {
+			g = append(g, evicted("kmsgrpc", s.grpc.TokensEvicted)...)
+		}
+		if s.rest != nil {
+			g = append(g, evicted("kmsrest", s.rest.TokensEvicted)...)
+		}
 		g = append(g, metrics.RuntimeGauges()...)
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 		s.stats.Write(w, g)

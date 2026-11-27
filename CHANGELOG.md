@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **`hsmgate_tokens_evicted_total{face,reason}`** (the review of 2026-11-22, finding 4): a counter on `/metrics` of the access tokens that were given up while they were live, because their client held its limit (`client_limit`) or the face its table (`table_full`). [operations.md](docs/operations.md).
+
+### Security
+- **A change of the audiences ends the access tokens given before** (the review of 2026-11-22, finding 2). The stamp of a credential that a token carries did not include the audiences, so after a list was narrowed a token given under the former one worked until it expired (ten minutes) or the service restarted. Now a reload with other values in `kmsgrpc.token_audiences` or `kmsrest.audiences` refuses it (`credential_changed`); the tokens of REST clients with a secret stay. [upgrading.md](docs/upgrading.md).
+
 ## 0.10.0 — 2026-11-27
 
 The findings of the security reviews of 2026-11-21 and 2026-11-22 are closed in this release. **It breaks compatibility for configurations with clients that sign JWTs**: they need audiences now (the first entry under Security), and `hsmgate check` with the new binary tells what is missing. [upgrading.md](docs/upgrading.md).

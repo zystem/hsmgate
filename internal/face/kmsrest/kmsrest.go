@@ -94,6 +94,9 @@ func New(a *audit.Log, g *gate.Gate, tenant string) *Face {
 	return &Face{Audit: a, Gate: g, Macs: kmsops.NewMacCache(), Fails: peer.NewFailures(), Created: time.Now(), Tenant: tenant, tokens: oauth.NewTokens()}
 }
 
+// TokensEvicted counts the access tokens given up while they were live (oauth.Tokens.Evicted).
+func (f *Face) TokensEvicted() (clientLimit, tableFull uint64) { return f.tokens.Evicted() }
+
 // Reload replaces the generation for the requests that come after; the returned function waits for the requests of the previous one. Access tokens stay valid, but every request is
 // judged again against the credentials of the new generation.
 func (f *Face) Reload(cfg *config.Config, tokens map[string]backend.Token, pol *policy.Policy, id func(*http.Request) (string, bool), creds map[string]Cred) func() {
@@ -871,14 +874,16 @@ func LoadCreds(cfg *config.Config) (map[string]Cred, error) {
 		}
 		c.From = from
 		material := c.SecretSum[:]
+		var audiences []string // only an assertion has an "aud": a new list leaves the tokens of the clients with a secret
 		if c.Pub != nil {
+			audiences = cfg.KMSRest.Audiences
 			der, err := x509.MarshalPKIXPublicKey(c.Pub)
 			if err != nil {
 				return nil, fmt.Errorf("client %s: oauth.public_key_file: %w", cl.Name, err)
 			}
 			material = der
 		}
-		c.Stamp = oauth.Stamp(cl.Name, o.ClientID, material)
+		c.Stamp = oauth.Stamp(cl.Name, o.ClientID, material, audiences...)
 		creds[o.ClientID] = c
 	}
 	return creds, nil
