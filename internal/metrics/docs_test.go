@@ -50,7 +50,7 @@ func TestEveryMetricIsDocumented(t *testing.T) {
 	}
 	var b strings.Builder
 	New(false).Write(&b, RuntimeGauges())
-	names := []string{"hsmgate_token_state", "hsmgate_gate_running", "hsmgate_gate_waiting"} // the gauges the server adds
+	names := []string{"hsmgate_token_state", "hsmgate_gate_running", "hsmgate_gate_waiting", "hsmgate_tokens_evicted_total"} // the values the server adds
 	for _, l := range strings.Split(b.String(), "\n") {
 		if strings.HasPrefix(l, "# TYPE ") {
 			names = append(names, strings.Fields(l)[2])

@@ -99,6 +99,9 @@ func New(a *audit.Log, g *gate.Gate, tokenPath string) *Face {
 	return &Face{Audit: a, Gate: g, Macs: kmsops.NewMacCache(), Fails: peer.NewFailures(), Created: time.Now(), TokenPath: tokenPath, tokens: oauth.NewTokens()}
 }
 
+// TokensEvicted counts the access tokens given up while they were live (oauth.Tokens.Evicted).
+func (f *Face) TokensEvicted() (clientLimit, tableFull uint64) { return f.tokens.Evicted() }
+
 // Reload replaces the generation for the requests that come after; the returned function waits for the requests of the previous one. The access tokens stay valid, but every request
 // is judged again against the credentials of the new generation.
 func (f *Face) Reload(cfg *config.Config, tokens map[string]backend.Token, pol *policy.Policy, id func(*http.Request) (string, bool), creds map[string]Cred) func() {

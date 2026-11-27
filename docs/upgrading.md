@@ -4,6 +4,10 @@ The latest release is supported, and the previous minor release for 30 days ([SE
 
 General steps: read the notes; run `hsmgate check -config …` with the new binary (it needs no PIN); replace the binary or the image (pin the digest); restart; `hsmgate unlock`; look at the audit log. A configuration that the new version refuses is refused at the start, not at the first request. SIGHUP reloads the configuration without a restart for what a reload may change (not the listener, the admin socket, the audit file, the limits, the enabled faces).
 
+## 0.10.0 to the next release (Unreleased)
+
+- Nothing to set. A reload that changes the values of `kmsgrpc.token_audiences` or `kmsrest.audiences` now ends the access tokens given before (`credential_changed`): the client has to ask for a new one, and not every library does that at once ([troubleshooting.md](troubleshooting.md)).
+
 ## 0.9.4 to 0.10.0
 
 - **A REST client assertion must carry `sub` equal to the client id** (and `iss` as before). The official Azure client libraries write both; a hand-made assertion without `sub` is now refused (`bad_subject` in the audit line). A gRPC JWT whose `sub` is another account than its `iss` is refused too; a JWT with no `sub` still passes.

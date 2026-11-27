@@ -45,7 +45,7 @@ func LoadCreds(cfg *config.Config) (map[string]Cred, error) {
 		if err != nil {
 			return nil, fmt.Errorf("client %s: jwt.public_key_file: %w", c.Name, err)
 		}
-		creds[c.JWT.Issuer] = Cred{Client: c.Name, Issuer: c.JWT.Issuer, Stamp: oauth.Stamp(c.Name, c.JWT.Issuer, der), Key: pub, NoCert: c.JWT.NoCert, From: from}
+		creds[c.JWT.Issuer] = Cred{Client: c.Name, Issuer: c.JWT.Issuer, Stamp: oauth.Stamp(c.Name, c.JWT.Issuer, der, cfg.KMSGRPC.TokenAudiences...), Key: pub, NoCert: c.JWT.NoCert, From: from}
 	}
 	return creds, nil
 }

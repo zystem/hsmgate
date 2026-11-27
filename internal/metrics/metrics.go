@@ -69,12 +69,13 @@ func clean(s string) string {
 	return s
 }
 
-// Gauge is a value read at the time of the scrape.
+// Gauge is a value read at the time of the scrape. With Counter it is a total since the start that somebody else keeps.
 type Gauge struct {
-	Name   string
-	Help   string
-	Labels string // already in the form `a="b",c="d"`, or empty
-	Value  float64
+	Counter bool
+	Name    string
+	Help    string
+	Labels  string // already in the form `a="b",c="d"`, or empty
+	Value   float64
 }
 
 // Write renders the counters and the gauges.
@@ -117,7 +118,11 @@ func (r *Registry) Write(w io.Writer, gauges []Gauge) {
 	for _, g := range gauges {
 		if !seen[g.Name] {
 			seen[g.Name] = true
-			fmt.Fprintf(w, "# HELP %s %s\n# TYPE %s gauge\n", g.Name, g.Help, g.Name)
+			kind := "gauge"
+			if g.Counter {
+				kind = "counter"
+			}
+			fmt.Fprintf(w, "# HELP %s %s\n# TYPE %s %s\n", g.Name, g.Help, g.Name, kind)
 		}
 		if g.Labels != "" {
 			fmt.Fprintf(w, "%s{%s} %g\n", g.Name, g.Labels, g.Value)

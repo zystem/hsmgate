@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -192,9 +193,16 @@ type tokenInfo struct {
 // Stamp is a short name of a credential as it is now: the client it belongs to, the issuer (or client id) and the material that proves it (the public key, or the secret).
 // A face writes it into every access token it gives and compares it again at every call, so that a token does not outlive the credential it was given for: a new key or secret,
 // another client behind the same issuer, are another stamp. The material is hashed with its length, so that two different splits of the same bytes are not the same stamp.
-func Stamp(client, issuer string, material []byte) string {
+// The audiences are the values of "aud" that the assertion of the token had to name, where it is one: a token given under another list is not good.
+func Stamp(client, issuer string, material []byte, audiences ...string) string {
 	h := sha256.New()
-	for _, p := range [][]byte{[]byte("hsmgate/credential/v1"), []byte(client), []byte(issuer), material} {
+	parts := [][]byte{[]byte("hsmgate/credential/v1"), []byte(client), []byte(issuer), material}
+	set := slices.Clone(audiences) // the order of a list and a value written twice change nothing
+	slices.Sort(set)
+	for _, a := range slices.Compact(set) {
+		parts = append(parts, []byte(a))
+	}
+	for _, p := range parts {
 		fmt.Fprintf(h, "%d:", len(p))
 		h.Write(p)
 	}
@@ -208,11 +216,20 @@ func Stamp(client, issuer string, material []byte) string {
 // is given up is a client that asks again; a table that was emptied at its limit (what this did before) was every client asking again at once.
 type Tokens struct {
 	mu sync.Mutex
-	m  map[string]tokenInfo
-	q  map[string][]string // per issuer, the tokens in the order they were given; they all live as long, so the expired ones are always the first
+	// live tokens that were given up for a new one, by the bound that was met; for the metrics
+	atClientLimit, atTableFull uint64
+	m                          map[string]tokenInfo
+	q                          map[string][]string // per issuer, the tokens in the order they were given; they all live as long, so the expired ones are always the first
 }
 
 func NewTokens() *Tokens { return &Tokens{m: map[string]tokenInfo{}, q: map[string][]string{}} }
+
+// Evicted counts the live tokens that were given up for a new one since the start: because their issuer held its limit, and because the table was full.
+func (t *Tokens) Evicted() (clientLimit, tableFull uint64) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.atClientLimit, t.atTableFull
+}
 
 // live drops the expired tokens at the front of the queue of an issuer.
 func (t *Tokens) live(issuer string, now time.Time) []string {
@@ -253,6 +270,7 @@ func (t *Tokens) Issue(issuer, stamp string, now time.Time) (string, time.Time) 
 	defer t.mu.Unlock()
 	if len(t.live(issuer, now)) >= maxPerIssuer {
 		t.dropOldest(issuer)
+		t.atClientLimit++
 	}
 	if len(t.m) >= maxTokens {
 		for iss := range t.q { // the expired of every issuer
@@ -266,6 +284,7 @@ func (t *Tokens) Issue(issuer, stamp string, now time.Time) (string, time.Time) 
 				}
 			}
 			t.dropOldest(most)
+			t.atTableFull++
 		}
 	}
 	b := make([]byte, 32)
