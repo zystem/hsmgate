@@ -1,7 +1,9 @@
 package audit
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sync"
@@ -21,9 +23,11 @@ type File struct {
 	Warn     func(error)
 	lastWarn time.Time
 	sync     bool
-	dirDirty bool                 // a file was opened or renamed in the directory since its last successful fsync: with sync on, nothing is written until one succeeds
-	syncFile func(*os.File) error // the fsync of the file; a test replaces it
-	syncDir  func(string) error   // the fsync of the directory, after a file was created or renamed in it; a test replaces it
+	dirDirty bool                                // a file was opened or renamed in the directory since its last successful fsync: with sync on, nothing is written until one succeeds
+	syncFile func(*os.File) error                // the fsync of the file; a test replaces it
+	syncDir  func(string) error                  // the fsync of the directory, after a file was created or renamed in it; a test replaces it
+	midLine  bool                                // the file does not end with a newline: the next line must not be glued to what is there
+	write    func(*os.File, []byte) (int, error) // the write of a line; a test replaces it
 }
 
 // SetSync makes every Write wait until the line is on the disk (fsync) before it returns, and the directory is synced after a rotation: a line that was answered for survives a
@@ -85,8 +89,46 @@ func OpenFile(path string, maxBytes int64, keep int) (*File, error) {
 	return a, nil
 }
 
+// fileMode lets a log shipper in the group of the service read the log.
+const fileMode = 0o640
+
+// openAppend opens the path for append. A file that it creates gets fileMode whatever the umask is (the systemd unit has 0077); a file that exists keeps its mode.
+func openAppend(path string) (*os.File, error) {
+	const flags = os.O_APPEND | os.O_CREATE | os.O_WRONLY
+	f, err := os.OpenFile(path, flags|os.O_EXCL, fileMode) // #nosec G302 G304 -- the group may read the log (a shipper); the path is the operator's
+	if errors.Is(err, fs.ErrExist) {
+		return os.OpenFile(path, flags, fileMode) // #nosec G302 G304 -- the same
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := f.Chmod(fileMode); err != nil { // #nosec G302 -- the same
+		_ = f.Close()
+		return nil, err
+	}
+	return f, nil
+}
+
+// endsMidLine reports whether the last byte of a file of that size is not a newline: a write that was cut short by a power loss or a full disk. A file that cannot be read is
+// taken to end well.
+func endsMidLine(path string, size int64) bool {
+	if size == 0 {
+		return false
+	}
+	r, err := os.Open(path) // #nosec G304 -- the operator's audit file
+	if err != nil {
+		return false
+	}
+	defer r.Close()
+	var last [1]byte
+	if _, err := r.ReadAt(last[:], size-1); err != nil {
+		return false
+	}
+	return last[0] != '\n'
+}
+
 func (a *File) open() error {
-	f, err := os.OpenFile(a.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o640) // #nosec G302 G304 -- the group may read the log (a shipper); the path is the operator's
+	f, err := openAppend(a.path)
 	if err != nil {
 		return err
 	}
@@ -96,6 +138,7 @@ func (a *File) open() error {
 		return err
 	}
 	a.f, a.size = f, st.Size()
+	a.midLine = st.Mode().IsRegular() && endsMidLine(a.path, st.Size())
 	a.dirDirty = true // it may have been created, or another file now has the name
 	return nil
 }
@@ -137,12 +180,30 @@ func (a *File) Write(p []byte) (int, error) {
 	if err := a.dirBarrier(); err != nil {
 		return 0, err
 	}
-	n, err := a.f.Write(p)
+	if a.midLine { // end the unfinished line first, so that this one can be read
+		n, err := a.writeBytes([]byte{'\n'})
+		a.size += int64(n)
+		if err != nil {
+			return 0, err
+		}
+		a.midLine = false
+	}
+	n, err := a.writeBytes(p)
 	a.size += int64(n)
+	if n > 0 {
+		a.midLine = p[n-1] != '\n' // a write that was cut short
+	}
 	if err == nil && a.sync {
 		err = a.fsync() // an error here is an error of the write: the caller does not answer (the audit is written before the answer)
 	}
 	return n, err
+}
+
+func (a *File) writeBytes(p []byte) (int, error) {
+	if a.write != nil {
+		return a.write(a.f, p)
+	}
+	return a.f.Write(p)
 }
 
 func (a *File) rotate() error {

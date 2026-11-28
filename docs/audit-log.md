@@ -2,7 +2,7 @@
 
 Every decision of the service is one line of JSON, **a refusal as well as a success**. A call is answered only after its line is written: if the log cannot be written the service answers 503 `audit log unavailable` and does nothing, and it writes a probe line until the log works again. There is never a key, a plaintext, a ciphertext or a PIN in it.
 
-Where it goes: `audit.file` of the configuration (opened for append, mode 0640 so that a log shipper in the group can read it), or standard output when there is no file; `audit.stdout: true` writes to both (the journal, under systemd; `docker logs`; the log of the pod) ([configuration.md](configuration.md)).
+Where it goes: `audit.file` of the configuration (opened for append; a file the service creates has mode 0640 whatever its umask is, so that a log shipper in the group can read it, and a file that exists keeps its mode), or standard output when there is no file; `audit.stdout: true` writes to both (the journal, under systemd; `docker logs`; the log of the pod) ([configuration.md](configuration.md)).
 
 ## A line
 
@@ -76,7 +76,31 @@ What to watch: a rise of `decrypt` for a client that normally only encrypts; `fo
 - **Written before the answer.** A call is answered only after its line was handed to the file (`write`). If the line cannot be written, the call is refused with 503 and nothing is done.
 - **A crash of the process loses nothing**: the line is in the cache of the kernel, which outlives the process.
 - **A power loss, a kernel panic or a hard stop of the machine can lose the last lines** (the seconds the kernel keeps dirty pages: about 5 seconds for an ext4 journal commit and up to about 30 seconds for the data), although the client has had its answer. What was shipped off the host by then is not lost: a shipper that reads the file sees a line a moment after it is written, so the copy on the other side is usually more complete than the file after such a failure. **Shipping by UDP gives no acknowledgement**: a lost packet and a lost tail of the file together leave the line nowhere; use TCP or TLS for the audit. How a given shipper resumes after the file became shorter than the offset it remembers was not tried (not run for Fluent Bit of the chart).
-- **`audit.sync: true`** closes that window on the host: every line is written to the disk (`fsync`) before the answer, and the directory too after a rotation, so a line that was answered for is there after a power loss. A failed `fsync` fails the call like a failed write. The name of the file must reach the disk too: after the file is created, rotated or reopened (logrotate and SIGHUP) the directory is synced before the next line is written, and while that fails every call is refused (503) and nothing is written; the first success restores the service. If the directory cannot be synced at start, the service does not start. Off by default. Cost, measured on 2026-11-22 on an NVMe disk with ext4 (LVM), one writer, `BenchmarkFileWrite` and `BenchmarkFileWriteSync` of `internal/audit`: 1.1 µs a line without it and 0.67 ms a line with it, so about 1500 lines a second at most, and all calls wait for each other at the file. A slower disk (a SATA SSD, a network disk, a hard disk) costs several milliseconds a line. Not measured: the effect on a service under load, and a volume of a cloud disk or a Kubernetes claim. A card does one operation at a time and an operation takes tens of milliseconds, so there the `fsync` is not the limit; with a software token it can be.
+- **`audit.sync: true`** closes that window on the host: every line is written to the disk (`fsync`) before the answer, and the directory too after a rotation, so a line that was answered for is there after a power loss. A failed `fsync` fails the call like a failed write. The name of the file must reach the disk too: after the file is created, rotated or reopened (logrotate and SIGHUP) the directory is synced before the next line is written, and while that fails every call is refused (503) and nothing is written; the first success restores the service. If the directory cannot be synced at start, the service does not start. Off by default. Cost, measured on 2026-11-22 on an NVMe disk with ext4 (LVM), one writer, `BenchmarkFileWrite` and `BenchmarkFileWriteSync` of `internal/audit`: 1.1 µs a line without it and 0.67 ms a line with it, so about 1500 lines a second at most, and all calls wait for each other at the file. A slower disk (a SATA SSD, a network disk, a hard disk) costs several milliseconds a line. Not measured: a volume of a cloud disk or a Kubernetes claim. **The lines are written one at a time, each with its own `fsync`, so the disk sets the most calls a second the service answers, however many clients there are** (the table below). A card does one operation at a time and an operation takes tens of milliseconds, so there the `fsync` matters less; with a software token it can be the limit.
+- **A line that was cut short** (a power loss, a full disk) stays in the file as an unreadable piece, and without `sync` there can be a block of zero bytes. The service ends such a piece with a newline before it writes the next line, so every later line is whole. A reader of the file must skip a line that does not parse.
+
+### What was run: hard stops, a full disk, latency
+
+On 2026-11-28, release 0.10.0 from the deb in a virtual machine (Debian 13, Proxmox, 4 cores, ext4 on a ZFS volume, `cache=none`), a software token, the load from the host over a virtual network. A hard stop of the machine (`qm stop`) is a power loss for the guest; the disks and the caches of the host were not cut. Each acknowledged call was looked up in the files by its `X-Request-Id`.
+
+| `audit.sync` | Stops | Acknowledged lines missing |
+|---|---|---|
+| `true` | 5, at a random moment under load | none of 8450 |
+| `true` | 3, right after a rotation by the service | none of 389 |
+| `false` | 5, at a random moment under load | between 35875 and 124894 each time (about the last 25 seconds or less) |
+
+Latency of an `encrypt` over 20 seconds (an `fsync` of a 150-byte append took 10.7 ms in this machine, 60 ms with the disk held to 50 writes a second); the host was busy with other machines:
+
+| Condition | `sync` | Clients at once | Calls a second | p50 | p99 |
+|---|---|---|---|---|---|
+| as is | off | 8 | 7253 | 1.0 ms | 2.6 ms |
+| as is | on | 1 | 84 | 12 ms | 16 ms |
+| as is | on | 8 | 91 | 86 ms | 104 ms |
+| as is | on | 32 | 58, and 685 answers 503 | 400 ms | 454 ms |
+| disk at 50 writes a second | on | 8 | 14 | 480 ms | 2.1 s |
+| network delay 20 ms | on | 8 | 91 | 86 ms | 121 ms |
+
+A full disk (an 8 MiB ext4 file system), with `sync` on and off: calls were refused with 503, the service went on when space was freed, and no acknowledged line was missing. Not run: a card, a cut of a physical machine, a network or cloud disk, a log shipper after a cut.
 
 ## Keeping it
 

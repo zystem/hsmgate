@@ -5,6 +5,13 @@
 ### Added
 - **`hsmgate_tokens_evicted_total{face,reason}`** (the review of 2026-11-22, finding 4): a counter on `/metrics` of the access tokens that were given up while they were live, because their client held its limit (`client_limit`) or the face its table (`table_full`). [operations.md](docs/operations.md).
 
+### Fixed
+- **A line after a cut-off line of the audit file is no longer lost to a reader.** When the file ended in the middle of a line (a power loss, a hard stop, a short write), the next line, of a call that had been answered, was glued to the piece and did not parse. The service now ends the piece with a newline first. Found on 2026-11-28 on a virtual machine ([audit-log.md](docs/audit-log.md), "What was run").
+- **The audit file has mode 0640 under systemd too.** The umask of the unit (0077) made it 0600, so a log shipper in the group could not read it, against the documentation. Files that exist keep their mode. [upgrading.md](docs/upgrading.md).
+
+### Documentation
+- What was run with hard stops, a full disk and under load, with the cost of `audit.sync` on a slower disk. [audit-log.md](docs/audit-log.md).
+
 ### Security
 - **A change of the audiences ends the access tokens given before** (the review of 2026-11-22, finding 2). The stamp of a credential that a token carries did not include the audiences, so after a list was narrowed a token given under the former one worked until it expired (ten minutes) or the service restarted. Now a reload with other values in `kmsgrpc.token_audiences` or `kmsrest.audiences` refuses it (`credential_changed`); the tokens of REST clients with a secret stay. [upgrading.md](docs/upgrading.md).
 
