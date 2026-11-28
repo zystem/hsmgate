@@ -6,6 +6,7 @@ General steps: read the notes; run `hsmgate check -config …` with the new bina
 
 ## 0.10.0 to the next release (Unreleased)
 
+- **The audit file under systemd was created with mode 0600**, not the documented 0640 (the unit has `UMask=0077`). New files now get 0640, readable by the group `hsmgate`. A file that exists keeps its mode, also after it is rotated: `sudo chmod 0640 /var/log/hsmgate/audit.log*` if a shipper must read it. If nothing but the service should read the log, take the other members out of that group.
 - Nothing to set. A reload that changes the values of `kmsgrpc.token_audiences` or `kmsrest.audiences` now ends the access tokens given before (`credential_changed`): the client has to ask for a new one, and not every library does that at once ([troubleshooting.md](troubleshooting.md)).
 
 ## 0.9.4 to 0.10.0
