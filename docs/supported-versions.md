@@ -4,7 +4,8 @@ The rule is in [SECURITY.md](../SECURITY.md), "What is supported": the **latest 
 
 | Release | Date | Status |
 |---|---|---|
-| **0.10.0** | 2026-11-27 | supported: the latest |
+| **0.10.1** | 2026-11-28 | supported: the latest |
+| 0.10.0 | 2026-11-27 | replaced: update |
 | 0.9.4 | 2026-11-20 | previous minor: High and Critical fixes only, **until 2026-12-27**; then not supported |
 | 0.9.3, 0.9.2, 0.9.1 | 2026-11-19, 2026-11-15 | replaced: update (0.9.0 was tagged but never released) |
 | 0.8.0 | 2026-11-13 | High and Critical fixes only, **until 2026-12-15**; then not supported |
@@ -15,6 +16,6 @@ The rule is in [SECURITY.md](../SECURITY.md), "What is supported": the **latest 
 
 How to read it: while the project is 0.x a minor release may change the configuration or the formats; [upgrading.md](upgrading.md) lists what each one changed, and `hsmgate check -config ...` with the new binary tells whether your file still loads (it needs no PIN). What is sealed in a format that is still supported (`ecies2`, `ecies3`, `ecies4`: every suite is always read, [key-management.md](key-management.md)) stays readable across releases. The old `ecies1` was dropped at 0.4: `rewrap` such texts with 0.3.x first ([upgrading.md](upgrading.md)).
 
-The Helm chart has the version of the release it was made with (`helm install ... --version 0.10.0` starts the image of the same release). Releases, their signatures and their SBOM: [GitHub releases](https://github.com/zystem/hsmgate/releases), [verifying-releases.md](verifying-releases.md).
+The Helm chart has the version of the release it was made with (`helm install ... --version 0.10.1` starts the image of the same release). Releases, their signatures and their SBOM: [GitHub releases](https://github.com/zystem/hsmgate/releases), [verifying-releases.md](verifying-releases.md).
 
 This page is updated by each release ([releasing.md](releasing.md)).

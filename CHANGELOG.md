@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.10.1 — 2026-11-28
+
+Two faults of the audit file, found by running 0.10.0 in a virtual machine, and the last points of the security review of 2026-11-22. No setting changes. If a log shipper must read the audit files that already exist, change their mode once: [upgrading.md](docs/upgrading.md).
 
 ### Added
 - **`hsmgate_tokens_evicted_total{face,reason}`** (the review of 2026-11-22, finding 4): a counter on `/metrics` of the access tokens that were given up while they were live, because their client held its limit (`client_limit`) or the face its table (`table_full`). [operations.md](docs/operations.md).
