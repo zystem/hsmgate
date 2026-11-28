@@ -55,33 +55,25 @@ func TestSIGTERMIsACleanStop(t *testing.T) {
 		}
 	}
 	cmd.Process.Signal(syscall.SIGTERM)
-	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
+	// Read stderr to its end before Wait: Wait closes the pipe, and what is not read yet is lost.
 	var out []string
-	all, live := lines, lines // all stays as it is (a closed channel ends a range); live becomes nil when closed, so that select does not spin
-	for {
+	stuck := time.After(10 * time.Second)
+	for open := true; open; {
 		select {
-		case l, ok := <-live:
-			if !ok {
-				live = nil
-				continue
-			}
-			out = append(out, l)
-		case err := <-done:
-			for l := range all {
+		case l, ok := <-lines:
+			if open = ok; ok {
 				out = append(out, l)
 			}
-			if err != nil {
-				t.Fatalf("exit: %v\n%s", err, strings.Join(out, "\n"))
-			}
-			if !strings.Contains(strings.Join(out, "\n"), "tokens logged out") || strings.Contains(strings.Join(out, "\n"), "Server closed") {
-				t.Errorf("output: %q", out)
-			}
-			return
-		case <-time.After(10 * time.Second):
+		case <-stuck:
 			cmd.Process.Kill()
 			t.Fatal("the service did not stop")
 		}
+	}
+	if err := cmd.Wait(); err != nil {
+		t.Fatalf("exit: %v\n%s", err, strings.Join(out, "\n"))
+	}
+	if !strings.Contains(strings.Join(out, "\n"), "tokens logged out") || strings.Contains(strings.Join(out, "\n"), "Server closed") {
+		t.Errorf("output: %q", out)
 	}
 }
 
